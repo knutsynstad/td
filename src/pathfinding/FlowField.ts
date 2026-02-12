@@ -7,6 +7,8 @@ import { computeDirtyBounds } from './obstacleDelta'
 import type { NavCollider } from './obstacleDelta'
 import { computeWallDistanceField } from './wallDistanceField'
 
+const RESCUE_SEARCH_RADIUS_CELLS = 8
+
 type FlowFieldOptions = {
   size: number
   resolution: number
@@ -95,7 +97,10 @@ export class FlowField {
       return new THREE.Vector3(dx, 0, dz)
     }
 
-    // Last-resort fallback for unreachable cells.
+    const rescue = this.getDirectionTowardReachableCell(pos, gx, gz)
+    if (rescue) return rescue
+
+    // Last-resort fallback.
     const fallback = new THREE.Vector3(-pos.x, 0, -pos.z)
     if (fallback.lengthSq() < 0.0001) return new THREE.Vector3(0, 0, 0)
     return fallback.normalize()
@@ -168,6 +173,50 @@ export class FlowField {
     computeDistanceField(this.dist, this.blocked, this.size, this.goalX, this.goalZ)
     computeWallDistanceField(this.wallDist, this.blocked, this.size)
     extractFlowField(this.flowX, this.flowZ, this.dist, this.wallDist, this.blocked, this.size)
+  }
+
+  private getDirectionTowardReachableCell(pos: THREE.Vector3, gx: number, gz: number): THREE.Vector3 | null {
+    let bestX = -1
+    let bestZ = -1
+    let bestDist = Number.POSITIVE_INFINITY
+    let bestCellDistSq = Number.POSITIVE_INFINITY
+
+    for (let radius = 1; radius <= RESCUE_SEARCH_RADIUS_CELLS; radius++) {
+      const minX = Math.max(0, gx - radius)
+      const maxX = Math.min(this.size - 1, gx + radius)
+      const minZ = Math.max(0, gz - radius)
+      const maxZ = Math.min(this.size - 1, gz + radius)
+
+      for (let z = minZ; z <= maxZ; z++) {
+        for (let x = minX; x <= maxX; x++) {
+          if (x !== minX && x !== maxX && z !== minZ && z !== maxZ) continue
+          const idx = getIndex(x, z, this.size)
+          if (this.blocked[idx] === 1) continue
+          const candidateDist = this.dist[idx]!
+          if (!Number.isFinite(candidateDist)) continue
+          const dx = x - gx
+          const dz = z - gz
+          const cellDistSq = dx * dx + dz * dz
+          if (
+            candidateDist + 1e-5 < bestDist ||
+            (Math.abs(candidateDist - bestDist) <= 1e-5 && cellDistSq < bestCellDistSq)
+          ) {
+            bestDist = candidateDist
+            bestCellDistSq = cellDistSq
+            bestX = x
+            bestZ = z
+          }
+        }
+      }
+
+      if (bestX !== -1) break
+    }
+
+    if (bestX === -1) return null
+    const [tx, tz] = gridToWorld(bestX, bestZ, this.worldBounds, this.resolution)
+    const dir = new THREE.Vector3(tx - pos.x, 0, tz - pos.z)
+    if (dir.lengthSq() < 0.0001) return null
+    return dir.normalize()
   }
 
   private refreshBlockedAll(colliders: NavCollider[]) {

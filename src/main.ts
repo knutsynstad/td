@@ -29,6 +29,7 @@ type Entity = {
   siegeMode?: boolean
   siegeTarget?: DestructibleCollider | null
   siegeAttackCooldown?: number
+  unreachableTime?: number
   username?: string
 }
 
@@ -65,8 +66,9 @@ const TOWER_HP = 24
 const MOB_SIEGE_DAMAGE = 2
 const MOB_SIEGE_ATTACK_COOLDOWN = 0.8
 const MOB_SIEGE_RANGE_BUFFER = 0.35
-const WALL_CHARGE_MAX = 3
-const TOWER_CHARGE_MAX = 2
+const MOB_SIEGE_UNREACHABLE_GRACE = 1.2
+const WALL_CHARGE_MAX = 200
+const TOWER_CHARGE_MAX = 50
 const CHARGE_FULL_RECHARGE_TIME = 60
 const WALL_RECHARGE_RATE = WALL_CHARGE_MAX / CHARGE_FULL_RECHARGE_TIME
 const TOWER_RECHARGE_RATE = TOWER_CHARGE_MAX / CHARGE_FULL_RECHARGE_TIME
@@ -188,11 +190,11 @@ app.innerHTML = `
         <div class="build-buttons">
           <button id="buildWall" class="hud-button build-button">
             <span class="button-label">Wall</span>
-            <span id="wallCount" class="hud-badge">3</span>
+            <span id="wallCount" class="hud-badge">200</span>
           </button>
           <button id="buildTower" class="hud-button build-button">
             <span class="button-label">Tower</span>
-            <span id="towerCount" class="hud-badge">2</span>
+            <span id="towerCount" class="hud-badge">50</span>
           </button>
         </div>
         <button id="shootButton" class="shoot-button">Shoot</button>
@@ -646,7 +648,8 @@ const makeMob = (pos: THREE.Vector3) => {
     waypointIndex: 0,
     siegeMode: false,
     siegeTarget: null,
-    siegeAttackCooldown: 0
+    siegeAttackCooldown: 0,
+    unreachableTime: 0
   })
 }
 
@@ -1367,6 +1370,50 @@ const pickSiegeTarget = (mob: Entity): DestructibleCollider | null => {
   return best
 }
 
+const updateMobSiegeState = (mob: Entity, delta: number) => {
+  mob.siegeAttackCooldown = Math.max((mob.siegeAttackCooldown ?? 0) - delta, 0)
+  const reachable = flowField.isReachable(mob.mesh.position)
+  if (reachable) {
+    mob.unreachableTime = 0
+    mob.siegeMode = false
+    mob.siegeTarget = null
+    return
+  }
+
+  mob.unreachableTime = (mob.unreachableTime ?? 0) + delta
+  if (!mob.siegeMode && (mob.unreachableTime ?? 0) >= MOB_SIEGE_UNREACHABLE_GRACE) {
+    mob.siegeTarget = pickSiegeTarget(mob)
+    mob.siegeMode = mob.siegeTarget !== null
+  }
+}
+
+const getMobSiegeDirection = (mob: Entity): THREE.Vector3 | null => {
+  if (!mob.siegeMode) return null
+
+  if (!mob.siegeTarget || !structureStates.has(mob.siegeTarget)) {
+    mob.siegeTarget = pickSiegeTarget(mob)
+    if (!mob.siegeTarget) {
+      mob.siegeMode = false
+      return null
+    }
+  }
+
+  const target = mob.siegeTarget
+  const attackRange = MOB_SIEGE_RANGE_BUFFER
+  const distanceToSurface = distanceToColliderSurface(mob.mesh.position, mob.radius, target)
+  if (distanceToSurface <= attackRange) {
+    if ((mob.siegeAttackCooldown ?? 0) <= 0) {
+      damageStructure(target, MOB_SIEGE_DAMAGE)
+      mob.siegeAttackCooldown = MOB_SIEGE_ATTACK_COOLDOWN
+    }
+    return new THREE.Vector3(0, 0, 0)
+  }
+
+  const dir = new THREE.Vector3(target.center.x - mob.mesh.position.x, 0, target.center.z - mob.mesh.position.z)
+  if (dir.length() <= 0.1) return new THREE.Vector3(0, 0, 0)
+  return dir.normalize()
+}
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if ((event.target as HTMLElement).closest('#hud')) return
   const point = getGroundPoint(event)
@@ -1461,34 +1508,12 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
   let dir = new THREE.Vector3()
   
   if (entity.kind === 'mob' && entity.waypoints && entity.waypointIndex !== undefined) {
-    entity.siegeAttackCooldown = Math.max((entity.siegeAttackCooldown ?? 0) - delta, 0)
-    const reachable = flowField.isReachable(entity.mesh.position)
-    if (reachable) {
-      entity.siegeMode = false
-      entity.siegeTarget = null
-    } else if (!entity.siegeMode) {
-      entity.siegeMode = true
-      entity.siegeTarget = pickSiegeTarget(entity)
-    }
+    updateMobSiegeState(entity, delta)
 
     if (entity.siegeMode) {
-      if (!entity.siegeTarget || !structureStates.has(entity.siegeTarget)) {
-        entity.siegeTarget = pickSiegeTarget(entity)
-      }
-      if (entity.siegeTarget) {
-        const target = entity.siegeTarget
-        const attackRange = MOB_SIEGE_RANGE_BUFFER
-        const distanceToSurface = distanceToColliderSurface(entity.mesh.position, entity.radius, target)
-        if (distanceToSurface <= attackRange) {
-          dir.set(0, 0, 0)
-          if ((entity.siegeAttackCooldown ?? 0) <= 0) {
-            damageStructure(target, MOB_SIEGE_DAMAGE)
-            entity.siegeAttackCooldown = MOB_SIEGE_ATTACK_COOLDOWN
-          }
-        } else {
-          dir.set(target.center.x - entity.mesh.position.x, 0, target.center.z - entity.mesh.position.z)
-          if (dir.length() > 0.1) dir.normalize()
-        }
+      const siegeDir = getMobSiegeDirection(entity)
+      if (siegeDir) {
+        dir.copy(siegeDir)
       } else {
         dir = flowField.getDirection(entity.mesh.position)
       }
@@ -1569,35 +1594,11 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
     }
     }
   } else if (entity.kind === 'mob') {
-    entity.siegeAttackCooldown = Math.max((entity.siegeAttackCooldown ?? 0) - delta, 0)
-    const reachable = flowField.isReachable(entity.mesh.position)
-    if (reachable) {
-      entity.siegeMode = false
-      entity.siegeTarget = null
-    } else if (!entity.siegeMode) {
-      entity.siegeMode = true
-      entity.siegeTarget = pickSiegeTarget(entity)
-    }
+    updateMobSiegeState(entity, delta)
 
     if (entity.siegeMode) {
-      if (!entity.siegeTarget || !structureStates.has(entity.siegeTarget)) {
-        entity.siegeTarget = pickSiegeTarget(entity)
-      }
-      if (entity.siegeTarget) {
-        const target = entity.siegeTarget
-        const attackRange = MOB_SIEGE_RANGE_BUFFER
-        const distanceToSurface = distanceToColliderSurface(entity.mesh.position, entity.radius, target)
-        if (distanceToSurface <= attackRange) {
-          dir.set(0, 0, 0)
-          if ((entity.siegeAttackCooldown ?? 0) <= 0) {
-            damageStructure(target, MOB_SIEGE_DAMAGE)
-            entity.siegeAttackCooldown = MOB_SIEGE_ATTACK_COOLDOWN
-          }
-        } else {
-          dir.set(target.center.x - entity.mesh.position.x, 0, target.center.z - entity.mesh.position.z)
-          if (dir.length() > 0.1) dir.normalize()
-        }
-      }
+      const siegeDir = getMobSiegeDirection(entity)
+      if (siegeDir) dir.copy(siegeDir)
     }
 
     if (!entity.siegeMode) {
