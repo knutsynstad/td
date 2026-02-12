@@ -95,12 +95,10 @@ canvas {
   position: absolute;
   top: 50%;
   left: 50%;
-  --banner-offset: 6rem;
   font-weight: 900;
   color: #ffffff;
-  text-shadow: 0 0 18px rgba(255, 255, 255, 0.45), 0 8px 20px rgba(0, 0, 0, 0.7);
   opacity: 0;
-  transform: translate(-50%, calc(-50% - var(--banner-offset))) translateY(8px) scale(0.95);
+  transform: translate(-50%, -50%) translateY(8px) scale(0.95);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -115,18 +113,6 @@ canvas {
 
 .event-banner__single {
   font-size: clamp(1.6rem, 4vw, 4rem);
-  letter-spacing: 0.04em;
-}
-
-.event-banner__small {
-  font-size: clamp(1.1rem, 2.4vw, 2rem);
-  letter-spacing: 0.2em;
-  opacity: 0.85;
-}
-
-.event-banner__large {
-  font-size: clamp(2.8rem, 6vw, 6rem);
-  letter-spacing: 0.04em;
 }
 
 .final-countdown {
@@ -136,7 +122,6 @@ canvas {
   font-size: clamp(6rem, 18vw, 18rem);
   font-weight: 900;
   color: #ffffff;
-  text-shadow: 0 0 18px rgba(255, 255, 255, 0.45), 0 8px 20px rgba(0, 0, 0, 0.7);
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.8);
   z-index: 5001;
@@ -151,19 +136,19 @@ canvas {
 @keyframes banner-pop {
   0% {
     opacity: 0;
-    transform: translate(-50%, calc(-50% - var(--banner-offset))) translateY(12px) scale(0.95);
+    transform: translate(-50%, -50%) translateY(12px) scale(0.95);
   }
   18% {
     opacity: 1;
-    transform: translate(-50%, calc(-50% - var(--banner-offset))) translateY(0) scale(1.03);
+    transform: translate(-50%, -50%) translateY(0) scale(1.03);
   }
   80% {
     opacity: 1;
-    transform: translate(-50%, calc(-50% - var(--banner-offset))) translateY(0) scale(1);
+    transform: translate(-50%, -50%) translateY(0) scale(1);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, calc(-50% - var(--banner-offset))) translateY(-8px) scale(0.98);
+    transform: translate(-50%, -50%) translateY(-8px) scale(0.98);
   }
 }
 

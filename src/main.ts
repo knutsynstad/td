@@ -1758,24 +1758,6 @@ const triggerEventBanner = (text: string, duration = 1.6) => {
   eventBannerTimer = duration
 }
 
-const triggerEventBannerStack = (smallText: string, largeText: string, duration = 1.8) => {
-  eventBannerEl.textContent = ''
-  const smallLine = document.createElement('div')
-  smallLine.className = 'event-banner__small'
-  smallLine.textContent = smallText
-  const largeLine = document.createElement('div')
-  largeLine.className = 'event-banner__large'
-  largeLine.textContent = largeText
-  eventBannerEl.appendChild(smallLine)
-  eventBannerEl.appendChild(largeLine)
-  eventBannerEl.classList.add('stack')
-  eventBannerEl.classList.remove('single')
-  eventBannerEl.classList.remove('show')
-  void eventBannerEl.offsetWidth
-  eventBannerEl.classList.add('show')
-  eventBannerTimer = duration
-}
-
 const spawnWave = () => {
   wave += 1
   const count = (5 + wave * 2) * 10
@@ -1785,7 +1767,7 @@ const spawnWave = () => {
     const pos = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
     makeMob(pos)
   }
-  triggerEventBannerStack('Here Comes', `Wave ${wave}!`)
+  triggerEventBanner(`Wave ${wave} spawned`, 1.8)
 }
 
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
@@ -2029,16 +2011,13 @@ const tick = () => {
   if (nextWaveIn > 0 && nextWaveIn <= 5) {
     finalCountdownEl.textContent = String(nextWaveIn)
     finalCountdownEl.classList.add('show')
-    if (prevNextWaveIn > 5) {
-      triggerEventBanner('Next Wave In')
-    }
   } else {
     finalCountdownEl.classList.remove('show')
     finalCountdownEl.textContent = ''
   }
 
   if (prevMobsCount > 0 && mobs.length === 0) {
-    triggerEventBanner('Wave Cleared!')
+    triggerEventBanner('Wave cleared')
   }
 
   if (eventBannerTimer > 0) {
