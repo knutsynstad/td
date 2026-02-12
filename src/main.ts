@@ -362,18 +362,18 @@ class SpatialGrid {
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <div id="hud" class="hud">
-    <div class="hud-top">
+    <div class="hud-corner hud-corner--top-left">
       <div class="hud-status-stack">
         <div class="wave-display">Wave <span id="wave">0</span></div>
         <div class="hud-meta">
-        <div id="mobsRow" class="hud-status">
-          <div class="hud-status__primary"></div>
-          <div class="hud-status__secondary">0 mobs left</div>
-        </div>
-        <div id="nextWaveRow" class="hud-status">
-          <div class="hud-status__primary"></div>
-          <div class="hud-status__secondary">Next wave in 0 sec</div>
-        </div>
+          <div id="mobsRow" class="hud-status">
+            <div class="hud-status__primary"></div>
+            <div class="hud-status__secondary">0 mobs left</div>
+          </div>
+          <div id="nextWaveRow" class="hud-status">
+            <div class="hud-status__primary"></div>
+            <div class="hud-status__secondary">Next wave in 0 sec</div>
+          </div>
         </div>
       </div>
     </div>
@@ -381,18 +381,20 @@ app.innerHTML = `
       <div id="eventBanner" class="event-banner"></div>
       <div id="finalCountdown" class="final-countdown"></div>
     </div>
-    <div class="hud-bottom">
-      <div class="build-buttons">
-        <button id="buildWall" class="hud-button build-button">
-          <span class="button-label">Wall</span>
-          <span id="wallCount" class="hud-badge">3</span>
-        </button>
-        <button id="buildTower" class="hud-button build-button">
-          <span class="button-label">Tower</span>
-          <span id="towerCount" class="hud-badge">2</span>
-        </button>
+    <div class="hud-corner hud-corner--bottom-right">
+      <div class="hud-actions">
+        <div class="build-buttons">
+          <button id="buildWall" class="hud-button build-button">
+            <span class="button-label">Wall</span>
+            <span id="wallCount" class="hud-badge">3</span>
+          </button>
+          <button id="buildTower" class="hud-button build-button">
+            <span class="button-label">Tower</span>
+            <span id="towerCount" class="hud-badge">2</span>
+          </button>
+        </div>
+        <button id="shootButton" class="shoot-button">Shoot</button>
       </div>
-      <button id="shootButton" class="shoot-button">Shoot</button>
     </div>
   </div>
 `

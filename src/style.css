@@ -34,39 +34,48 @@ canvas {
 .hud {
   position: fixed;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
   pointer-events: none;
   z-index: 2000;
 }
 
-.hud-top {
+.hud-corner {
+  position: absolute;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: center;
-  align-items: center;
+}
+
+.hud-corner--top-left {
+  top: 32px;
+  left: 32px;
+  align-items: flex-start;
+}
+
+.hud-corner--bottom-right {
+  right: 32px;
+  bottom: 32px;
+  align-items: flex-end;
+}
+
+.hud-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   pointer-events: auto;
 }
 
 .hud-status-stack {
-  position: fixed;
-  top: 0;
-  left: 16px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0;
   pointer-events: none;
-  z-index: 3000;
 }
 
 .hud-lives {
   position: fixed;
-  top: 16px;
-  left: 16px;
+  top: 32px;
+  left: 32px;
   font-size: 1.6rem;
   font-weight: 800;
   color: #ffffff;
@@ -80,7 +89,7 @@ canvas {
 }
 
 .hud-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
@@ -158,8 +167,7 @@ canvas {
   flex-direction: column;
   gap: 6px;
   justify-content: flex-start;
-  align-items: flex-end;
-  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .hud-status {
@@ -196,17 +204,6 @@ canvas {
   font-size: inherit;
   font-weight: inherit;
   color: #ffffff;
-}
-
-.hud-bottom {
-  display: flex;
-  flex-direction: row;
-  gap: 12px;
-  justify-content: flex-end;
-  align-items: flex-end;
-  align-self: flex-end;
-  pointer-events: auto;
-  flex-wrap: wrap;
 }
 
 .hud-title {
@@ -366,19 +363,19 @@ canvas {
 }
 
 @media (max-width: 720px) {
-  .hud-top {
-    align-items: center;
+  .hud-corner--top-left {
+    top: 12px;
+    left: 12px;
   }
 
-  .hud-meta {
-    flex-direction: column;
-    gap: 8px;
-    align-items: center;
+  .hud-corner--bottom-right {
+    right: 12px;
+    bottom: 12px;
   }
 
-  .hud-bottom {
+  .hud-actions {
     flex-direction: column;
-    width: auto;
+    align-items: flex-end;
   }
 
   .shoot-button {
