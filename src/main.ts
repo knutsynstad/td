@@ -1,5 +1,6 @@
 import './style.css'
 import * as THREE from 'three'
+import { FlowField } from './pathfinding/FlowField'
 
 type StaticCollider = {
   center: THREE.Vector3
@@ -81,226 +82,6 @@ class WaypointCache {
 
   clear() {
     this.cache.clear()
-  }
-}
-
-// Flow Field Pathfinding System
-class FlowField {
-  private grid: Float32Array // Stores direction vectors: [x0, z0, x1, z1, ...]
-  private costs: Float32Array // Stores path costs for Dijkstra
-  private size: number
-  private resolution: number
-
-  constructor(size: number, resolution: number) {
-    this.size = size
-    this.resolution = resolution
-    this.grid = new Float32Array(size * size * 2) // 2 floats per cell (x, z direction)
-    this.costs = new Float32Array(size * size)
-  }
-
-  private worldToGrid(x: number, z: number): [number, number] {
-    const gx = Math.floor((x + WORLD_BOUNDS) / this.resolution)
-    const gz = Math.floor((z + WORLD_BOUNDS) / this.resolution)
-    return [Math.max(0, Math.min(this.size - 1, gx)), Math.max(0, Math.min(this.size - 1, gz))]
-  }
-
-  private gridToWorld(gx: number, gz: number): [number, number] {
-    const x = gx * this.resolution - WORLD_BOUNDS + this.resolution * 0.5
-    const z = gz * this.resolution - WORLD_BOUNDS + this.resolution * 0.5
-    return [x, z]
-  }
-
-  private getIndex(gx: number, gz: number): number {
-    return gz * this.size + gx
-  }
-
-  private isBlocked(gx: number, gz: number, staticColliders: StaticCollider[]): boolean {
-    const [wx, wz] = this.gridToWorld(gx, gz)
-    const testPos = new THREE.Vector3(wx, 0, wz)
-    const testRadius = this.resolution * 0.4 // Slightly smaller than cell to allow passage
-
-    for (const collider of staticColliders) {
-      if (collider.type === 'castle') continue // Castle is the goal
-      const minX = collider.center.x - collider.halfSize.x - testRadius
-      const maxX = collider.center.x + collider.halfSize.x + testRadius
-      const minZ = collider.center.z - collider.halfSize.z - testRadius
-      const maxZ = collider.center.z + collider.halfSize.z + testRadius
-      if (testPos.x >= minX && testPos.x <= maxX && testPos.z >= minZ && testPos.z <= maxZ) {
-        return true
-      }
-    }
-    return false
-  }
-
-  compute(staticColliders: StaticCollider[], goal: THREE.Vector3) {
-    // Initialize costs to infinity
-    this.costs.fill(Number.POSITIVE_INFINITY)
-    this.grid.fill(0)
-
-    const [goalGx, goalGz] = this.worldToGrid(goal.x, goal.z)
-    const goalIdx = this.getIndex(goalGx, goalGz)
-
-    // Min-heap priority queue: [cost, gx, gz]
-    const heap: Array<[number, number, number]> = []
-    const heapPush = (item: [number, number, number]) => {
-      heap.push(item)
-      let i = heap.length - 1
-      while (i > 0) {
-        const parent = Math.floor((i - 1) / 2)
-        if (heap[parent][0] <= heap[i][0]) break
-        [heap[parent], heap[i]] = [heap[i], heap[parent]]
-        i = parent
-      }
-    }
-    const heapPop = (): [number, number, number] => {
-      const top = heap[0]!
-      const bottom = heap.pop()!
-      if (heap.length === 0) return top
-      heap[0] = bottom
-      let i = 0
-      while (true) {
-        const left = i * 2 + 1
-        const right = i * 2 + 2
-        let smallest = i
-        if (left < heap.length && heap[left]![0] < heap[smallest]![0]) smallest = left
-        if (right < heap.length && heap[right]![0] < heap[smallest]![0]) smallest = right
-        if (smallest === i) break
-        [heap[i], heap[smallest]] = [heap[smallest]!, heap[i]!]
-        i = smallest
-      }
-      return top
-    }
-
-    this.costs[goalIdx] = 0
-    heapPush([0, goalGx, goalGz])
-
-    const neighbors = [
-      [-1, -1], [0, -1], [1, -1],
-      [-1, 0],           [1, 0],
-      [-1, 1],  [0, 1],  [1, 1]
-    ]
-
-    while (heap.length > 0) {
-      const [cost, gx, gz] = heapPop()
-      const idx = this.getIndex(gx, gz)
-
-      // Skip if we already found a better path
-      if (cost > this.costs[idx]) continue
-
-      for (const [dx, dz] of neighbors) {
-        const ngx = gx + dx
-        const ngz = gz + dz
-        if (ngx < 0 || ngx >= this.size || ngz < 0 || ngz >= this.size) continue
-
-        const nidx = this.getIndex(ngx, ngz)
-        
-        // Check if blocked
-        if (this.isBlocked(ngx, ngz, staticColliders)) {
-          this.costs[nidx] = Number.POSITIVE_INFINITY
-          continue
-        }
-
-        // Diagonal cost is sqrt(2), cardinal is 1
-        const moveCost = (dx !== 0 && dz !== 0) ? 1.414 : 1.0
-        const newCost = cost + moveCost
-
-        if (newCost < this.costs[nidx]) {
-          this.costs[nidx] = newCost
-          heapPush([newCost, ngx, ngz])
-
-          // Set direction vector toward this cell (from neighbor to current)
-          const dirX = (gx - ngx) * this.resolution
-          const dirZ = (gz - ngz) * this.resolution
-          const len = Math.sqrt(dirX * dirX + dirZ * dirZ)
-          if (len > 0.001) {
-            this.grid[nidx * 2] = dirX / len
-            this.grid[nidx * 2 + 1] = dirZ / len
-          }
-        }
-      }
-    }
-  }
-
-  getDirection(pos: THREE.Vector3): THREE.Vector3 {
-    const [gx, gz] = this.worldToGrid(pos.x, pos.z)
-    const idx = this.getIndex(gx, gz)
-    
-    // If unreachable, fallback to direct-to-goal
-    if (this.costs[idx] === Number.POSITIVE_INFINITY) {
-      const dir = new THREE.Vector3(-pos.x, 0, -pos.z)
-      if (dir.length() > 0.001) {
-        dir.normalize()
-        return dir
-      }
-      return new THREE.Vector3(0, 0, 0)
-    }
-
-    // Sample flow field with bilinear interpolation for smoothness
-    const fx = (pos.x + WORLD_BOUNDS) / this.resolution
-    const fz = (pos.z + WORLD_BOUNDS) / this.resolution
-    const gx0 = Math.floor(fx)
-    const gz0 = Math.floor(fz)
-    const gx1 = Math.min(gx0 + 1, this.size - 1)
-    const gz1 = Math.min(gz0 + 1, this.size - 1)
-    
-    const tx = fx - gx0
-    const tz = fz - gz0
-
-    const sample = (gx: number, gz: number) => {
-      const idx = this.getIndex(gx, gz)
-      return new THREE.Vector3(this.grid[idx * 2], 0, this.grid[idx * 2 + 1])
-    }
-
-    const v00 = sample(gx0, gz0)
-    const v10 = sample(gx1, gz0)
-    const v01 = sample(gx0, gz1)
-    const v11 = sample(gx1, gz1)
-
-    const v0 = new THREE.Vector3().lerpVectors(v00, v10, tx)
-    const v1 = new THREE.Vector3().lerpVectors(v01, v11, tx)
-    const result = new THREE.Vector3().lerpVectors(v0, v1, tz)
-
-    if (result.length() < 0.001) {
-      // Fallback to direct-to-goal
-      const dir = new THREE.Vector3(-pos.x, 0, -pos.z)
-      if (dir.length() > 0.001) {
-        dir.normalize()
-        return dir
-      }
-    }
-
-    return result.normalize()
-  }
-
-  // Compute waypoints from start to goal following flow field
-  computeWaypoints(start: THREE.Vector3, goal: THREE.Vector3, maxWaypoints = 100): THREE.Vector3[] {
-    const waypoints: THREE.Vector3[] = [start.clone()]
-    let current = start.clone()
-    const waypointSpacing = this.resolution * 2 // Space waypoints every 2 grid cells
-    const maxDistance = start.distanceTo(goal) * 2 // Safety limit
-
-    for (let i = 0; i < maxWaypoints; i++) {
-      const dir = this.getDirection(current)
-      if (dir.length() < 0.001) break // Reached goal or stuck
-
-      // Move along flow field (create new vector, don't mutate current)
-      const next = current.clone().add(dir.clone().multiplyScalar(waypointSpacing))
-
-      // Check if we're close enough to goal
-      const distToGoal = next.distanceTo(goal)
-      if (distToGoal < waypointSpacing * 1.5) {
-        waypoints.push(goal.clone())
-        break
-      }
-
-      waypoints.push(next.clone())
-      current = next
-
-      // Safety check: if we've moved too far, something's wrong
-      if (current.distanceTo(start) > maxDistance) break
-    }
-
-    return waypoints
   }
 }
 
@@ -634,14 +415,32 @@ addMapWall(new THREE.Vector3(-10, 0.5, 5), new THREE.Vector3(0.5, 0.5, 3))
 addMapWall(new THREE.Vector3(0, 0.5, 12), new THREE.Vector3(5, 0.5, 0.5))
 
 // Initialize flow field and spatial grid
-const flowField = new FlowField(FLOW_FIELD_SIZE, FLOW_FIELD_RESOLUTION)
+const flowField = new FlowField({
+  size: FLOW_FIELD_SIZE,
+  resolution: FLOW_FIELD_RESOLUTION,
+  worldBounds: WORLD_BOUNDS
+})
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
 const waypointCache = new WaypointCache(GRID_SIZE * 2) // Share waypoints within 2 grid cells
+const castleGoal = new THREE.Vector3(0, 0, 0)
+
+const refreshAllMobWaypoints = () => {
+  for (const mob of mobs) {
+    const waypoints = flowField.computeWaypoints(mob.mesh.position, castleGoal)
+    mob.waypoints = waypoints
+    mob.waypointIndex = 0
+  }
+}
+
+const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] = []) => {
+  const changed = flowField.applyObstacleDelta(staticColliders, added, removed, castleGoal)
+  if (!changed) return
+  waypointCache.clear()
+  refreshAllMobWaypoints()
+}
 
 // Compute initial flow field (exclude castle from pathfinding)
-// Note: walls are added after this, so flow field will be recomputed when walls are added
-const collisionColliders = staticColliders.filter(c => c.type !== 'castle')
-flowField.compute(collisionColliders, new THREE.Vector3(0, 0, 0))
+flowField.rebuildAll(staticColliders, castleGoal)
 
 const ring = new THREE.Mesh(
   new THREE.RingGeometry(SELECTION_RADIUS - 0.1, SELECTION_RADIUS, 32),
@@ -745,10 +544,9 @@ const makeMob = (pos: THREE.Vector3) => {
   scene.add(mob)
   
   // Try to get cached waypoints, otherwise compute new ones
-  const goal = new THREE.Vector3(0, 0, 0)
   let waypoints = waypointCache.get(pos)
   if (!waypoints) {
-    waypoints = flowField.computeWaypoints(pos, goal)
+    waypoints = flowField.computeWaypoints(pos, castleGoal)
     waypointCache.set(pos, waypoints)
   }
   
@@ -783,7 +581,6 @@ let wallDragEnd: THREE.Vector3 | null = null
 const EVENT_BANNER_DURATION = 2.4
 let eventBannerTimer = 0
 let prevMobsCount = 0
-let prevNextWaveIn = 0
 
 // Particle system
 type CubeParticle = {
@@ -929,16 +726,6 @@ usernameContainer.style.pointerEvents = 'none'
 usernameContainer.style.zIndex = '1001'
 app.appendChild(usernameContainer)
 
-const castleLivesContainer = document.createElement('div')
-castleLivesContainer.style.position = 'fixed'
-castleLivesContainer.style.top = '0'
-castleLivesContainer.style.left = '0'
-castleLivesContainer.style.width = '100%'
-castleLivesContainer.style.height = '100%'
-castleLivesContainer.style.pointerEvents = 'none'
-castleLivesContainer.style.zIndex = '998'
-app.appendChild(castleLivesContainer)
-
 const worldToScreen = (worldPos: THREE.Vector3): { x: number, y: number } | null => {
   const vector = worldPos.clone()
   vector.project(camera)
@@ -1012,32 +799,6 @@ const updateUsernameLabels = () => {
     
     usernameContainer.appendChild(label)
   }
-}
-
-const updateCastleLivesText = () => {
-  // Clear existing text
-  castleLivesContainer.innerHTML = ''
-  
-  const screenPos = worldToScreen(
-    player.mesh.position.clone().setY(player.baseY + 1.0)
-  )
-  if (!screenPos) return
-  
-  const label = document.createElement('div')
-  label.textContent = `${lives} Lives`
-  label.style.position = 'absolute'
-  label.style.left = `${screenPos.x}px`
-  label.style.top = `${screenPos.y}px`
-  label.style.transform = 'translate(-50%, -50%)'
-  label.style.color = '#fff'
-  label.style.fontSize = '24px'
-  label.style.fontWeight = '600'
-  label.style.textShadow = '0 1px 3px rgba(0,0,0,0.8)'
-  label.style.whiteSpace = 'nowrap'
-  label.style.pointerEvents = 'none'
-  label.style.opacity = '0.6'
-  
-  castleLivesContainer.appendChild(label)
 }
 
 const buildPreview = new THREE.Mesh(
@@ -1207,17 +968,8 @@ const placeBuilding = (center: THREE.Vector3) => {
   } else {
     wallCharges -= 1
   }
-  // Recompute flow field and clear waypoint cache when static obstacles change
-  const collisionColliders = staticColliders.filter(c => c.type !== 'castle')
-  flowField.compute(collisionColliders, new THREE.Vector3(0, 0, 0))
-  waypointCache.clear()
-  // Recompute waypoints for all existing mobs
-  const goal = new THREE.Vector3(0, 0, 0)
-  for (const mob of mobs) {
-    const waypoints = flowField.computeWaypoints(mob.mesh.position, goal)
-    mob.waypoints = waypoints
-    mob.waypointIndex = 0
-  }
+  // Update pathfinding only for changed obstacle cells.
+  applyObstacleDelta([staticColliders[staticColliders.length - 1]!])
   return true
 }
 
@@ -1315,18 +1067,9 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     wallCharges -= placed
   }
   
-  // Recompute flow field and clear waypoint cache when static obstacles change
   if (placed > 0) {
-    const collisionColliders = staticColliders.filter(c => c.type !== 'castle')
-    flowField.compute(collisionColliders, new THREE.Vector3(0, 0, 0))
-    waypointCache.clear()
-    // Recompute waypoints for all existing mobs
-    const goal = new THREE.Vector3(0, 0, 0)
-    for (const mob of mobs) {
-      const waypoints = flowField.computeWaypoints(mob.mesh.position, goal)
-      mob.waypoints = waypoints
-      mob.waypointIndex = 0
-    }
+    const added = staticColliders.slice(staticColliders.length - placed)
+    applyObstacleDelta(added)
   }
   
   return placed > 0
@@ -1401,22 +1144,16 @@ for (const pos of prebuiltTowers) {
   addMapTower(pos)
 }
 
-// Recompute flow field and clear waypoint cache after prebuilt towers
-const mapCollisionColliders = staticColliders.filter(c => c.type !== 'castle')
-flowField.compute(mapCollisionColliders, new THREE.Vector3(0, 0, 0))
+// Rebuild once after initial static map setup.
+flowField.rebuildAll(staticColliders, castleGoal)
 waypointCache.clear()
-for (const mob of mobs) {
-  const waypoints = flowField.computeWaypoints(mob.mesh.position, new THREE.Vector3(0, 0, 0))
-  mob.waypoints = waypoints
-  mob.waypointIndex = 0
-}
+refreshAllMobWaypoints()
 
 const resetGame = () => {
   lives = 1
   wave = 0
   nextWaveAt = 0
   prevMobsCount = 0
-  prevNextWaveIn = 0
   eventBannerTimer = 0
   eventBannerEl.classList.remove('show')
   eventBannerEl.textContent = ''
@@ -1451,7 +1188,7 @@ const resetGame = () => {
   wallCharges = WALL_CHARGE_MAX
   towerCharges = TOWER_CHARGE_MAX
 
-  flowField.compute([], new THREE.Vector3(0, 0, 0))
+  flowField.rebuildAll(staticColliders, castleGoal)
   waypointCache.clear()
 }
 
@@ -1579,7 +1316,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
   }
 })
 
-window.addEventListener('pointerup', (event) => {
+window.addEventListener('pointerup', () => {
   isShooting = false
   if (buildMode === 'wall' && isDraggingWall && wallDragStart && wallDragEnd) {
     placeWallLine(wallDragStart, wallDragEnd)
@@ -1671,8 +1408,7 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
       const distOffTrack = entity.mesh.position.distanceTo(expectedPos)
       if (distOffTrack > GRID_SIZE * 3) {
         // Too far off track, recalculate waypoints
-        const goal = new THREE.Vector3(0, 0, 0)
-        entity.waypoints = flowField.computeWaypoints(entity.mesh.position, goal)
+        entity.waypoints = flowField.computeWaypoints(entity.mesh.position, castleGoal)
         entity.waypointIndex = 0
       }
     }
@@ -2032,7 +1768,6 @@ const tick = () => {
   }
 
   prevMobsCount = mobs.length
-  prevNextWaveIn = nextWaveIn
   
   // Update shoot button cooldown visual
   const cooldownPercent = Math.min(1, shootCooldown / SHOOT_COOLDOWN)
