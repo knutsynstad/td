@@ -371,8 +371,8 @@ app.innerHTML = `
           <div class="hud-status__secondary">0 mobs left</div>
         </div>
         <div id="nextWaveRow" class="hud-status">
-          <div class="hud-status__primary">wave 1</div>
-          <div class="hud-status__secondary">in 0 seconds</div>
+          <div class="hud-status__primary"></div>
+          <div class="hud-status__secondary">Next wave in 0 sec</div>
         </div>
         </div>
       </div>
@@ -2007,7 +2007,6 @@ const tick = () => {
   updateGroundFromBounds(visibleBounds)
   worldGrid.update(visibleBounds)
 
-  waveEl.textContent = String(wave)
   const wallAvailable = Math.floor(wallCharges)
   const towerAvailable = Math.floor(towerCharges)
   wallCountEl.textContent = `x${wallAvailable}`
@@ -2016,11 +2015,12 @@ const tick = () => {
   buildTowerBtn.disabled = towerAvailable <= 0
   const nextWaveIn = mobs.length === 0 && nextWaveAt !== 0 ? Math.max(0, Math.ceil((nextWaveAt - now) / 1000)) : 0
   const showNextWave = mobs.length === 0 && nextWaveAt !== 0
+  waveEl.textContent = String(showNextWave ? wave + 1 : wave)
   nextWaveRowEl.style.display = showNextWave ? '' : 'none'
   mobsRowEl.style.display = showNextWave ? 'none' : ''
   if (showNextWave) {
-    nextWavePrimaryEl.textContent = `wave ${wave + 1}`
-    nextWaveSecondaryEl.textContent = `in ${nextWaveIn} seconds`
+    nextWavePrimaryEl.textContent = ''
+    nextWaveSecondaryEl.textContent = `In ${nextWaveIn} seconds`
   } else {
     mobsPrimaryEl.textContent = ''
     mobsSecondaryEl.textContent = `${mobs.length} mobs left`
