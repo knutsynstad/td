@@ -1884,7 +1884,7 @@ const tick = () => {
     }
   }
 
-  if (mobs.length === 0 && nextWaveAt === 0) {
+  if (wave > 0 && mobs.length === 0 && nextWaveAt === 0) {
     nextWaveAt = now + 10000
   }
   if (mobs.length === 0 && now >= nextWaveAt && nextWaveAt !== 0) {
