@@ -895,23 +895,6 @@ const buildPreview = new THREE.Mesh(
 buildPreview.visible = false
 scene.add(buildPreview)
 
-// Preview meshes for wall line
-const wallPreviewMeshes: THREE.Mesh[] = []
-const createWallPreview = () => {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ color: 0x66ff66, transparent: true, opacity: 0.4 })
-  )
-  mesh.visible = false
-  scene.add(mesh)
-  wallPreviewMeshes.push(mesh)
-  return mesh
-}
-// Pre-create preview meshes for wall charges
-for (let i = 0; i < WALL_CHARGE_MAX; i += 1) {
-  createWallPreview()
-}
-
 const setBuildMode = (mode: 'off' | 'wall' | 'tower') => {
   if (buildMode === mode) {
     // Toggle off if clicking same button
@@ -928,12 +911,6 @@ const setBuildMode = (mode: 'off' | 'wall' | 'tower') => {
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
-  // Hide wall preview meshes when exiting build mode
-  if (buildMode === 'off') {
-    for (const preview of wallPreviewMeshes) {
-      preview.visible = false
-    }
-  }
 }
 
 buildWallBtn.addEventListener('click', () => setBuildMode('wall'))
@@ -997,14 +974,12 @@ const getTowerHit = (event: PointerEvent) => {
 const withinBounds = (pos: THREE.Vector3) =>
   pos.x > -WORLD_BOUNDS && pos.x < WORLD_BOUNDS && pos.z > -WORLD_BOUNDS && pos.z < WORLD_BOUNDS
 
-const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingWalls = false) => {
+const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingStructures = false) => {
   if (!withinBounds(center)) return false
   if (center.length() < CASTLE_RADIUS + 2) return false
   for (const collider of staticColliders) {
     if (collider.type === 'castle') continue // Castle has no collision
-    // For wall placement, allow walls to touch (but not overlap)
-    const isWallCollision = collider.type === 'wall' && allowTouchingWalls
-    if (aabbOverlap(center, halfSize, collider.center, collider.halfSize, isWallCollision)) {
+    if (aabbOverlap(center, halfSize, collider.center, collider.halfSize, allowTouchingStructures)) {
       return false
     }
   }
@@ -1016,7 +991,7 @@ const placeBuilding = (center: THREE.Vector3) => {
   const size = isTower ? new THREE.Vector3(1, TOWER_HEIGHT, 1) : new THREE.Vector3(1, 1, 1)
   const half = size.clone().multiplyScalar(0.5)
   const snapped = new THREE.Vector3(snapToGrid(center.x), half.y, snapToGrid(center.z))
-  if (!canPlace(snapped, half)) return false
+  if (!canPlace(snapped, half, true)) return false
   if (isTower ? towerCharges < 1 : wallCharges < 1) return false
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
@@ -1104,49 +1079,54 @@ const getCardinalWallLine = (start: THREE.Vector3, end: THREE.Vector3): THREE.Ve
   return positions
 }
 
-const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
+const WALL_LINE_SIZE = new THREE.Vector3(1, 1, 1)
+const WALL_LINE_HALF = WALL_LINE_SIZE.clone().multiplyScalar(0.5)
+
+const getWallLinePlacement = (start: THREE.Vector3, end: THREE.Vector3, availableWallCharges: number) => {
   const positions = getCardinalWallLine(start, end)
-  const wallSize = new THREE.Vector3(1, 1, 1)
-  const half = wallSize.clone().multiplyScalar(0.5)
-  const availableWallCharges = Math.floor(wallCharges)
-  if (availableWallCharges <= 0) return false
-  
-  // Check all positions first before placing any
   const validPositions: THREE.Vector3[] = []
   const seenKeys = new Set<string>()
-  
+  let blockedPosition: THREE.Vector3 | null = null
+
   for (const pos of positions) {
     if (validPositions.length >= availableWallCharges) break
-    
-    const snapped = new THREE.Vector3(snapToGrid(pos.x), half.y, snapToGrid(pos.z))
+
+    const snapped = new THREE.Vector3(snapToGrid(pos.x), WALL_LINE_HALF.y, snapToGrid(pos.z))
     const key = `${snapped.x},${snapped.z}`
-    
-    // Skip duplicates
+
     if (seenKeys.has(key)) continue
     seenKeys.add(key)
-    
-    // Check if this position can be placed (against existing colliders only)
-    // Allow walls to touch when placing lines
-    if (canPlace(snapped, half, true)) {
+
+    // Wall lines allow touching adjacent walls, but not overlapping.
+    if (canPlace(snapped, WALL_LINE_HALF, true)) {
       validPositions.push(snapped)
     } else {
-      // Stop at first invalid position to avoid gaps
+      blockedPosition = snapped
       break
     }
   }
-  
+
+  return { validPositions, blockedPosition }
+}
+
+const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
+  const availableWallCharges = Math.floor(wallCharges)
+  if (availableWallCharges <= 0) return false
+
+  const { validPositions } = getWallLinePlacement(start, end, availableWallCharges)
+
   // Now place all valid positions
   let placed = 0
   for (const pos of validPositions) {
     if (placed >= availableWallCharges) break
-    
+
     const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(wallSize.x, wallSize.y, wallSize.z),
+      new THREE.BoxGeometry(WALL_LINE_SIZE.x, WALL_LINE_SIZE.y, WALL_LINE_SIZE.z),
       new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
     )
     mesh.position.copy(pos)
     scene.add(mesh)
-    addWallCollider(pos, half, mesh)
+    addWallCollider(pos, WALL_LINE_HALF, mesh)
     placed += 1
   }
   if (placed > 0) {
@@ -1447,42 +1427,42 @@ renderer.domElement.addEventListener('pointermove', (event) => {
   
   if (buildMode === 'wall' && isDraggingWall && wallDragStart) {
     wallDragEnd = point.clone()
-    // Hide single preview
-    buildPreview.visible = false
-    
-    // Show preview of all walls in the line
-    const positions = getCardinalWallLine(wallDragStart, wallDragEnd)
-    const wallSize = new THREE.Vector3(1, 1, 1)
-    const half = wallSize.clone().multiplyScalar(0.5)
-    
-    for (let i = 0; i < wallPreviewMeshes.length; i += 1) {
-      const preview = wallPreviewMeshes[i]
-      if (i < positions.length && i < 5) {
-        const pos = positions[i]
-        const snapped = new THREE.Vector3(snapToGrid(pos.x), half.y, snapToGrid(pos.z))
-        const availableWallPreview = Math.floor(wallCharges)
-        const ok = canPlace(snapped, half) && availableWallPreview > i
-        preview.scale.set(wallSize.x, wallSize.y, wallSize.z)
-        preview.position.copy(snapped)
-        ;(preview.material as THREE.MeshStandardMaterial).color.setHex(ok ? 0x66ff66 : 0xff6666)
-        preview.visible = true
-      } else {
-        preview.visible = false
-      }
+
+    // Show one continuous preview mesh for the wall segment.
+    const availableWallPreview = Math.floor(wallCharges)
+    const { validPositions, blockedPosition } = getWallLinePlacement(wallDragStart, wallDragEnd, availableWallPreview)
+
+    if (validPositions.length > 0) {
+      const first = validPositions[0]!
+      const last = validPositions[validPositions.length - 1]!
+      const length = validPositions.length
+      const isHorizontal = Math.abs(last.x - first.x) >= Math.abs(last.z - first.z)
+      const previewSizeX = isHorizontal ? length * GRID_SIZE : GRID_SIZE
+      const previewSizeZ = isHorizontal ? GRID_SIZE : length * GRID_SIZE
+
+      buildPreview.scale.set(previewSizeX, WALL_LINE_SIZE.y, previewSizeZ)
+      buildPreview.position.set((first.x + last.x) * 0.5, WALL_LINE_HALF.y, (first.z + last.z) * 0.5)
+      ;(buildPreview.material as THREE.MeshStandardMaterial).color.setHex(0x66ff66)
+      buildPreview.visible = true
+    } else if (blockedPosition) {
+      buildPreview.scale.set(WALL_LINE_SIZE.x, WALL_LINE_SIZE.y, WALL_LINE_SIZE.z)
+      buildPreview.position.copy(blockedPosition)
+      ;(buildPreview.material as THREE.MeshStandardMaterial).color.setHex(0xff6666)
+      buildPreview.visible = true
+    } else {
+      buildPreview.visible = false
     }
   } else {
-    // Hide wall preview meshes
-    for (const preview of wallPreviewMeshes) {
-      preview.visible = false
-    }
     const isTower = buildMode === 'tower'
     const size = isTower ? new THREE.Vector3(1, 2, 1) : new THREE.Vector3(1, 1, 1)
     const half = size.clone().multiplyScalar(0.5)
     const snapped = new THREE.Vector3(snapToGrid(point.x), half.y, snapToGrid(point.z))
-    const ok = canPlace(snapped, half) && towerCharges > 0
+    const chargesAvailable = isTower ? towerCharges : wallCharges
+    const ok = canPlace(snapped, half, true) && chargesAvailable > 0
     buildPreview.scale.set(size.x, size.y, size.z)
     buildPreview.position.copy(snapped)
     ;(buildPreview.material as THREE.MeshStandardMaterial).color.setHex(ok ? 0x66ff66 : 0xff6666)
+    buildPreview.visible = true
   }
 })
 
