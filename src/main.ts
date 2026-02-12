@@ -8,6 +8,12 @@ type StaticCollider = {
   type: 'castle' | 'wall' | 'tower'
 }
 
+type StructureType = Extract<StaticCollider['type'], 'wall' | 'tower'>
+
+type DestructibleCollider = StaticCollider & {
+  type: StructureType
+}
+
 type Entity = {
   mesh: THREE.Mesh
   radius: number
@@ -20,6 +26,9 @@ type Entity = {
   baseY: number
   waypoints?: THREE.Vector3[] // For mobs: pre-computed path waypoints
   waypointIndex?: number // Current waypoint index
+  siegeMode?: boolean
+  siegeTarget?: DestructibleCollider | null
+  siegeAttackCooldown?: number
   username?: string
 }
 
@@ -30,6 +39,13 @@ type Tower = {
   laserVisibleTime: number
   laser: THREE.Mesh
   rangeRing: THREE.Mesh
+}
+
+type StructureState = {
+  mesh: THREE.Mesh
+  hp: number
+  maxHp: number
+  tower?: Tower
 }
 
 const SELECTION_RADIUS = 8
@@ -44,6 +60,11 @@ const SHOOT_DAMAGE = 5
 const TOWER_RANGE = 8
 const TOWER_SHOOT_COOLDOWN = 0.25
 const TOWER_HEIGHT = 2
+const WALL_HP = 16
+const TOWER_HP = 24
+const MOB_SIEGE_DAMAGE = 2
+const MOB_SIEGE_ATTACK_COOLDOWN = 0.8
+const MOB_SIEGE_RANGE_BUFFER = 0.35
 const WALL_CHARGE_MAX = 3
 const TOWER_CHARGE_MAX = 2
 const CHARGE_FULL_RECHARGE_TIME = 60
@@ -379,6 +400,67 @@ const castleCollider: StaticCollider = {
 }
 const staticColliders: StaticCollider[] = [castleCollider]
 const wallMeshes: THREE.Mesh[] = []
+const structureStates = new Map<StaticCollider, StructureState>()
+
+const addWallCollider = (
+  center: THREE.Vector3,
+  halfSize: THREE.Vector3,
+  mesh: THREE.Mesh,
+  hp = WALL_HP
+): DestructibleCollider => {
+  const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'wall' }
+  staticColliders.push(collider)
+  wallMeshes.push(mesh)
+  structureStates.set(collider, { mesh, hp, maxHp: hp })
+  return collider
+}
+
+const addTowerCollider = (
+  center: THREE.Vector3,
+  halfSize: THREE.Vector3,
+  mesh: THREE.Mesh,
+  tower: Tower,
+  hp = TOWER_HP
+): DestructibleCollider => {
+  const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'tower' }
+  staticColliders.push(collider)
+  structureStates.set(collider, { mesh, hp, maxHp: hp, tower })
+  return collider
+}
+
+const removeStructureCollider = (collider: DestructibleCollider) => {
+  const state = structureStates.get(collider)
+  if (!state) return
+
+  scene.remove(state.mesh)
+  if (collider.type === 'wall') {
+    const wallIdx = wallMeshes.indexOf(state.mesh)
+    if (wallIdx >= 0) wallMeshes.splice(wallIdx, 1)
+  }
+
+  if (state.tower) {
+    scene.remove(state.tower.rangeRing)
+    scene.remove(state.tower.laser)
+    const towerIdx = towers.indexOf(state.tower)
+    if (towerIdx >= 0) towers.splice(towerIdx, 1)
+    if (selectedTower === state.tower) selectedTower = null
+  }
+
+  structureStates.delete(collider)
+  const colliderIdx = staticColliders.indexOf(collider)
+  if (colliderIdx >= 0) staticColliders.splice(colliderIdx, 1)
+  applyObstacleDelta([], [collider])
+}
+
+const damageStructure = (collider: DestructibleCollider, damage: number): boolean => {
+  const state = structureStates.get(collider)
+  if (!state) return false
+  state.hp -= damage
+  if (state.hp > 0) return false
+  spawnCubeEffects(collider.center.clone())
+  removeStructureCollider(collider)
+  return true
+}
 
 // Add basic walls on the map
 const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
@@ -403,8 +485,7 @@ const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
   )
   mesh.position.copy(snappedCenter)
   scene.add(mesh)
-  wallMeshes.push(mesh)
-  staticColliders.push({ center: snappedCenter.clone(), halfSize: halfSize.clone(), type: 'wall' })
+  addWallCollider(snappedCenter, halfSize, mesh)
 }
 
 // Add some basic walls for mobs to navigate around
@@ -562,7 +643,10 @@ const makeMob = (pos: THREE.Vector3) => {
     maxHp: maxHp,
     baseY: 0.4,
     waypoints: waypoints.map(w => w.clone()), // Clone for this mob
-    waypointIndex: 0
+    waypointIndex: 0,
+    siegeMode: false,
+    siegeTarget: null,
+    siegeAttackCooldown: 0
   })
 }
 
@@ -937,10 +1021,7 @@ const placeBuilding = (center: THREE.Vector3) => {
   )
   mesh.position.copy(snapped)
   scene.add(mesh)
-  if (!isTower) {
-    wallMeshes.push(mesh)
-  }
-  staticColliders.push({ center: snapped.clone(), halfSize: half.clone(), type: isTower ? 'tower' : 'wall' })
+  let addedCollider: DestructibleCollider
   if (isTower) {
     const rangeRing = new THREE.Mesh(
       new THREE.RingGeometry(TOWER_RANGE - 0.12, TOWER_RANGE, 32),
@@ -956,20 +1037,23 @@ const placeBuilding = (center: THREE.Vector3) => {
     towerLaser.rotation.order = 'YXZ'
     scene.add(towerLaser)
 
-    towers.push({
+    const tower: Tower = {
       mesh,
       range: TOWER_RANGE,
       shootCooldown: 0,
       laserVisibleTime: 0,
       laser: towerLaser,
       rangeRing
-    })
+    }
+    towers.push(tower)
+    addedCollider = addTowerCollider(snapped, half, mesh, tower)
     towerCharges -= 1
   } else {
+    addedCollider = addWallCollider(snapped, half, mesh)
     wallCharges -= 1
   }
   // Update pathfinding only for changed obstacle cells.
-  applyObstacleDelta([staticColliders[staticColliders.length - 1]!])
+  applyObstacleDelta([addedCollider])
   return true
 }
 
@@ -1059,8 +1143,7 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     )
     mesh.position.copy(pos)
     scene.add(mesh)
-    wallMeshes.push(mesh)
-    staticColliders.push({ center: pos.clone(), halfSize: half.clone(), type: 'wall' })
+    addWallCollider(pos, half, mesh)
     placed += 1
   }
   if (placed > 0) {
@@ -1099,7 +1182,6 @@ const addMapTower = (center: THREE.Vector3) => {
   )
   mesh.position.copy(snapped)
   scene.add(mesh)
-  staticColliders.push({ center: snapped.clone(), halfSize: half.clone(), type: 'tower' })
 
   const rangeRing = new THREE.Mesh(
     new THREE.RingGeometry(TOWER_RANGE - 0.12, TOWER_RANGE, 32),
@@ -1115,14 +1197,16 @@ const addMapTower = (center: THREE.Vector3) => {
   towerLaser.rotation.order = 'YXZ'
   scene.add(towerLaser)
 
-  towers.push({
+  const tower: Tower = {
     mesh,
     range: TOWER_RANGE,
     shootCooldown: 0,
     laserVisibleTime: 0,
     laser: towerLaser,
     rangeRing
-  })
+  }
+  towers.push(tower)
+  addTowerCollider(snapped, half, mesh, tower)
 }
 
 const prebuiltTowers = [
@@ -1181,6 +1265,7 @@ const resetGame = () => {
     scene.remove(wall)
   }
   wallMeshes.length = 0
+  structureStates.clear()
 
   staticColliders.length = 0
   staticColliders.push(castleCollider)
@@ -1242,6 +1327,44 @@ const resolveCircleCircle = (a: Entity, b: Entity) => {
 const setMoveTarget = (pos: THREE.Vector3) => {
   const clamped = new THREE.Vector3(clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS), 0, clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS))
   player.target.copy(clamped)
+}
+
+const getDestructibleColliders = (): DestructibleCollider[] =>
+  staticColliders.filter((collider): collider is DestructibleCollider => collider.type === 'wall' || collider.type === 'tower')
+
+const distanceToColliderSurface = (pos: THREE.Vector3, radius: number, collider: StaticCollider): number => {
+  const minX = collider.center.x - collider.halfSize.x
+  const maxX = collider.center.x + collider.halfSize.x
+  const minZ = collider.center.z - collider.halfSize.z
+  const maxZ = collider.center.z + collider.halfSize.z
+  const closestX = clamp(pos.x, minX, maxX)
+  const closestZ = clamp(pos.z, minZ, maxZ)
+  const dx = pos.x - closestX
+  const dz = pos.z - closestZ
+  return Math.sqrt(dx * dx + dz * dz) - radius
+}
+
+const pickSiegeTarget = (mob: Entity): DestructibleCollider | null => {
+  const options = getDestructibleColliders()
+  if (options.length === 0) return null
+
+  const towardWall = flowField.getDirectionTowardNearestWall(mob.mesh.position)
+  let best: DestructibleCollider | null = null
+  let bestScore = Number.POSITIVE_INFINITY
+
+  for (const collider of options) {
+    const toTarget = new THREE.Vector3().subVectors(collider.center, mob.mesh.position)
+    const planarDist = Math.hypot(toTarget.x, toTarget.z)
+    const dirToTarget = planarDist > 0.0001 ? toTarget.multiplyScalar(1 / planarDist) : null
+    const alignment = towardWall && dirToTarget ? Math.max(0, towardWall.dot(dirToTarget)) : 0
+    // Prefer closer blockers, with a bias toward the wall-distance gradient direction.
+    const score = planarDist - alignment * 3
+    if (score < bestScore) {
+      bestScore = score
+      best = collider
+    }
+  }
+  return best
 }
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
@@ -1338,6 +1461,38 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
   let dir = new THREE.Vector3()
   
   if (entity.kind === 'mob' && entity.waypoints && entity.waypointIndex !== undefined) {
+    entity.siegeAttackCooldown = Math.max((entity.siegeAttackCooldown ?? 0) - delta, 0)
+    const reachable = flowField.isReachable(entity.mesh.position)
+    if (reachable) {
+      entity.siegeMode = false
+      entity.siegeTarget = null
+    } else if (!entity.siegeMode) {
+      entity.siegeMode = true
+      entity.siegeTarget = pickSiegeTarget(entity)
+    }
+
+    if (entity.siegeMode) {
+      if (!entity.siegeTarget || !structureStates.has(entity.siegeTarget)) {
+        entity.siegeTarget = pickSiegeTarget(entity)
+      }
+      if (entity.siegeTarget) {
+        const target = entity.siegeTarget
+        const attackRange = MOB_SIEGE_RANGE_BUFFER
+        const distanceToSurface = distanceToColliderSurface(entity.mesh.position, entity.radius, target)
+        if (distanceToSurface <= attackRange) {
+          dir.set(0, 0, 0)
+          if ((entity.siegeAttackCooldown ?? 0) <= 0) {
+            damageStructure(target, MOB_SIEGE_DAMAGE)
+            entity.siegeAttackCooldown = MOB_SIEGE_ATTACK_COOLDOWN
+          }
+        } else {
+          dir.set(target.center.x - entity.mesh.position.x, 0, target.center.z - entity.mesh.position.z)
+          if (dir.length() > 0.1) dir.normalize()
+        }
+      } else {
+        dir = flowField.getDirection(entity.mesh.position)
+      }
+    } else {
     // Use waypoint-based navigation
     const waypoints = entity.waypoints
     let waypointIdx = entity.waypointIndex
@@ -1412,7 +1567,40 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
         entity.waypointIndex = 0
       }
     }
+    }
   } else if (entity.kind === 'mob') {
+    entity.siegeAttackCooldown = Math.max((entity.siegeAttackCooldown ?? 0) - delta, 0)
+    const reachable = flowField.isReachable(entity.mesh.position)
+    if (reachable) {
+      entity.siegeMode = false
+      entity.siegeTarget = null
+    } else if (!entity.siegeMode) {
+      entity.siegeMode = true
+      entity.siegeTarget = pickSiegeTarget(entity)
+    }
+
+    if (entity.siegeMode) {
+      if (!entity.siegeTarget || !structureStates.has(entity.siegeTarget)) {
+        entity.siegeTarget = pickSiegeTarget(entity)
+      }
+      if (entity.siegeTarget) {
+        const target = entity.siegeTarget
+        const attackRange = MOB_SIEGE_RANGE_BUFFER
+        const distanceToSurface = distanceToColliderSurface(entity.mesh.position, entity.radius, target)
+        if (distanceToSurface <= attackRange) {
+          dir.set(0, 0, 0)
+          if ((entity.siegeAttackCooldown ?? 0) <= 0) {
+            damageStructure(target, MOB_SIEGE_DAMAGE)
+            entity.siegeAttackCooldown = MOB_SIEGE_ATTACK_COOLDOWN
+          }
+        } else {
+          dir.set(target.center.x - entity.mesh.position.x, 0, target.center.z - entity.mesh.position.z)
+          if (dir.length() > 0.1) dir.normalize()
+        }
+      }
+    }
+
+    if (!entity.siegeMode) {
     // Fallback: use flow field directly if no waypoints
     dir = flowField.getDirection(entity.mesh.position)
     
@@ -1440,6 +1628,7 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
     if (avoidance.length() > 0.001) {
       avoidance.normalize().multiplyScalar(0.3)
       dir.add(avoidance).normalize()
+    }
     }
   } else {
     // Non-mobs use direct target following

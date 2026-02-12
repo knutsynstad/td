@@ -101,6 +101,47 @@ export class FlowField {
     return fallback.normalize()
   }
 
+  isReachable(pos: THREE.Vector3): boolean {
+    const [gx, gz] = worldToGrid(pos.x, pos.z, this.worldBounds, this.resolution, this.size)
+    const idx = getIndex(gx, gz, this.size)
+    return Number.isFinite(this.dist[idx]!)
+  }
+
+  getDirectionTowardNearestWall(pos: THREE.Vector3): THREE.Vector3 | null {
+    const [gx, gz] = worldToGrid(pos.x, pos.z, this.worldBounds, this.resolution, this.size)
+    const idx = getIndex(gx, gz, this.size)
+    const currentWallDist = this.wallDist[idx]!
+
+    if (currentWallDist === 0) return null
+
+    let bestX = gx
+    let bestZ = gz
+    let bestWallDist = currentWallDist
+
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dz === 0) continue
+        const nx = gx + dx
+        const nz = gz + dz
+        if (nx < 0 || nz < 0 || nx >= this.size || nz >= this.size) continue
+        const nIdx = getIndex(nx, nz, this.size)
+        if (this.blocked[nIdx] === 1) continue
+        const nWallDist = this.wallDist[nIdx]!
+        if (nWallDist < bestWallDist) {
+          bestWallDist = nWallDist
+          bestX = nx
+          bestZ = nz
+        }
+      }
+    }
+
+    if (bestX === gx && bestZ === gz) return null
+    const [targetX, targetZ] = gridToWorld(bestX, bestZ, this.worldBounds, this.resolution)
+    const dir = new THREE.Vector3(targetX - pos.x, 0, targetZ - pos.z)
+    if (dir.lengthSq() < 0.0001) return null
+    return dir.normalize()
+  }
+
   computeWaypoints(start: THREE.Vector3, goal: THREE.Vector3, maxWaypoints = 100): THREE.Vector3[] {
     const waypoints: THREE.Vector3[] = [start.clone()]
     let current = start.clone()
