@@ -778,6 +778,7 @@ let towerCharges = TOWER_CHARGE_MAX
 let isDraggingWall = false
 let wallDragStart: THREE.Vector3 | null = null
 let wallDragEnd: THREE.Vector3 | null = null
+const EVENT_BANNER_DURATION = 2.4
 let eventBannerTimer = 0
 let prevMobsCount = 0
 let prevNextWaveIn = 0
@@ -1744,7 +1745,7 @@ const updateNpcTargets = () => {
   }
 }
 
-const triggerEventBanner = (text: string, duration = 1.6) => {
+const triggerEventBanner = (text: string) => {
   eventBannerEl.textContent = ''
   const line = document.createElement('div')
   line.className = 'event-banner__single'
@@ -1755,7 +1756,7 @@ const triggerEventBanner = (text: string, duration = 1.6) => {
   eventBannerEl.classList.remove('show')
   void eventBannerEl.offsetWidth
   eventBannerEl.classList.add('show')
-  eventBannerTimer = duration
+  eventBannerTimer = EVENT_BANNER_DURATION
 }
 
 const spawnWave = () => {
@@ -1767,7 +1768,7 @@ const spawnWave = () => {
     const pos = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
     makeMob(pos)
   }
-  triggerEventBanner(`Wave ${wave} spawned`, 1.8)
+  triggerEventBanner(`Wave ${wave} spawned`)
 }
 
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
