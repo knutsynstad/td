@@ -1022,6 +1022,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   const structureHit = getStructureHit(event)
   if (structureHit) {
     setSelectedStructures([structureHit])
+    setMoveTarget(structureHit.center)
     return
   }
   const point = getGroundPoint(event)
