@@ -18,6 +18,7 @@ import {
   canPlace as canPlaceAt,
   getWallLinePlacement as computeWallLinePlacement,
   placeBuilding as placeBuildingAt,
+  placeWallSegments as placeWallSegmentsAt,
   placeWallLine as placeWallSegment,
   snapToGrid as snapGridValue,
   type BuildMode
@@ -325,13 +326,26 @@ const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
     center.y,
     snapAxis(center.z, sizeZTiles)
   )
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(halfSize.x * 2, halfSize.y * 2, halfSize.z * 2),
-    new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
-  )
-  mesh.position.copy(snappedCenter)
-  scene.add(mesh)
-  structureStore.addWallCollider(snappedCenter, halfSize, mesh, WALL_HP)
+  const startX = snappedCenter.x - (sizeXTiles - 1) * halfGrid
+  const startZ = snappedCenter.z - (sizeZTiles - 1) * halfGrid
+  const tileHalf = new THREE.Vector3(GRID_SIZE * 0.5, halfSize.y, GRID_SIZE * 0.5)
+
+  for (let x = 0; x < sizeXTiles; x += 1) {
+    for (let z = 0; z < sizeZTiles; z += 1) {
+      const tileCenter = new THREE.Vector3(
+        startX + x * GRID_SIZE,
+        snappedCenter.y,
+        startZ + z * GRID_SIZE
+      )
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(GRID_SIZE, halfSize.y * 2, GRID_SIZE),
+        new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
+      )
+      mesh.position.copy(tileCenter)
+      scene.add(mesh)
+      structureStore.addWallCollider(tileCenter, tileHalf, mesh, WALL_HP)
+    }
+  }
 }
 
 // Add some basic walls for mobs to navigate around
@@ -567,6 +581,7 @@ let towerCharges = TOWER_CHARGE_MAX
 let isDraggingWall = false
 let wallDragStart: THREE.Vector3 | null = null
 let wallDragEnd: THREE.Vector3 | null = null
+let wallDragValidPositions: THREE.Vector3[] = []
 const EVENT_BANNER_DURATION = 2.4
 let eventBannerTimer = 0
 let prevMobsCount = 0
@@ -696,6 +711,7 @@ const setBuildMode = (mode: BuildMode) => {
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
+  wallDragValidPositions = []
 }
 
 const setSelectedStructures = (colliders: DestructibleCollider[]) => {
@@ -867,6 +883,17 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
   return placed > 0
 }
 
+const placeWallSegments = (positions: THREE.Vector3[]) => {
+  const placed = placeWallSegmentsAt(positions, wallCharges, {
+    scene,
+    structureStore,
+    staticColliders,
+    applyObstacleDelta
+  })
+  wallCharges -= placed
+  return placed > 0
+}
+
 const addMapTower = (center: THREE.Vector3) => {
   const size = new THREE.Vector3(1, TOWER_HEIGHT, 1)
   const half = size.clone().multiplyScalar(0.5)
@@ -917,6 +944,7 @@ const resetGame = () => {
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
+  wallDragValidPositions = []
 
   for (const mob of mobs) {
     scene.remove(mob.mesh)
@@ -982,6 +1010,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
       isDraggingWall = true
       wallDragStart = point.clone()
       wallDragEnd = point.clone()
+      wallDragValidPositions = []
     } else {
       // Tower: place and exit
       if (placeBuilding(point)) {
@@ -1012,6 +1041,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     // Show one continuous preview mesh for the wall segment.
     const availableWallPreview = Math.floor(wallCharges)
     const { validPositions, blockedPosition } = getWallLinePlacement(wallDragStart, wallDragEnd, availableWallPreview)
+    wallDragValidPositions = validPositions
 
     if (validPositions.length > 0) {
       const first = validPositions[0]!
@@ -1054,7 +1084,11 @@ window.addEventListener('pointerup', (event) => {
   }
   isShooting = false
   if (buildMode === 'wall' && isDraggingWall && wallDragStart && wallDragEnd) {
-    placeWallLine(wallDragStart, wallDragEnd)
+    if (wallDragValidPositions.length > 0) {
+      placeWallSegments(wallDragValidPositions)
+    } else {
+      placeWallLine(wallDragStart, wallDragEnd)
+    }
     setBuildMode('off')
   }
 })

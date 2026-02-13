@@ -142,9 +142,21 @@ export const placeWallLine = (
   if (availableWallCharges <= 0) return 0
   const { validPositions } = getWallLinePlacement(start, end, availableWallCharges, context.staticColliders)
 
+  return placeWallSegments(validPositions, wallCharges, context)
+}
+
+export const placeWallSegments = (
+  positions: THREE.Vector3[],
+  wallCharges: number,
+  context: Pick<PlaceContext, 'scene' | 'structureStore' | 'staticColliders' | 'applyObstacleDelta'>
+) => {
+  const availableWallCharges = Math.floor(wallCharges)
+  if (availableWallCharges <= 0 || positions.length === 0) return 0
+
   let placed = 0
-  for (const pos of validPositions) {
+  for (const pos of positions) {
     if (placed >= availableWallCharges) break
+    if (!canPlace(pos, WALL_LINE_HALF, context.staticColliders, true)) continue
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(WALL_LINE_SIZE.x, WALL_LINE_SIZE.y, WALL_LINE_SIZE.z),
       new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
