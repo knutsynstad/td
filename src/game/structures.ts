@@ -1,0 +1,94 @@
+import * as THREE from 'three'
+import type { DestructibleCollider, StaticCollider, StructureState, Tower } from './types'
+
+type RemoveTowerCallback = (tower: Tower) => void
+type ObstacleDeltaCallback = (added: StaticCollider[], removed?: StaticCollider[]) => void
+
+export class StructureStore {
+  readonly structureStates = new Map<StaticCollider, StructureState>()
+  readonly structureMeshToCollider = new Map<THREE.Mesh, DestructibleCollider>()
+  readonly wallMeshes: THREE.Mesh[] = []
+  private readonly scene: THREE.Scene
+  private readonly staticColliders: StaticCollider[]
+  private readonly towers: Tower[]
+  private readonly onRemoveTower: RemoveTowerCallback
+  private readonly onObstacleDelta: ObstacleDeltaCallback
+
+  constructor(
+    scene: THREE.Scene,
+    staticColliders: StaticCollider[],
+    towers: Tower[],
+    onRemoveTower: RemoveTowerCallback,
+    onObstacleDelta: ObstacleDeltaCallback
+  ) {
+    this.scene = scene
+    this.staticColliders = staticColliders
+    this.towers = towers
+    this.onRemoveTower = onRemoveTower
+    this.onObstacleDelta = onObstacleDelta
+  }
+
+  addWallCollider(center: THREE.Vector3, halfSize: THREE.Vector3, mesh: THREE.Mesh, hp: number): DestructibleCollider {
+    const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'wall' }
+    this.staticColliders.push(collider)
+    this.wallMeshes.push(mesh)
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp })
+    this.structureMeshToCollider.set(mesh, collider)
+    return collider
+  }
+
+  addTowerCollider(
+    center: THREE.Vector3,
+    halfSize: THREE.Vector3,
+    mesh: THREE.Mesh,
+    tower: Tower,
+    hp: number
+  ): DestructibleCollider {
+    const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'tower' }
+    this.staticColliders.push(collider)
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp, tower })
+    this.structureMeshToCollider.set(mesh, collider)
+    return collider
+  }
+
+  removeStructureCollider(collider: DestructibleCollider) {
+    const state = this.structureStates.get(collider)
+    if (!state) return
+
+    this.scene.remove(state.mesh)
+    this.structureMeshToCollider.delete(state.mesh)
+    if (collider.type === 'wall') {
+      const wallIdx = this.wallMeshes.indexOf(state.mesh)
+      if (wallIdx >= 0) this.wallMeshes.splice(wallIdx, 1)
+    }
+
+    if (state.tower) {
+      this.scene.remove(state.tower.rangeRing)
+      this.scene.remove(state.tower.laser)
+      const towerIdx = this.towers.indexOf(state.tower)
+      if (towerIdx >= 0) this.towers.splice(towerIdx, 1)
+      this.onRemoveTower(state.tower)
+    }
+
+    this.structureStates.delete(collider)
+    const colliderIdx = this.staticColliders.indexOf(collider)
+    if (colliderIdx >= 0) this.staticColliders.splice(colliderIdx, 1)
+    this.onObstacleDelta([], [collider])
+  }
+
+  damageStructure(collider: DestructibleCollider, damage: number, onDestroyed?: (collider: DestructibleCollider) => void): boolean {
+    const state = this.structureStates.get(collider)
+    if (!state) return false
+    state.hp -= damage
+    if (state.hp > 0) return false
+    onDestroyed?.(collider)
+    this.removeStructureCollider(collider)
+    return true
+  }
+
+  getDestructibleColliders(): DestructibleCollider[] {
+    return this.staticColliders.filter(
+      (collider): collider is DestructibleCollider => collider.type === 'wall' || collider.type === 'tower'
+    )
+  }
+}

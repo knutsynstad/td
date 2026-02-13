@@ -1,11 +1,6 @@
 import { expandBounds, worldToGrid } from './gridMath'
 import type { GridBounds } from './gridMath'
-
-export type NavCollider = {
-  center: { x: number, z: number }
-  halfSize: { x: number, z: number }
-  type: 'castle' | 'wall' | 'tower'
-}
+import type { NavCollider } from '../game/types'
 
 const toBounds = (
   collider: NavCollider,

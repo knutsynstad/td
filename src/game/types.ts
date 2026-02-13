@@ -1,0 +1,61 @@
+import * as THREE from 'three'
+
+export type ColliderType = 'castle' | 'wall' | 'tower'
+
+export type NavPoint = { x: number, z: number }
+
+export type NavCollider = {
+  center: NavPoint
+  halfSize: NavPoint
+  type: ColliderType
+}
+
+export type StaticCollider = NavCollider & {
+  center: THREE.Vector3
+  halfSize: THREE.Vector3
+}
+
+export type StructureType = Extract<StaticCollider['type'], 'wall' | 'tower'>
+
+export type DestructibleCollider = StaticCollider & {
+  type: StructureType
+}
+
+export type Entity = {
+  mesh: THREE.Mesh
+  radius: number
+  speed: number
+  velocity: THREE.Vector3
+  target: THREE.Vector3
+  kind: 'player' | 'mob' | 'npc'
+  hp?: number
+  maxHp?: number
+  baseY: number
+  waypoints?: THREE.Vector3[]
+  waypointIndex?: number
+  siegeMode?: boolean
+  siegeTarget?: DestructibleCollider | null
+  siegeAttackCooldown?: number
+  unreachableTime?: number
+  username?: string
+}
+
+export type Tower = {
+  mesh: THREE.Mesh
+  range: number
+  damage: number
+  shootCooldown: number
+  shootCadence: number
+  laserVisibleTime: number
+  laser: THREE.Mesh
+  rangeRing: THREE.Mesh
+  typeId: string
+  level: number
+}
+
+export type StructureState = {
+  mesh: THREE.Mesh
+  hp: number
+  maxHp: number
+  tower?: Tower
+}

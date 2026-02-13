@@ -4,7 +4,7 @@ import { extractFlowField } from './flowExtraction'
 import { getIndex, gridToWorld, worldToGrid } from './gridMath'
 import type { GridBounds } from './gridMath'
 import { computeDirtyBounds } from './obstacleDelta'
-import type { NavCollider } from './obstacleDelta'
+import type { NavCollider } from '../game/types'
 import { computeWallDistanceField } from './wallDistanceField'
 
 const RESCUE_SEARCH_RADIUS_CELLS = 8

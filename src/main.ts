@@ -1,167 +1,60 @@
 import './style.css'
 import * as THREE from 'three'
 import { FlowField } from './pathfinding/FlowField'
-
-type StaticCollider = {
-  center: THREE.Vector3
-  halfSize: THREE.Vector3
-  type: 'castle' | 'wall' | 'tower'
-}
-
-type StructureType = Extract<StaticCollider['type'], 'wall' | 'tower'>
-
-type DestructibleCollider = StaticCollider & {
-  type: StructureType
-}
-
-type Entity = {
-  mesh: THREE.Mesh
-  radius: number
-  speed: number
-  velocity: THREE.Vector3
-  target: THREE.Vector3
-  kind: 'player' | 'mob' | 'npc'
-  hp?: number
-  maxHp?: number
-  baseY: number
-  waypoints?: THREE.Vector3[] // For mobs: pre-computed path waypoints
-  waypointIndex?: number // Current waypoint index
-  siegeMode?: boolean
-  siegeTarget?: DestructibleCollider | null
-  siegeAttackCooldown?: number
-  unreachableTime?: number
-  username?: string
-}
-
-type Tower = {
-  mesh: THREE.Mesh
-  range: number
-  shootCooldown: number
-  laserVisibleTime: number
-  laser: THREE.Mesh
-  rangeRing: THREE.Mesh
-}
-
-type StructureState = {
-  mesh: THREE.Mesh
-  hp: number
-  maxHp: number
-  tower?: Tower
-}
-
-const SELECTION_RADIUS = 8
-const WORLD_BOUNDS = 30
-const GRID_SIZE = 1
-const CASTLE_RADIUS = 0.5
-const PLAYER_SPEED = 6
-const MOB_SPEED = 3
-const NPC_SPEED = 4
-const SHOOT_COOLDOWN = 0.5
-const SHOOT_DAMAGE = 5
-const TOWER_RANGE = 8
-const TOWER_SHOOT_COOLDOWN = 0.25
-const TOWER_HEIGHT = 2
-const WALL_HP = 16
-const TOWER_HP = 24
-const MOB_SIEGE_DAMAGE = 2
-const MOB_SIEGE_ATTACK_COOLDOWN = 0.8
-const MOB_SIEGE_RANGE_BUFFER = 0.35
-const MOB_SIEGE_UNREACHABLE_GRACE = 1.2
-const WALL_CHARGE_MAX = 200
-const TOWER_CHARGE_MAX = 50
-const CHARGE_FULL_RECHARGE_TIME = 60
-const WALL_RECHARGE_RATE = WALL_CHARGE_MAX / CHARGE_FULL_RECHARGE_TIME
-const TOWER_RECHARGE_RATE = TOWER_CHARGE_MAX / CHARGE_FULL_RECHARGE_TIME
-
-// Flow field constants
-const FLOW_FIELD_RESOLUTION = GRID_SIZE
-const FLOW_FIELD_SIZE = Math.ceil((WORLD_BOUNDS * 2) / FLOW_FIELD_RESOLUTION)
-const SPATIAL_GRID_CELL_SIZE = 3
-
-// Waypoint cache for sharing paths between mobs
-class WaypointCache {
-  private cache: Map<string, THREE.Vector3[]>
-  private gridSnap: number
-
-  constructor(gridSnap: number) {
-    this.cache = new Map()
-    this.gridSnap = gridSnap
-  }
-
-  private getKey(pos: THREE.Vector3): string {
-    // Snap to grid for sharing between nearby spawns
-    const gx = Math.floor(pos.x / this.gridSnap)
-    const gz = Math.floor(pos.z / this.gridSnap)
-    return `${gx},${gz}`
-  }
-
-  get(start: THREE.Vector3): THREE.Vector3[] | null {
-    return this.cache.get(this.getKey(start)) || null
-  }
-
-  set(start: THREE.Vector3, waypoints: THREE.Vector3[]) {
-    this.cache.set(this.getKey(start), waypoints)
-  }
-
-  clear() {
-    this.cache.clear()
-  }
-}
-
-// Spatial Grid for efficient dynamic collision checks
-class SpatialGrid {
-  private cells: Map<string, Entity[]>
-  private cellSize: number
-
-  constructor(cellSize: number) {
-    this.cells = new Map()
-    this.cellSize = cellSize
-  }
-
-  private getCellKey(x: number, z: number): string {
-    const gx = Math.floor(x / this.cellSize)
-    const gz = Math.floor(z / this.cellSize)
-    return `${gx},${gz}`
-  }
-
-  clear() {
-    this.cells.clear()
-  }
-
-  insert(entity: Entity) {
-    const key = this.getCellKey(entity.mesh.position.x, entity.mesh.position.z)
-    if (!this.cells.has(key)) {
-      this.cells.set(key, [])
-    }
-    this.cells.get(key)!.push(entity)
-  }
-
-  getNearby(pos: THREE.Vector3, radius: number): Entity[] {
-    const results: Entity[] = []
-    const minGx = Math.floor((pos.x - radius) / this.cellSize)
-    const maxGx = Math.floor((pos.x + radius) / this.cellSize)
-    const minGz = Math.floor((pos.z - radius) / this.cellSize)
-    const maxGz = Math.floor((pos.z + radius) / this.cellSize)
-
-    for (let gx = minGx; gx <= maxGx; gx++) {
-      for (let gz = minGz; gz <= maxGz; gz++) {
-        const key = `${gx},${gz}`
-        const cell = this.cells.get(key)
-        if (cell) {
-          for (const entity of cell) {
-            const dx = entity.mesh.position.x - pos.x
-            const dz = entity.mesh.position.z - pos.z
-            const distSq = dx * dx + dz * dz
-            if (distSq <= radius * radius) {
-              results.push(entity)
-            }
-          }
-        }
-      }
-    }
-    return results
-  }
-}
+import { screenToWorldOnGround } from './utils/coords'
+import { SelectionDialog } from './ui/SelectionDialog'
+import { UpgradeManager } from './game/UpgradeManager'
+import { StructureStore } from './game/structures'
+import { getTowerType } from './game/TowerTypes'
+import type { TowerTypeId } from './game/TowerTypes'
+import type { DestructibleCollider, Entity, StaticCollider, Tower } from './game/types'
+import { WaypointCache } from './utils/WaypointCache'
+import { SpatialGrid } from './utils/SpatialGrid'
+import { createParticleSystem } from './effects/particles'
+import { clamp, resolveCircleCircle } from './physics/collision'
+import { createEntityMotionSystem } from './entities/motion'
+import { createGameLoop } from './game/GameLoop'
+import {
+  canPlace as canPlaceAt,
+  getWallLinePlacement as computeWallLinePlacement,
+  placeBuilding as placeBuildingAt,
+  placeWallLine as placeWallSegment,
+  snapToGrid as snapGridValue,
+  type BuildMode
+} from './placement/building'
+import {
+  clearSelectionState,
+  createSelectionState,
+  getSelectedInRange as getSelectedInRangeFromState,
+  getSelectionTowerTypeId as getSelectionTowerTypeIdFromState,
+  getSingleSelectedTower as getSingleSelectedTowerFromState,
+  isColliderInRange as isColliderInRangeFromState,
+  setSelectedStructures as setSelectedStructuresState
+} from './selection/selection'
+import {
+  FLOW_FIELD_RESOLUTION,
+  FLOW_FIELD_SIZE,
+  GRID_SIZE,
+  MOB_SIEGE_ATTACK_COOLDOWN,
+  MOB_SIEGE_DAMAGE,
+  MOB_SIEGE_RANGE_BUFFER,
+  MOB_SIEGE_UNREACHABLE_GRACE,
+  MOB_SPEED,
+  NPC_SPEED,
+  PLAYER_SPEED,
+  SELECTION_RADIUS,
+  SHOOT_COOLDOWN,
+  SHOOT_DAMAGE,
+  SPATIAL_GRID_CELL_SIZE,
+  TOWER_CHARGE_MAX,
+  TOWER_HEIGHT,
+  TOWER_HP,
+  TOWER_RECHARGE_RATE,
+  WALL_CHARGE_MAX,
+  WALL_HP,
+  WALL_RECHARGE_RATE,
+  WORLD_BOUNDS
+} from './game/constants'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
@@ -401,68 +294,19 @@ const castleCollider: StaticCollider = {
   type: 'castle'
 }
 const staticColliders: StaticCollider[] = [castleCollider]
-const wallMeshes: THREE.Mesh[] = []
-const structureStates = new Map<StaticCollider, StructureState>()
-
-const addWallCollider = (
-  center: THREE.Vector3,
-  halfSize: THREE.Vector3,
-  mesh: THREE.Mesh,
-  hp = WALL_HP
-): DestructibleCollider => {
-  const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'wall' }
-  staticColliders.push(collider)
-  wallMeshes.push(mesh)
-  structureStates.set(collider, { mesh, hp, maxHp: hp })
-  return collider
-}
-
-const addTowerCollider = (
-  center: THREE.Vector3,
-  halfSize: THREE.Vector3,
-  mesh: THREE.Mesh,
-  tower: Tower,
-  hp = TOWER_HP
-): DestructibleCollider => {
-  const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'tower' }
-  staticColliders.push(collider)
-  structureStates.set(collider, { mesh, hp, maxHp: hp, tower })
-  return collider
-}
-
-const removeStructureCollider = (collider: DestructibleCollider) => {
-  const state = structureStates.get(collider)
-  if (!state) return
-
-  scene.remove(state.mesh)
-  if (collider.type === 'wall') {
-    const wallIdx = wallMeshes.indexOf(state.mesh)
-    if (wallIdx >= 0) wallMeshes.splice(wallIdx, 1)
-  }
-
-  if (state.tower) {
-    scene.remove(state.tower.rangeRing)
-    scene.remove(state.tower.laser)
-    const towerIdx = towers.indexOf(state.tower)
-    if (towerIdx >= 0) towers.splice(towerIdx, 1)
-    if (selectedTower === state.tower) selectedTower = null
-  }
-
-  structureStates.delete(collider)
-  const colliderIdx = staticColliders.indexOf(collider)
-  if (colliderIdx >= 0) staticColliders.splice(colliderIdx, 1)
-  applyObstacleDelta([], [collider])
-}
-
-const damageStructure = (collider: DestructibleCollider, damage: number): boolean => {
-  const state = structureStates.get(collider)
-  if (!state) return false
-  state.hp -= damage
-  if (state.hp > 0) return false
-  spawnCubeEffects(collider.center.clone())
-  removeStructureCollider(collider)
-  return true
-}
+const mobs: Entity[] = []
+const towers: Tower[] = []
+let selectedTower: Tower | null = null
+const structureStore = new StructureStore(
+  scene,
+  staticColliders,
+  towers,
+  (tower) => {
+    if (selectedTower === tower) selectedTower = null
+    upgradeManager.cancelForTower(tower)
+  },
+  (added, removed = []) => applyObstacleDelta(added, removed)
+)
 
 // Add basic walls on the map
 const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
@@ -487,7 +331,7 @@ const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
   )
   mesh.position.copy(snappedCenter)
   scene.add(mesh)
-  addWallCollider(snappedCenter, halfSize, mesh)
+  structureStore.addWallCollider(snappedCenter, halfSize, mesh, WALL_HP)
 }
 
 // Add some basic walls for mobs to navigate around
@@ -506,8 +350,13 @@ const flowField = new FlowField({
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
 const waypointCache = new WaypointCache(GRID_SIZE * 2) // Share waypoints within 2 grid cells
 const castleGoal = new THREE.Vector3(0, 0, 0)
+let pendingWaypointRefresh = false
+let pendingWaypointRefreshIndex = 0
+const WAYPOINT_REFRESH_BATCH_SIZE = 200
 
 const refreshAllMobWaypoints = () => {
+  pendingWaypointRefresh = false
+  pendingWaypointRefreshIndex = 0
   for (const mob of mobs) {
     const waypoints = flowField.computeWaypoints(mob.mesh.position, castleGoal)
     mob.waypoints = waypoints
@@ -519,7 +368,8 @@ const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] =
   const changed = flowField.applyObstacleDelta(staticColliders, added, removed, castleGoal)
   if (!changed) return
   waypointCache.clear()
-  refreshAllMobWaypoints()
+  pendingWaypointRefresh = true
+  pendingWaypointRefreshIndex = 0
 }
 
 // Compute initial flow field (exclude castle from pathfinding)
@@ -574,6 +424,7 @@ const towerRangeMaterial = new THREE.MeshBasicMaterial({
   opacity: 0.3,
   side: THREE.DoubleSide
 })
+const upgradeManager = new UpgradeManager(8)
 
 const raycaster = new THREE.Raycaster()
 const pointer = new THREE.Vector2()
@@ -614,9 +465,60 @@ const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
 makeNpc(new THREE.Vector3(-6, 0, 6), 0xffc857, 'u/NPC_Alpha')
 makeNpc(new THREE.Vector3(-6, 0, -6), 0xb48cff, 'u/NPC_Beta')
 
-const mobs: Entity[] = []
-const towers: Tower[] = []
-let selectedTower: Tower | null = null
+const selection = createSelectionState()
+const selectedStructures = selection.selectedStructures
+let activePointerId: number | null = null
+
+const applyTowerType = (tower: Tower, typeId: TowerTypeId) => {
+  const typeConfig = getTowerType(typeId)
+  tower.typeId = typeId
+  tower.level = typeConfig.level
+  tower.range = typeConfig.range
+  tower.damage = typeConfig.damage
+  tower.shootCadence = typeConfig.shootCadence
+  tower.rangeRing.geometry.dispose()
+  tower.rangeRing.geometry = new THREE.RingGeometry(typeConfig.range - 0.12, typeConfig.range, 32)
+  ;(tower.mesh.material as THREE.MeshStandardMaterial).color.setHex(typeConfig.color)
+}
+
+const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId): Tower => {
+  const typeConfig = getTowerType(typeId)
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1, TOWER_HEIGHT, 1),
+    new THREE.MeshStandardMaterial({ color: typeConfig.color })
+  )
+  mesh.position.copy(snapped)
+  scene.add(mesh)
+
+  const rangeRing = new THREE.Mesh(
+    new THREE.RingGeometry(typeConfig.range - 0.12, typeConfig.range, 32),
+    towerRangeMaterial
+  )
+  rangeRing.rotation.x = -Math.PI / 2
+  rangeRing.position.set(snapped.x, 0.02, snapped.z)
+  rangeRing.visible = false
+  scene.add(rangeRing)
+
+  const towerLaser = new THREE.Mesh(towerLaserGeometry, towerLaserMaterial)
+  towerLaser.visible = false
+  towerLaser.rotation.order = 'YXZ'
+  scene.add(towerLaser)
+
+  const tower: Tower = {
+    mesh,
+    range: typeConfig.range,
+    damage: typeConfig.damage,
+    shootCooldown: 0,
+    shootCadence: typeConfig.shootCadence,
+    laserVisibleTime: 0,
+    laser: towerLaser,
+    rangeRing,
+    typeId,
+    level: typeConfig.level
+  }
+  towers.push(tower)
+  return tower
+}
 
 const makeMob = (pos: THREE.Vector3) => {
   const mob = new THREE.Mesh(
@@ -653,7 +555,7 @@ const makeMob = (pos: THREE.Vector3) => {
   })
 }
 
-let buildMode: 'off' | 'wall' | 'tower' = 'off'
+let buildMode: BuildMode = 'off'
 let isShooting = false
 let shootCooldown = 0
 let laserVisibleTime = 0
@@ -669,128 +571,10 @@ const EVENT_BANNER_DURATION = 2.4
 let eventBannerTimer = 0
 let prevMobsCount = 0
 
-// Particle system
-type CubeParticle = {
-  mesh: THREE.Mesh
-  velocity: THREE.Vector3
-  angularVelocity: THREE.Vector3
-  lifetime: number
-  maxLifetime: number
-}
-
-type CubeParticleOptions = {
-  sizeMin?: number
-  sizeMax?: number
-  lifetimeMin?: number
-  lifetimeMax?: number
-  color?: number
-  angularVelocityScale?: number
-}
-
-type CubeEffectOptions = {
-  countMin?: number
-  countMax?: number
-  speedMin?: number
-  speedMax?: number
-  verticalMin?: number
-  verticalMax?: number
-  particle?: CubeParticleOptions
-}
-
-const cubeParticles: CubeParticle[] = []
-
-const createCubeParticle = (
-  pos: THREE.Vector3,
-  velocity: THREE.Vector3,
-  options: CubeParticleOptions = {}
-): CubeParticle => {
-  const sizeMin = options.sizeMin ?? 0.15
-  const sizeMax = options.sizeMax ?? 0.25
-  const size = sizeMin + Math.random() * (sizeMax - sizeMin)
-  const lifetimeMin = options.lifetimeMin ?? 1.5
-  const lifetimeMax = options.lifetimeMax ?? 1.5
-  const maxLifetime = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin)
-  const angularScale = options.angularVelocityScale ?? 10
-  const particle = new THREE.Mesh(
-    new THREE.BoxGeometry(size, size, size),
-    new THREE.MeshStandardMaterial({ color: options.color ?? 0xff7a7a, transparent: true })
-  )
-  particle.position.copy(pos)
-  scene.add(particle)
-  return {
-    mesh: particle,
-    velocity: velocity.clone(),
-    angularVelocity: new THREE.Vector3(
-      (Math.random() - 0.5) * angularScale,
-      (Math.random() - 0.5) * angularScale,
-      (Math.random() - 0.5) * angularScale
-    ),
-    lifetime: maxLifetime,
-    maxLifetime
-  }
-}
-
-const spawnCubeEffects = (pos: THREE.Vector3, options: CubeEffectOptions = {}) => {
-  const countMin = options.countMin ?? 6
-  const countMax = options.countMax ?? 10
-  const count = countMin + Math.floor(Math.random() * (countMax - countMin + 1))
-  const speedMin = options.speedMin ?? 2
-  const speedMax = options.speedMax ?? 4
-  const verticalMin = options.verticalMin ?? 3
-  const verticalMax = options.verticalMax ?? 5
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2
-    const speed = speedMin + Math.random() * (speedMax - speedMin)
-    const velocity = new THREE.Vector3(
-      Math.cos(angle) * speed,
-      verticalMin + Math.random() * (verticalMax - verticalMin),
-      Math.sin(angle) * speed
-    )
-    cubeParticles.push(createCubeParticle(pos.clone(), velocity, options.particle))
-  }
-}
-
-const spawnMobDeathEffects = (pos: THREE.Vector3) => {
-  spawnCubeEffects(pos, {
-    countMin: 6,
-    countMax: 10,
-    speedMin: 2.2,
-    speedMax: 3.8,
-    verticalMin: 3.2,
-    verticalMax: 5.2,
-    particle: {
-      sizeMin: 0.18,
-      sizeMax: 0.35,
-      lifetimeMin: 1.8,
-      lifetimeMax: 2.6,
-      angularVelocityScale: 16
-    }
-  })
-}
-
-const updateParticles = (delta: number) => {
-  // Update cube particles
-  for (let i = cubeParticles.length - 1; i >= 0; i--) {
-    const particle = cubeParticles[i]!
-    particle.lifetime -= delta
-    particle.velocity.y -= 9.8 * delta // Gravity
-    particle.mesh.position.add(particle.velocity.clone().multiplyScalar(delta))
-    
-    // Rotate cube
-    particle.mesh.rotation.x += particle.angularVelocity.x * delta
-    particle.mesh.rotation.y += particle.angularVelocity.y * delta
-    particle.mesh.rotation.z += particle.angularVelocity.z * delta
-    
-    // Fade out
-    const opacity = Math.max(0, particle.lifetime / particle.maxLifetime)
-    ;(particle.mesh.material as THREE.MeshStandardMaterial).opacity = opacity
-    
-    if (particle.lifetime <= 0 || particle.mesh.position.y < -1) {
-      scene.remove(particle.mesh)
-      cubeParticles.splice(i, 1)
-    }
-  }
-}
+const particleSystem = createParticleSystem(scene)
+const spawnCubeEffects = particleSystem.spawnCubeEffects
+const spawnMobDeathEffects = particleSystem.spawnMobDeathEffects
+const updateParticles = particleSystem.updateParticles
 
 // Health bars and username labels using HTML overlays
 const healthBarContainer = document.createElement('div')
@@ -895,7 +679,7 @@ const buildPreview = new THREE.Mesh(
 buildPreview.visible = false
 scene.add(buildPreview)
 
-const setBuildMode = (mode: 'off' | 'wall' | 'tower') => {
+const setBuildMode = (mode: BuildMode) => {
   if (buildMode === mode) {
     // Toggle off if clicking same button
     buildMode = 'off'
@@ -906,11 +690,94 @@ const setBuildMode = (mode: 'off' | 'wall' | 'tower') => {
   buildTowerBtn.classList.toggle('active', buildMode === 'tower')
   buildPreview.visible = buildMode !== 'off'
   if (buildMode !== 'off') {
-    selectedTower = null
+    clearSelectionState(selection)
+    selectedTower = selection.selectedTower
   }
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
+}
+
+const setSelectedStructures = (colliders: DestructibleCollider[]) => {
+  setSelectedStructuresState(selection, colliders, structureStore)
+  selectedTower = selection.selectedTower
+}
+
+const clearSelection = () => {
+  clearSelectionState(selection)
+  selectedTower = selection.selectedTower
+}
+
+const isColliderInRange = (collider: DestructibleCollider, range: number) => {
+  return isColliderInRangeFromState(player, collider, range)
+}
+
+const getSelectedInRange = () =>
+  getSelectedInRangeFromState(selection, player, SELECTION_RADIUS)
+
+const getSingleSelectedTower = (): Tower | null => {
+  return getSingleSelectedTowerFromState(selection, structureStore)
+}
+
+const getSelectionTowerTypeId = (): TowerTypeId | null => {
+  return getSelectionTowerTypeIdFromState(selection, structureStore)
+}
+
+const selectionDialog = new SelectionDialog(
+  app,
+  {
+    selectedCount: 0,
+    inRangeCount: 0,
+    selectedTowerTypeId: null,
+    upgradeBlockedReason: null,
+    canDelete: false,
+    activeUpgradeText: null
+  },
+  {
+    onDelete: () => {
+      const colliders = getSelectedInRange()
+      if (colliders.length === 0) return
+      for (const collider of colliders) {
+        structureStore.removeStructureCollider(collider)
+      }
+      clearSelection()
+    },
+    onUpgrade: (targetTypeId) => {
+      const tower = getSingleSelectedTower()
+      if (!tower) return
+      const [collider] = selectedStructures.values()
+      if (!isColliderInRange(collider, SELECTION_RADIUS)) return
+      upgradeManager.startUpgrade(tower, targetTypeId, performance.now())
+    }
+  }
+)
+
+const updateSelectionDialog = (nowMs: number) => {
+  const selectedCount = selectedStructures.size
+  const inRange = getSelectedInRange()
+  const tower = getSingleSelectedTower()
+  const selectedTowerTypeId = getSelectionTowerTypeId()
+  const activeUpgrade = tower ? upgradeManager.getJob(tower) : null
+  let upgradeBlockedReason: string | null = null
+  let activeUpgradeText: string | null = null
+  if (tower && activeUpgrade) {
+    const remaining = Math.max(0, Math.ceil((activeUpgrade.endsAtMs - nowMs) / 1000))
+    activeUpgradeText = `Upgrading to ${getTowerType(activeUpgrade.toTypeId).label} (${remaining}s)`
+    upgradeBlockedReason = 'Upgrade already in progress'
+  } else if (tower && inRange.length === 0) {
+    upgradeBlockedReason = 'Move closer to upgrade'
+  } else if (tower && upgradeManager.availableWorkers <= 0) {
+    upgradeBlockedReason = 'No workers available'
+  }
+
+  selectionDialog.update({
+    selectedCount,
+    inRangeCount: inRange.length,
+    selectedTowerTypeId,
+    upgradeBlockedReason,
+    canDelete: inRange.length > 0,
+    activeUpgradeText
+  })
 }
 
 buildWallBtn.addEventListener('click', () => setBuildMode('wall'))
@@ -943,10 +810,6 @@ window.addEventListener('keyup', (event) => {
   }
 })
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
-
-const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE
-
 const updatePointer = (event: PointerEvent) => {
   const rect = renderer.domElement.getBoundingClientRect()
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
@@ -954,242 +817,64 @@ const updatePointer = (event: PointerEvent) => {
 }
 
 const getGroundPoint = (event: PointerEvent) => {
-  updatePointer(event)
-  raycaster.setFromCamera(pointer, camera)
-  const point = new THREE.Vector3()
-  const hit = raycaster.ray.intersectPlane(groundPlane, point)
-  return hit ? point : null
+  const rect = renderer.domElement.getBoundingClientRect()
+  return screenToWorldOnGround(event.clientX, event.clientY, rect, camera, groundPlane)
 }
 
-const getTowerHit = (event: PointerEvent) => {
-  if (towers.length === 0) return null
+const getStructureHit = (event: PointerEvent): DestructibleCollider | null => {
+  const meshes = Array.from(structureStore.structureMeshToCollider.keys())
+  if (meshes.length === 0) return null
   updatePointer(event)
   raycaster.setFromCamera(pointer, camera)
-  const hits = raycaster.intersectObjects(towers.map(tower => tower.mesh), false)
+  const hits = raycaster.intersectObjects(meshes, false)
   if (hits.length === 0) return null
-  const hitMesh = hits[0]!.object
-  return towers.find(tower => tower.mesh === hitMesh) ?? null
+  const mesh = hits[0]!.object as THREE.Mesh
+  return structureStore.structureMeshToCollider.get(mesh) ?? null
 }
-
-const withinBounds = (pos: THREE.Vector3) =>
-  pos.x > -WORLD_BOUNDS && pos.x < WORLD_BOUNDS && pos.z > -WORLD_BOUNDS && pos.z < WORLD_BOUNDS
 
 const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingStructures = false) => {
-  if (!withinBounds(center)) return false
-  if (center.length() < CASTLE_RADIUS + 2) return false
-  for (const collider of staticColliders) {
-    if (collider.type === 'castle') continue // Castle has no collision
-    if (aabbOverlap(center, halfSize, collider.center, collider.halfSize, allowTouchingStructures)) {
-      return false
-    }
-  }
-  return true
+  return canPlaceAt(center, halfSize, staticColliders, allowTouchingStructures)
 }
 
 const placeBuilding = (center: THREE.Vector3) => {
-  const isTower = buildMode === 'tower'
-  const size = isTower ? new THREE.Vector3(1, TOWER_HEIGHT, 1) : new THREE.Vector3(1, 1, 1)
-  const half = size.clone().multiplyScalar(0.5)
-  const snapped = new THREE.Vector3(snapToGrid(center.x), half.y, snapToGrid(center.z))
-  if (!canPlace(snapped, half, true)) return false
-  if (isTower ? towerCharges < 1 : wallCharges < 1) return false
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size.x, size.y, size.z),
-    new THREE.MeshStandardMaterial({ color: isTower ? 0x5aa4ff : 0x7a8a99 })
-  )
-  mesh.position.copy(snapped)
-  scene.add(mesh)
-  let addedCollider: DestructibleCollider
-  if (isTower) {
-    const rangeRing = new THREE.Mesh(
-      new THREE.RingGeometry(TOWER_RANGE - 0.12, TOWER_RANGE, 32),
-      towerRangeMaterial
-    )
-    rangeRing.rotation.x = -Math.PI / 2
-    rangeRing.position.set(snapped.x, 0.02, snapped.z)
-    rangeRing.visible = false
-    scene.add(rangeRing)
-
-    const towerLaser = new THREE.Mesh(towerLaserGeometry, towerLaserMaterial)
-    towerLaser.visible = false
-    towerLaser.rotation.order = 'YXZ'
-    scene.add(towerLaser)
-
-    const tower: Tower = {
-      mesh,
-      range: TOWER_RANGE,
-      shootCooldown: 0,
-      laserVisibleTime: 0,
-      laser: towerLaser,
-      rangeRing
-    }
-    towers.push(tower)
-    addedCollider = addTowerCollider(snapped, half, mesh, tower)
-    towerCharges -= 1
-  } else {
-    addedCollider = addWallCollider(snapped, half, mesh)
-    wallCharges -= 1
-  }
-  // Update pathfinding only for changed obstacle cells.
-  applyObstacleDelta([addedCollider])
-  return true
-}
-
-const getCardinalWallLine = (start: THREE.Vector3, end: THREE.Vector3): THREE.Vector3[] => {
-  // Snap both start and end to grid
-  const startSnapped = new THREE.Vector3(snapToGrid(start.x), 0, snapToGrid(start.z))
-  const endSnapped = new THREE.Vector3(snapToGrid(end.x), 0, snapToGrid(end.z))
-  
-  // Convert to grid coordinates (integers)
-  const x0 = Math.round(startSnapped.x / GRID_SIZE)
-  const z0 = Math.round(startSnapped.z / GRID_SIZE)
-  const x1 = Math.round(endSnapped.x / GRID_SIZE)
-  const z1 = Math.round(endSnapped.z / GRID_SIZE)
-  
-  // Calculate differences
-  const dx = x1 - x0
-  const dz = z1 - z0
-  
-  // Determine cardinal direction (only allow pure horizontal or vertical)
-  const isHorizontal = Math.abs(dx) > Math.abs(dz)
-  const isVertical = Math.abs(dz) > Math.abs(dx)
-  
-  // If not clearly cardinal, use the dominant direction
-  let dirX = 0
-  let dirZ = 0
-  if (isHorizontal) {
-    dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0
-  } else if (isVertical) {
-    dirZ = dz > 0 ? 1 : dz < 0 ? -1 : 0
-  } else {
-    // If equal, prefer horizontal
-    dirX = dx > 0 ? 1 : dx < 0 ? -1 : 0
-  }
-  
-  // Calculate number of steps
-  const steps = isHorizontal ? Math.abs(dx) : Math.abs(dz)
-  
-  const positions: THREE.Vector3[] = []
-  for (let i = 0; i <= steps; i += 1) {
-    const x = x0 + dirX * i
-    const z = z0 + dirZ * i
-    positions.push(new THREE.Vector3(x * GRID_SIZE, 0, z * GRID_SIZE))
-  }
-  
-  return positions
+  const result = placeBuildingAt(center, buildMode, towerCharges, wallCharges, {
+    staticColliders,
+    structureStore,
+    scene,
+    createTowerAt: (snapped) => createTowerAt(snapped, 'base'),
+    applyObstacleDelta
+  })
+  wallCharges -= result.wallSpent
+  towerCharges -= result.towerSpent
+  return result.placed
 }
 
 const WALL_LINE_SIZE = new THREE.Vector3(1, 1, 1)
 const WALL_LINE_HALF = WALL_LINE_SIZE.clone().multiplyScalar(0.5)
 
 const getWallLinePlacement = (start: THREE.Vector3, end: THREE.Vector3, availableWallCharges: number) => {
-  const positions = getCardinalWallLine(start, end)
-  const validPositions: THREE.Vector3[] = []
-  const seenKeys = new Set<string>()
-  let blockedPosition: THREE.Vector3 | null = null
-
-  for (const pos of positions) {
-    if (validPositions.length >= availableWallCharges) break
-
-    const snapped = new THREE.Vector3(snapToGrid(pos.x), WALL_LINE_HALF.y, snapToGrid(pos.z))
-    const key = `${snapped.x},${snapped.z}`
-
-    if (seenKeys.has(key)) continue
-    seenKeys.add(key)
-
-    // Wall lines allow touching adjacent walls, but not overlapping.
-    if (canPlace(snapped, WALL_LINE_HALF, true)) {
-      validPositions.push(snapped)
-    } else {
-      blockedPosition = snapped
-      break
-    }
-  }
-
-  return { validPositions, blockedPosition }
+  return computeWallLinePlacement(start, end, availableWallCharges, staticColliders)
 }
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
-  const availableWallCharges = Math.floor(wallCharges)
-  if (availableWallCharges <= 0) return false
-
-  const { validPositions } = getWallLinePlacement(start, end, availableWallCharges)
-
-  // Now place all valid positions
-  let placed = 0
-  for (const pos of validPositions) {
-    if (placed >= availableWallCharges) break
-
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(WALL_LINE_SIZE.x, WALL_LINE_SIZE.y, WALL_LINE_SIZE.z),
-      new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
-    )
-    mesh.position.copy(pos)
-    scene.add(mesh)
-    addWallCollider(pos, WALL_LINE_HALF, mesh)
-    placed += 1
-  }
-  if (placed > 0) {
-    wallCharges -= placed
-  }
-  
-  if (placed > 0) {
-    const added = staticColliders.slice(staticColliders.length - placed)
-    applyObstacleDelta(added)
-  }
-  
+  const placed = placeWallSegment(start, end, wallCharges, {
+    scene,
+    structureStore,
+    staticColliders,
+    applyObstacleDelta
+  })
+  wallCharges -= placed
   return placed > 0
-}
-
-const aabbOverlap = (aCenter: THREE.Vector3, aHalf: THREE.Vector3, bCenter: THREE.Vector3, bHalf: THREE.Vector3, allowTouching = false) => {
-  const dx = Math.abs(aCenter.x - bCenter.x)
-  const dz = Math.abs(aCenter.z - bCenter.z)
-  const overlapX = allowTouching ? dx < aHalf.x + bHalf.x : dx <= aHalf.x + bHalf.x
-  const overlapZ = allowTouching ? dz < aHalf.z + bHalf.z : dz <= aHalf.z + bHalf.z
-  return overlapX && overlapZ
 }
 
 const addMapTower = (center: THREE.Vector3) => {
   const size = new THREE.Vector3(1, TOWER_HEIGHT, 1)
   const half = size.clone().multiplyScalar(0.5)
-  const snapped = new THREE.Vector3(snapToGrid(center.x), half.y, snapToGrid(center.z))
-  if (!withinBounds(snapped)) return
-  if (snapped.length() < CASTLE_RADIUS + 2) return
-  for (const collider of staticColliders) {
-    if (collider.type === 'castle') continue
-    if (aabbOverlap(snapped, half, collider.center, collider.halfSize)) return
-  }
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size.x, size.y, size.z),
-    new THREE.MeshStandardMaterial({ color: 0x5aa4ff })
-  )
-  mesh.position.copy(snapped)
-  scene.add(mesh)
-
-  const rangeRing = new THREE.Mesh(
-    new THREE.RingGeometry(TOWER_RANGE - 0.12, TOWER_RANGE, 32),
-    towerRangeMaterial
-  )
-  rangeRing.rotation.x = -Math.PI / 2
-  rangeRing.position.set(snapped.x, 0.02, snapped.z)
-  rangeRing.visible = false
-  scene.add(rangeRing)
-
-  const towerLaser = new THREE.Mesh(towerLaserGeometry, towerLaserMaterial)
-  towerLaser.visible = false
-  towerLaser.rotation.order = 'YXZ'
-  scene.add(towerLaser)
-
-  const tower: Tower = {
-    mesh,
-    range: TOWER_RANGE,
-    shootCooldown: 0,
-    laserVisibleTime: 0,
-    laser: towerLaser,
-    rangeRing
-  }
-  towers.push(tower)
-  addTowerCollider(snapped, half, mesh, tower)
+  const snapped = new THREE.Vector3(snapGridValue(center.x), half.y, snapGridValue(center.z))
+  if (!canPlaceAt(snapped, half, staticColliders)) return
+  const tower = createTowerAt(snapped, 'base')
+  const mesh = tower.mesh
+  structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP)
 }
 
 const prebuiltTowers = [
@@ -1228,6 +913,7 @@ const resetGame = () => {
   finalCountdownEl.textContent = ''
   setBuildMode('off')
   selectedTower = null
+  selectedStructures.clear()
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
@@ -1238,17 +924,19 @@ const resetGame = () => {
   mobs.length = 0
 
   for (const tower of towers) {
+    upgradeManager.cancelForTower(tower)
     scene.remove(tower.mesh)
     scene.remove(tower.rangeRing)
     scene.remove(tower.laser)
   }
   towers.length = 0
 
-  for (const wall of wallMeshes) {
+  for (const wall of structureStore.wallMeshes) {
     scene.remove(wall)
   }
-  wallMeshes.length = 0
-  structureStates.clear()
+  structureStore.wallMeshes.length = 0
+  structureStore.structureStates.clear()
+  structureStore.structureMeshToCollider.clear()
 
   staticColliders.length = 0
   staticColliders.push(castleCollider)
@@ -1260,145 +948,36 @@ const resetGame = () => {
   waypointCache.clear()
 }
 
-const resolveCircleAabb = (pos: THREE.Vector3, radius: number, collider: StaticCollider) => {
-  const minX = collider.center.x - collider.halfSize.x
-  const maxX = collider.center.x + collider.halfSize.x
-  const minZ = collider.center.z - collider.halfSize.z
-  const maxZ = collider.center.z + collider.halfSize.z
-  const closestX = clamp(pos.x, minX, maxX)
-  const closestZ = clamp(pos.z, minZ, maxZ)
-  const dx = pos.x - closestX
-  const dz = pos.z - closestZ
-  const distSq = dx * dx + dz * dz
-  if (distSq < radius * radius) {
-    const dist = Math.sqrt(distSq)
-    if (dist > 0.0001) {
-      const push = radius - dist
-      pos.x += (dx / dist) * push
-      pos.z += (dz / dist) * push
-    } else {
-      const left = Math.abs(pos.x - minX)
-      const right = Math.abs(maxX - pos.x)
-      const top = Math.abs(pos.z - minZ)
-      const bottom = Math.abs(maxZ - pos.z)
-      const smallest = Math.min(left, right, top, bottom)
-      if (smallest === left) pos.x = minX - radius
-      else if (smallest === right) pos.x = maxX + radius
-      else if (smallest === top) pos.z = minZ - radius
-      else pos.z = maxZ + radius
-    }
-  }
-}
-
-const resolveCircleCircle = (a: Entity, b: Entity) => {
-  const dx = a.mesh.position.x - b.mesh.position.x
-  const dz = a.mesh.position.z - b.mesh.position.z
-  const distSq = dx * dx + dz * dz
-  const minDist = a.radius + b.radius
-  if (distSq < minDist * minDist && distSq > 0.00001) {
-    const dist = Math.sqrt(distSq)
-    const overlap = minDist - dist
-    const nx = dx / dist
-    const nz = dz / dist
-    a.mesh.position.x += nx * (overlap * 0.5)
-    a.mesh.position.z += nz * (overlap * 0.5)
-    b.mesh.position.x -= nx * (overlap * 0.5)
-    b.mesh.position.z -= nz * (overlap * 0.5)
-  }
-}
-
 const setMoveTarget = (pos: THREE.Vector3) => {
   const clamped = new THREE.Vector3(clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS), 0, clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS))
   player.target.copy(clamped)
 }
 
-const getDestructibleColliders = (): DestructibleCollider[] =>
-  staticColliders.filter((collider): collider is DestructibleCollider => collider.type === 'wall' || collider.type === 'tower')
-
-const distanceToColliderSurface = (pos: THREE.Vector3, radius: number, collider: StaticCollider): number => {
-  const minX = collider.center.x - collider.halfSize.x
-  const maxX = collider.center.x + collider.halfSize.x
-  const minZ = collider.center.z - collider.halfSize.z
-  const maxZ = collider.center.z + collider.halfSize.z
-  const closestX = clamp(pos.x, minX, maxX)
-  const closestZ = clamp(pos.z, minZ, maxZ)
-  const dx = pos.x - closestX
-  const dz = pos.z - closestZ
-  return Math.sqrt(dx * dx + dz * dz) - radius
-}
-
-const pickSiegeTarget = (mob: Entity): DestructibleCollider | null => {
-  const options = getDestructibleColliders()
-  if (options.length === 0) return null
-
-  const towardWall = flowField.getDirectionTowardNearestWall(mob.mesh.position)
-  let best: DestructibleCollider | null = null
-  let bestScore = Number.POSITIVE_INFINITY
-
-  for (const collider of options) {
-    const toTarget = new THREE.Vector3().subVectors(collider.center, mob.mesh.position)
-    const planarDist = Math.hypot(toTarget.x, toTarget.z)
-    const dirToTarget = planarDist > 0.0001 ? toTarget.multiplyScalar(1 / planarDist) : null
-    const alignment = towardWall && dirToTarget ? Math.max(0, towardWall.dot(dirToTarget)) : 0
-    // Prefer closer blockers, with a bias toward the wall-distance gradient direction.
-    const score = planarDist - alignment * 3
-    if (score < bestScore) {
-      bestScore = score
-      best = collider
-    }
-  }
-  return best
-}
-
-const updateMobSiegeState = (mob: Entity, delta: number) => {
-  mob.siegeAttackCooldown = Math.max((mob.siegeAttackCooldown ?? 0) - delta, 0)
-  const reachable = flowField.isReachable(mob.mesh.position)
-  if (reachable) {
-    mob.unreachableTime = 0
-    mob.siegeMode = false
-    mob.siegeTarget = null
-    return
-  }
-
-  mob.unreachableTime = (mob.unreachableTime ?? 0) + delta
-  if (!mob.siegeMode && (mob.unreachableTime ?? 0) >= MOB_SIEGE_UNREACHABLE_GRACE) {
-    mob.siegeTarget = pickSiegeTarget(mob)
-    mob.siegeMode = mob.siegeTarget !== null
-  }
-}
-
-const getMobSiegeDirection = (mob: Entity): THREE.Vector3 | null => {
-  if (!mob.siegeMode) return null
-
-  if (!mob.siegeTarget || !structureStates.has(mob.siegeTarget)) {
-    mob.siegeTarget = pickSiegeTarget(mob)
-    if (!mob.siegeTarget) {
-      mob.siegeMode = false
-      return null
-    }
-  }
-
-  const target = mob.siegeTarget
-  const attackRange = MOB_SIEGE_RANGE_BUFFER
-  const distanceToSurface = distanceToColliderSurface(mob.mesh.position, mob.radius, target)
-  if (distanceToSurface <= attackRange) {
-    if ((mob.siegeAttackCooldown ?? 0) <= 0) {
-      damageStructure(target, MOB_SIEGE_DAMAGE)
-      mob.siegeAttackCooldown = MOB_SIEGE_ATTACK_COOLDOWN
-    }
-    return new THREE.Vector3(0, 0, 0)
-  }
-
-  const dir = new THREE.Vector3(target.center.x - mob.mesh.position.x, 0, target.center.z - mob.mesh.position.z)
-  if (dir.length() <= 0.1) return new THREE.Vector3(0, 0, 0)
-  return dir.normalize()
-}
+const motionSystem = createEntityMotionSystem({
+  flowField,
+  structureStore,
+  staticColliders,
+  spatialGrid,
+  npcs,
+  castleGoal,
+  constants: {
+    mobSiegeAttackCooldown: MOB_SIEGE_ATTACK_COOLDOWN,
+    mobSiegeDamage: MOB_SIEGE_DAMAGE,
+    mobSiegeRangeBuffer: MOB_SIEGE_RANGE_BUFFER,
+    mobSiegeUnreachableGrace: MOB_SIEGE_UNREACHABLE_GRACE,
+    worldBounds: WORLD_BOUNDS,
+    gridSize: GRID_SIZE
+  },
+  spawnCubeEffects
+})
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
-  if ((event.target as HTMLElement).closest('#hud')) return
-  const point = getGroundPoint(event)
-  if (!point) return
+  if ((event.target as HTMLElement).closest('#hud, .selection-dialog')) return
+  activePointerId = event.pointerId
+  renderer.domElement.setPointerCapture(event.pointerId)
   if (buildMode !== 'off') {
+    const point = getGroundPoint(event)
+    if (!point) return
     if (buildMode === 'wall') {
       isDraggingWall = true
       wallDragStart = point.clone()
@@ -1411,12 +990,14 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     }
     return
   }
-  const towerHit = getTowerHit(event)
-  if (towerHit) {
-    selectedTower = towerHit
+  const structureHit = getStructureHit(event)
+  if (structureHit) {
+    setSelectedStructures([structureHit])
     return
   }
-  selectedTower = null
+  const point = getGroundPoint(event)
+  if (!point) return
+  clearSelection()
   setMoveTarget(point)
 })
 
@@ -1456,7 +1037,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     const isTower = buildMode === 'tower'
     const size = isTower ? new THREE.Vector3(1, 2, 1) : new THREE.Vector3(1, 1, 1)
     const half = size.clone().multiplyScalar(0.5)
-    const snapped = new THREE.Vector3(snapToGrid(point.x), half.y, snapToGrid(point.z))
+    const snapped = new THREE.Vector3(snapGridValue(point.x), half.y, snapGridValue(point.z))
     const chargesAvailable = isTower ? towerCharges : wallCharges
     const ok = canPlace(snapped, half, true) && chargesAvailable > 0
     buildPreview.scale.set(size.x, size.y, size.z)
@@ -1466,7 +1047,11 @@ renderer.domElement.addEventListener('pointermove', (event) => {
   }
 })
 
-window.addEventListener('pointerup', () => {
+window.addEventListener('pointerup', (event) => {
+  if (activePointerId !== null && event.pointerId === activePointerId) {
+    renderer.domElement.releasePointerCapture(activePointerId)
+    activePointerId = null
+  }
   isShooting = false
   if (buildMode === 'wall' && isDraggingWall && wallDragStart && wallDragEnd) {
     placeWallLine(wallDragStart, wallDragEnd)
@@ -1485,172 +1070,11 @@ window.addEventListener('resize', () => {
 })
 
 const updateEntityMotion = (entity: Entity, delta: number) => {
-  let dir = new THREE.Vector3()
-  
-  if (entity.kind === 'mob' && entity.waypoints && entity.waypointIndex !== undefined) {
-    updateMobSiegeState(entity, delta)
-
-    if (entity.siegeMode) {
-      const siegeDir = getMobSiegeDirection(entity)
-      if (siegeDir) {
-        dir.copy(siegeDir)
-      } else {
-        dir = flowField.getDirection(entity.mesh.position)
-      }
-    } else {
-    // Use waypoint-based navigation
-    const waypoints = entity.waypoints
-    let waypointIdx = entity.waypointIndex
-    
-    // Advance to next waypoint if close enough
-    if (waypointIdx < waypoints.length) {
-      const targetWaypoint = waypoints[waypointIdx]
-      const distToWaypoint = entity.mesh.position.distanceTo(targetWaypoint)
-      
-      if (distToWaypoint < entity.radius + 0.5) {
-        waypointIdx++
-        entity.waypointIndex = waypointIdx
-      }
-      
-      // If we have a valid waypoint, move toward it
-      if (waypointIdx < waypoints.length) {
-        dir = new THREE.Vector3(
-          waypoints[waypointIdx].x - entity.mesh.position.x,
-          0,
-          waypoints[waypointIdx].z - entity.mesh.position.z
-        )
-        if (dir.length() > 0.1) {
-          dir.normalize()
-        }
-      } else {
-        // Reached end of waypoints, use direct-to-goal
-        dir = new THREE.Vector3(-entity.mesh.position.x, 0, -entity.mesh.position.z)
-        if (dir.length() > 0.1) {
-          dir.normalize()
-        }
-      }
-    } else {
-      // Fallback: use flow field if waypoints exhausted or invalid
-      dir = flowField.getDirection(entity.mesh.position)
-    }
-    
-    // Add dynamic avoidance for nearby entities
-    const avoidanceRadius = entity.radius * 2 + 0.5
-    const nearby = spatialGrid.getNearby(entity.mesh.position, avoidanceRadius)
-    
-    const avoidance = new THREE.Vector3()
-    for (const other of nearby) {
-      if (other === entity) continue
-      const dx = entity.mesh.position.x - other.mesh.position.x
-      const dz = entity.mesh.position.z - other.mesh.position.z
-      const distSq = dx * dx + dz * dz
-      if (distSq < 0.001) continue
-      
-      const dist = Math.sqrt(distSq)
-      const minDist = entity.radius + other.radius + 0.3
-      if (dist < minDist) {
-        const strength = (minDist - dist) / minDist
-        avoidance.x += (dx / dist) * strength
-        avoidance.z += (dz / dist) * strength
-      }
-    }
-    
-    // Blend waypoint direction with avoidance (avoidance is secondary)
-    if (avoidance.length() > 0.001) {
-      avoidance.normalize().multiplyScalar(0.3) // 30% avoidance influence
-      dir.add(avoidance).normalize()
-    }
-    
-    // Check if mob is significantly off track (e.g., pushed by collision)
-    // If so, recalculate waypoints from current position
-    if (waypointIdx < waypoints.length && waypointIdx > 0) {
-      const expectedPos = waypoints[waypointIdx - 1]
-      const distOffTrack = entity.mesh.position.distanceTo(expectedPos)
-      if (distOffTrack > GRID_SIZE * 3) {
-        // Too far off track, recalculate waypoints
-        entity.waypoints = flowField.computeWaypoints(entity.mesh.position, castleGoal)
-        entity.waypointIndex = 0
-      }
-    }
-    }
-  } else if (entity.kind === 'mob') {
-    updateMobSiegeState(entity, delta)
-
-    if (entity.siegeMode) {
-      const siegeDir = getMobSiegeDirection(entity)
-      if (siegeDir) dir.copy(siegeDir)
-    }
-
-    if (!entity.siegeMode) {
-    // Fallback: use flow field directly if no waypoints
-    dir = flowField.getDirection(entity.mesh.position)
-    
-    // Add dynamic avoidance
-    const avoidanceRadius = entity.radius * 2 + 0.5
-    const nearby = spatialGrid.getNearby(entity.mesh.position, avoidanceRadius)
-    
-    const avoidance = new THREE.Vector3()
-    for (const other of nearby) {
-      if (other === entity) continue
-      const dx = entity.mesh.position.x - other.mesh.position.x
-      const dz = entity.mesh.position.z - other.mesh.position.z
-      const distSq = dx * dx + dz * dz
-      if (distSq < 0.001) continue
-      
-      const dist = Math.sqrt(distSq)
-      const minDist = entity.radius + other.radius + 0.3
-      if (dist < minDist) {
-        const strength = (minDist - dist) / minDist
-        avoidance.x += (dx / dist) * strength
-        avoidance.z += (dz / dist) * strength
-      }
-    }
-    
-    if (avoidance.length() > 0.001) {
-      avoidance.normalize().multiplyScalar(0.3)
-      dir.add(avoidance).normalize()
-    }
-    }
-  } else {
-    // Non-mobs use direct target following
-    dir = new THREE.Vector3(entity.target.x - entity.mesh.position.x, 0, entity.target.z - entity.mesh.position.z)
-    if (dir.length() > 0.1) {
-      dir.normalize()
-    } else {
-      dir.set(0, 0, 0)
-    }
-  }
-  
-  if (dir.length() > 0.1) {
-    entity.velocity.copy(dir).multiplyScalar(entity.speed)
-  } else {
-    entity.velocity.set(0, 0, 0)
-  }
-  
-  entity.mesh.position.x += entity.velocity.x * delta
-  entity.mesh.position.z += entity.velocity.z * delta
-  
-  // Final collision resolution with static colliders
-  for (const collider of staticColliders) {
-    if (collider.type === 'castle') continue // Castle has no collision
-    resolveCircleAabb(entity.mesh.position, entity.radius, collider)
-  }
-  
-  entity.mesh.position.x = clamp(entity.mesh.position.x, -WORLD_BOUNDS, WORLD_BOUNDS)
-  entity.mesh.position.z = clamp(entity.mesh.position.z, -WORLD_BOUNDS, WORLD_BOUNDS)
-  entity.mesh.position.y = entity.baseY
+  motionSystem.updateEntityMotion(entity, delta)
 }
 
 const updateNpcTargets = () => {
-  for (const npc of npcs) {
-    if (npc.mesh.position.distanceTo(npc.target) < 0.5) {
-      npc.target.set(
-        (Math.random() - 0.5) * WORLD_BOUNDS * 1.2,
-        0,
-        (Math.random() - 0.5) * WORLD_BOUNDS * 1.2
-      )
-    }
-  }
+  motionSystem.updateNpcTargets()
 }
 
 const triggerEventBanner = (text: string) => {
@@ -1682,7 +1106,10 @@ const spawnWave = () => {
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
   let best: Entity | null = null
   let bestDistToBase = Number.POSITIVE_INFINITY
-  for (const mob of mobs) {
+  const candidates = spatialGrid.getNearby(center, radius)
+  for (const mob of candidates) {
+    if (mob.kind !== 'mob') continue
+    if ((mob.hp ?? 0) <= 0) continue
     const distToCenter = mob.mesh.position.distanceTo(center)
     if (distToCenter > radius) continue
     const distToBase = mob.mesh.position.length()
@@ -1696,11 +1123,12 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 
 const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
 
-let lastTime = performance.now()
-const tick = () => {
-  const now = performance.now()
-  const delta = Math.min((now - lastTime) / 1000, 0.05)
-  lastTime = now
+const tick = (now: number, delta: number) => {
+
+  for (const completed of upgradeManager.collectCompleted(now)) {
+    applyTowerType(completed.tower, completed.toTypeId)
+    triggerEventBanner(`${getTowerType(completed.toTypeId).label} online`)
+  }
 
   wallCharges = Math.min(WALL_CHARGE_MAX, wallCharges + WALL_RECHARGE_RATE * delta)
   towerCharges = Math.min(TOWER_CHARGE_MAX, towerCharges + TOWER_RECHARGE_RATE * delta)
@@ -1709,6 +1137,20 @@ const tick = () => {
   }
   if (buildMode === 'tower' && towerCharges < 1) {
     setBuildMode('off')
+  }
+
+  if (pendingWaypointRefresh) {
+    const stop = Math.min(mobs.length, pendingWaypointRefreshIndex + WAYPOINT_REFRESH_BATCH_SIZE)
+    for (let i = pendingWaypointRefreshIndex; i < stop; i += 1) {
+      const mob = mobs[i]!
+      mob.waypoints = flowField.computeWaypoints(mob.mesh.position, castleGoal)
+      mob.waypointIndex = 0
+    }
+    pendingWaypointRefreshIndex = stop
+    if (pendingWaypointRefreshIndex >= mobs.length) {
+      pendingWaypointRefresh = false
+      pendingWaypointRefreshIndex = 0
+    }
   }
 
   updateNpcTargets()
@@ -1721,7 +1163,13 @@ const tick = () => {
     mob.target.set(0, 0, 0)
     updateEntityMotion(mob, delta)
   }
-  
+
+  spatialGrid.clear()
+  const dynamicEntities = [player, ...npcs, ...mobs]
+  for (const entity of dynamicEntities) {
+    spatialGrid.insert(entity)
+  }
+
   updateParticles(delta)
 
   for (const tower of towers) {
@@ -1741,20 +1189,13 @@ const tick = () => {
       tower.laser.rotateX(Math.PI / 2)
 
       if (tower.shootCooldown <= 0) {
-        target.hp = (target.hp ?? 1) - SHOOT_DAMAGE
-        tower.shootCooldown = TOWER_SHOOT_COOLDOWN
+        target.hp = (target.hp ?? 1) - tower.damage
+        tower.shootCooldown = tower.shootCadence
         tower.laserVisibleTime = 0.07
       }
     }
 
     tower.laser.visible = tower.laserVisibleTime > 0 && target !== null
-  }
-
-  // Use spatial grid for efficient dynamic collision resolution
-  spatialGrid.clear()
-  const dynamicEntities = [player, ...npcs, ...mobs]
-  for (const entity of dynamicEntities) {
-    spatialGrid.insert(entity)
   }
 
   // Only check collisions between entities in nearby cells
@@ -1832,11 +1273,13 @@ const tick = () => {
   
   // Update shoot button state
   shootButton.disabled = selected === null
+  updateSelectionDialog(now)
 
   ring.position.set(player.mesh.position.x, 0.02, player.mesh.position.z)
   for (const tower of towers) {
     tower.rangeRing.position.set(tower.mesh.position.x, 0.02, tower.mesh.position.z)
-    tower.rangeRing.visible = selectedTower === tower
+    const collider = structureStore.structureMeshToCollider.get(tower.mesh)
+    tower.rangeRing.visible = selectedTower === tower || (collider !== undefined && selectedStructures.has(collider))
   }
 
   const arrowDir = new THREE.Vector3(
@@ -1969,7 +1412,7 @@ const tick = () => {
   buildTowerBtn.classList.toggle('unlocked', towerCooldownPercent <= 0.01)
 
   renderer.render(scene, camera)
-  requestAnimationFrame(tick)
 }
 
-tick()
+const gameLoop = createGameLoop(tick)
+gameLoop.start()
