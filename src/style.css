@@ -45,16 +45,28 @@ canvas {
   background: rgba(17, 23, 30, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  padding: 10px;
+  padding: 12px;
   display: grid;
-  gap: 6px;
+  gap: 10px;
   z-index: 2200;
   pointer-events: auto;
 }
 
 .selection-dialog__title {
-  font-weight: 700;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
   padding: 2px 2px 4px;
+}
+
+.selection-dialog__title-main {
+  font-weight: 800;
+}
+
+.selection-dialog__coords {
+  font-weight: 500;
+  opacity: 0.4;
 }
 
 .selection-dialog__meta,
@@ -70,7 +82,7 @@ canvas {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   opacity: 0.66;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .selection-dialog__group {
@@ -80,15 +92,6 @@ canvas {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
-}
-
-.selection-dialog__group--summary {
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.selection-dialog__summary-line {
-  opacity: 0.78;
 }
 
 .selection-dialog__group--stats {
@@ -106,6 +109,34 @@ canvas {
   background: rgba(255, 255, 255, 0.015);
 }
 
+.selection-dialog__summary-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 8px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.selection-dialog__summary-item {
+  display: grid;
+  gap: 1px;
+}
+
+.selection-dialog__summary-value {
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.1;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.selection-dialog__summary-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.58;
+}
+
 .selection-dialog__stats {
   display: grid;
   gap: 6px;
@@ -115,38 +146,78 @@ canvas {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-top: 2px;
 }
 
 .selection-dialog__stat-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 0.9rem;
+  gap: 10px;
   padding: 2px 0;
 }
 
-.selection-dialog__group--stats .selection-dialog__stat-row span {
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.96);
+.selection-dialog__stat-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.selection-dialog__stat-controls {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.selection-dialog__stat-value-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.98);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
 }
 
 .selection-dialog__stat-upgrade {
-  min-width: 56px;
-  height: 28px;
-  padding: 0 8px;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(54, 66, 84, 0.9);
+  border: 1px solid rgba(113, 231, 150, 0.55);
+  background: linear-gradient(135deg, rgba(49, 173, 96, 0.95), rgba(33, 138, 76, 0.95));
   color: #fff;
-  font-size: 0.75rem;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1;
-  white-space: nowrap;
+  text-align: center;
+  cursor: pointer;
+}
+
+.selection-dialog__stat-upgrade:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 .selection-dialog__stat-upgrade:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(60, 74, 90, 0.6);
+  cursor: not-allowed;
 }
 
 .selection-dialog__action {
@@ -157,6 +228,7 @@ canvas {
   background: rgba(54, 66, 84, 0.8);
   color: #fff;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .selection-dialog__danger {
@@ -165,6 +237,7 @@ canvas {
 
 .selection-dialog__action:disabled {
   opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .hud {

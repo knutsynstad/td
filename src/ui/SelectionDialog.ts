@@ -5,6 +5,7 @@ type SelectionDialogState = {
   selectedCount: number
   inRangeCount: number
   selectedTowerTypeId: TowerTypeId | null
+  buildingCoords: { x: number, z: number } | null
   buildingHealth: {
     hp: number
     maxHp: number
@@ -58,6 +59,7 @@ export class SelectionDialog {
       selectedCount,
       inRangeCount,
       selectedTowerTypeId,
+      buildingCoords,
       buildingHealth,
       upgradeOptions,
       towerDetails,
@@ -73,51 +75,70 @@ export class SelectionDialog {
     }
     this.root.style.display = ''
     const typeLabel = selectedTowerTypeId ? getTowerType(selectedTowerTypeId).label : 'Wall'
+    const titleMarkup = buildingCoords
+      ? `<span class="selection-dialog__title-main">${typeLabel}</span> <span class="selection-dialog__coords">${buildingCoords.x},${buildingCoords.z}</span>`
+      : `<span class="selection-dialog__title-main">${typeLabel}</span>`
     const upgradesById = new Map(upgradeOptions.map(option => [option.id, option]))
     const upgradesDisabled = Boolean(upgradeBlockedReason) || inRangeCount === 0
-    const healthText = buildingHealth
-      ? `Health ${Math.max(0, Math.ceil(buildingHealth.hp))}/${buildingHealth.maxHp}`
-      : ''
-    const dpsText = towerDetails ? `DPS ${towerDetails.dps.toFixed(1)}` : ''
-    const summaryRows: string[] = []
-    if (healthText) summaryRows.push(healthText)
-    if (dpsText) summaryRows.push(dpsText)
-    if (towerDetails) summaryRows.push(`Kills ${towerDetails.killCount}`)
-    const summaryMarkup = summaryRows.length
-      ? `<div class="selection-dialog__group selection-dialog__group--summary">
-          ${summaryRows.map(row => `<div class="selection-dialog__meta selection-dialog__summary-line">${row}</div>`).join('')}
+    const summaryItems: Array<{ label: string, value: string }> = []
+    if (buildingHealth) {
+      summaryItems.push({
+        label: 'Health',
+        value: `${Math.max(0, Math.ceil(buildingHealth.hp))}/${buildingHealth.maxHp}`
+      })
+    }
+    if (towerDetails) {
+      summaryItems.push({ label: 'DPS', value: towerDetails.dps.toFixed(1) })
+      summaryItems.push({ label: 'Kills', value: String(towerDetails.killCount) })
+    }
+    const summaryMarkup = summaryItems.length
+      ? `<div class="selection-dialog__summary-row">
+          ${summaryItems.map(item => `
+            <div class="selection-dialog__summary-item">
+              <div class="selection-dialog__summary-value">${item.value}</div>
+              <div class="selection-dialog__summary-label">${item.label}</div>
+            </div>
+          `).join('')}
         </div>`
       : ''
     const statsMarkup = towerDetails
       ? `<div class="selection-dialog__group selection-dialog__group--stats">
-          <div class="selection-dialog__section-title">Stats</div>
           <div class="selection-dialog__stats">
             <div class="selection-dialog__stat-row">
-              <span>Range ${towerDetails.range.toFixed(1)}</span>
-              ${(() => {
-                const upgrade = upgradesById.get('range')
-                const disabled = upgradesDisabled || !upgrade
-                const text = upgrade?.deltaText ?? 'Max'
-                return `<button class="selection-dialog__stat-upgrade" data-upgrade="range" ${disabled ? 'disabled' : ''}>${text}</button>`
-              })()}
+              <span class="selection-dialog__stat-label">Range</span>
+              <span class="selection-dialog__stat-controls">
+                <span class="selection-dialog__stat-value-box">${towerDetails.range.toFixed(1)}</span>
+                ${(() => {
+                  const upgrade = upgradesById.get('range')
+                  const disabled = upgradesDisabled || !upgrade
+                  const text = '+'
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="range" ${disabled ? 'disabled' : ''}>${text}</button>`
+                })()}
+              </span>
             </div>
             <div class="selection-dialog__stat-row">
-              <span>Damage ${towerDetails.damage}</span>
-              ${(() => {
-                const upgrade = upgradesById.get('damage')
-                const disabled = upgradesDisabled || !upgrade
-                const text = upgrade?.deltaText ?? 'Max'
-                return `<button class="selection-dialog__stat-upgrade" data-upgrade="damage" ${disabled ? 'disabled' : ''}>${text}</button>`
-              })()}
+              <span class="selection-dialog__stat-label">Damage</span>
+              <span class="selection-dialog__stat-controls">
+                <span class="selection-dialog__stat-value-box">${towerDetails.damage}</span>
+                ${(() => {
+                  const upgrade = upgradesById.get('damage')
+                  const disabled = upgradesDisabled || !upgrade
+                  const text = '+'
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="damage" ${disabled ? 'disabled' : ''}>${text}</button>`
+                })()}
+              </span>
             </div>
             <div class="selection-dialog__stat-row">
-              <span>Speed ${towerDetails.speed.toFixed(2)}/s</span>
-              ${(() => {
-                const upgrade = upgradesById.get('speed')
-                const disabled = upgradesDisabled || !upgrade
-                const text = upgrade?.deltaText ?? 'Max'
-                return `<button class="selection-dialog__stat-upgrade" data-upgrade="speed" ${disabled ? 'disabled' : ''}>${text}</button>`
-              })()}
+              <span class="selection-dialog__stat-label">Speed</span>
+              <span class="selection-dialog__stat-controls">
+                <span class="selection-dialog__stat-value-box">${towerDetails.speed.toFixed(2)}/s</span>
+                ${(() => {
+                  const upgrade = upgradesById.get('speed')
+                  const disabled = upgradesDisabled || !upgrade
+                  const text = '+'
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="speed" ${disabled ? 'disabled' : ''}>${text}</button>`
+                })()}
+              </span>
             </div>
           </div>
         </div>`
@@ -134,20 +155,17 @@ export class SelectionDialog {
       : ''
 
     this.root.innerHTML = `
-      <div class="selection-dialog__title">${typeLabel}</div>
+      <div class="selection-dialog__title">${titleMarkup}</div>
       ${summaryMarkup}
       ${statsMarkup}
       ${statusMarkup}
-      <div class="selection-dialog__group selection-dialog__group--actions">
-        <div class="selection-dialog__section-title">Building actions</div>
-        <div class="selection-dialog__action-bar">
-          <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-            Repair
-          </button>
-          <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
-            Delete
-          </button>
-        </div>
+      <div class="selection-dialog__action-bar">
+        <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
+          Repair
+        </button>
+        <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
+          Delete
+        </button>
       </div>
     `
 

@@ -782,6 +782,7 @@ const selectionDialog = new SelectionDialog(
     selectedCount: 0,
     inRangeCount: 0,
     selectedTowerTypeId: null,
+    buildingCoords: null,
     buildingHealth: null,
     upgradeOptions: [],
     towerDetails: null,
@@ -849,6 +850,12 @@ const updateSelectionDialog = (nowMs: number) => {
     selectedCount,
     inRangeCount: inRange.length,
     selectedTowerTypeId,
+    buildingCoords: selectedCollider
+      ? {
+          x: Math.round(selectedCollider.center.x),
+          z: Math.round(selectedCollider.center.z)
+        }
+      : null,
     buildingHealth: selectedStructureState
       ? {
           hp: selectedStructureState.hp,
