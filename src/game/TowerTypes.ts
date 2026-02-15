@@ -1,4 +1,6 @@
-export type TowerTypeId = 'base' | 'sniper' | 'rapid' | 'splash'
+import type { Tower } from './types'
+
+export type TowerTypeId = 'base'
 
 export type TowerTypeConfig = {
   id: TowerTypeId
@@ -8,62 +10,65 @@ export type TowerTypeConfig = {
   range: number
   damage: number
   shootCadence: number
-  requiredWorkers: number
-  upgradeDurationSec: number
-  upgrades: TowerTypeId[]
 }
 
 export const TOWER_TYPES: Record<TowerTypeId, TowerTypeConfig> = {
   base: {
     id: 'base',
-    label: 'Base Tower',
+    label: 'Tower',
     level: 1,
     color: 0x5aa4ff,
     range: 8,
     damage: 5,
-    shootCadence: 0.25,
+    shootCadence: 0.25
+  }
+}
+
+export type TowerUpgradeId = 'range' | 'damage' | 'speed'
+
+export type TowerUpgradeConfig = {
+  id: TowerUpgradeId
+  label: string
+  requiredWorkers: number
+  upgradeDurationSec: number
+  maxLevel: number
+}
+
+export const TOWER_UPGRADES: Record<TowerUpgradeId, TowerUpgradeConfig> = {
+  range: {
+    id: 'range',
+    label: 'Range',
     requiredWorkers: 1,
     upgradeDurationSec: 8,
-    upgrades: ['sniper', 'rapid']
+    maxLevel: 5
   },
-  sniper: {
-    id: 'sniper',
-    label: 'Sniper',
-    level: 2,
-    color: 0xb48cff,
-    range: 11,
-    damage: 12,
-    shootCadence: 1.2,
+  damage: {
+    id: 'damage',
+    label: 'Damage',
+    requiredWorkers: 1,
+    upgradeDurationSec: 8,
+    maxLevel: 5
+  },
+  speed: {
+    id: 'speed',
+    label: 'Speed',
     requiredWorkers: 2,
-    upgradeDurationSec: 14,
-    upgrades: ['splash']
-  },
-  rapid: {
-    id: 'rapid',
-    label: 'Rapid',
-    range: 7,
-    damage: 3,
-    shootCadence: 0.11,
-    level: 2,
-    color: 0x57e39d,
-    requiredWorkers: 2,
-    upgradeDurationSec: 12,
-    upgrades: ['splash']
-  },
-  splash: {
-    id: 'splash',
-    label: 'Splash',
-    range: 9,
-    damage: 8,
-    shootCadence: 0.45,
-    level: 3,
-    color: 0xffb86a,
-    requiredWorkers: 3,
-    upgradeDurationSec: 20,
-    upgrades: []
+    upgradeDurationSec: 10,
+    maxLevel: 5
   }
 }
 
 export const getTowerType = (towerTypeId: TowerTypeId): TowerTypeConfig => TOWER_TYPES[towerTypeId]
-export const getUpgradeOptions = (towerTypeId: TowerTypeId): TowerTypeConfig[] =>
-  TOWER_TYPES[towerTypeId].upgrades.map(id => TOWER_TYPES[id])
+export const getTowerUpgrade = (upgradeId: TowerUpgradeId): TowerUpgradeConfig => TOWER_UPGRADES[upgradeId]
+export const getTowerUpgradeDeltaText = (upgradeId: TowerUpgradeId): string => {
+  if (upgradeId === 'range') return '+0.75'
+  if (upgradeId === 'damage') return '+2'
+  return '+10%'
+}
+export const getTowerUpgradeOptions = (tower: Tower): TowerUpgradeConfig[] => {
+  const options: TowerUpgradeConfig[] = []
+  if (tower.rangeLevel < TOWER_UPGRADES.range.maxLevel) options.push(TOWER_UPGRADES.range)
+  if (tower.damageLevel < TOWER_UPGRADES.damage.maxLevel) options.push(TOWER_UPGRADES.damage)
+  if (tower.speedLevel < TOWER_UPGRADES.speed.maxLevel) options.push(TOWER_UPGRADES.speed)
+  return options
+}

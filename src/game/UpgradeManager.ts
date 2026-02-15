@@ -1,11 +1,10 @@
-import { getTowerType } from './TowerTypes'
-import type { TowerTypeId } from './TowerTypes'
+import { getTowerUpgrade } from './TowerTypes'
+import type { TowerUpgradeId } from './TowerTypes'
 import type { Tower } from './types'
 
 export type UpgradeJob = {
   tower: Tower
-  fromTypeId: TowerTypeId
-  toTypeId: TowerTypeId
+  upgradeId: TowerUpgradeId
   requiredWorkers: number
   endsAtMs: number
 }
@@ -32,19 +31,18 @@ export class UpgradeManager {
     return this.activeJobs.get(tower) ?? null
   }
 
-  canStartUpgrade(tower: Tower, toTypeId: TowerTypeId): boolean {
+  canStartUpgrade(tower: Tower, upgradeId: TowerUpgradeId): boolean {
     if (this.activeJobs.has(tower)) return false
-    const target = getTowerType(toTypeId)
+    const target = getTowerUpgrade(upgradeId)
     return this.availableWorkers >= target.requiredWorkers
   }
 
-  startUpgrade(tower: Tower, toTypeId: TowerTypeId, nowMs: number): UpgradeJob | null {
-    if (!this.canStartUpgrade(tower, toTypeId)) return null
-    const target = getTowerType(toTypeId)
+  startUpgrade(tower: Tower, upgradeId: TowerUpgradeId, nowMs: number): UpgradeJob | null {
+    if (!this.canStartUpgrade(tower, upgradeId)) return null
+    const target = getTowerUpgrade(upgradeId)
     const job: UpgradeJob = {
       tower,
-      fromTypeId: tower.typeId as TowerTypeId,
-      toTypeId,
+      upgradeId,
       requiredWorkers: target.requiredWorkers,
       endsAtMs: nowMs + target.upgradeDurationSec * 1000
     }

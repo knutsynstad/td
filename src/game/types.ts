@@ -44,6 +44,11 @@ export type Tower = {
   mesh: THREE.Mesh
   range: number
   damage: number
+  rangeLevel: number
+  damageLevel: number
+  speedLevel: number
+  killCount: number
+  builtBy: string
   shootCooldown: number
   shootCadence: number
   laserVisibleTime: number

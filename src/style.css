@@ -6,6 +6,10 @@
   background-color: #0f1419;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  --hud-button-size: 84px;
+  --hud-build-gap: 8px;
+  --hud-actions-gap: 12px;
+  --hud-action-bar-width: calc(var(--hud-button-size) * 3 + var(--hud-build-gap) + var(--hud-actions-gap));
 }
 
 *,
@@ -34,38 +38,120 @@ canvas {
 
 .selection-dialog {
   position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: 112px;
-  margin: 0 auto;
-  max-width: 360px;
+  right: 32px;
+  bottom: 132px;
+  left: auto;
+  width: min(var(--hud-action-bar-width), calc(100vw - 24px));
   background: rgba(17, 23, 30, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  padding: 12px;
+  padding: 10px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   z-index: 2200;
   pointer-events: auto;
 }
 
 .selection-dialog__title {
   font-weight: 700;
+  padding: 2px 2px 4px;
 }
 
 .selection-dialog__meta,
 .selection-dialog__hint {
   font-size: 0.85rem;
-  opacity: 0.8;
+  opacity: 0.84;
+  line-height: 1.35;
 }
 
-.selection-dialog__actions {
+.selection-dialog__section-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.66;
+  margin-bottom: 2px;
+}
+
+.selection-dialog__group {
   display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.selection-dialog__group--summary {
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.selection-dialog__summary-line {
+  opacity: 0.78;
+}
+
+.selection-dialog__group--stats {
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.selection-dialog__group--stats .selection-dialog__section-title {
+  opacity: 0.78;
+}
+
+.selection-dialog__group--status {
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.selection-dialog__stats {
+  display: grid;
+  gap: 6px;
+}
+
+.selection-dialog__action-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
+.selection-dialog__stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.9rem;
+  padding: 2px 0;
+}
+
+.selection-dialog__group--stats .selection-dialog__stat-row span {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.selection-dialog__stat-upgrade {
+  min-width: 56px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(54, 66, 84, 0.9);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.selection-dialog__stat-upgrade:disabled {
+  opacity: 0.55;
+}
+
 .selection-dialog__action {
-  min-height: 44px;
+  min-height: 40px;
+  width: 100%;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(54, 66, 84, 0.8);
@@ -108,9 +194,10 @@ canvas {
 .hud-actions {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: var(--hud-actions-gap);
   flex-wrap: wrap;
   justify-content: flex-end;
+  width: var(--hud-action-bar-width);
   pointer-events: auto;
 }
 
@@ -263,7 +350,7 @@ canvas {
 
 .build-buttons {
   display: flex;
-  gap: 8px;
+  gap: var(--hud-build-gap);
   flex-wrap: wrap;
 }
 
@@ -271,8 +358,8 @@ canvas {
   position: relative;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  width: 84px;
-  height: 84px;
+  width: var(--hud-button-size);
+  height: var(--hud-button-size);
   padding: 8px;
   font-size: 0.9rem;
   font-weight: 600;
@@ -357,8 +444,8 @@ canvas {
   position: relative;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
-  width: 84px;
-  height: 84px;
+  width: var(--hud-button-size);
+  height: var(--hud-button-size);
   padding: 8px;
   font-size: 0.9rem;
   font-weight: 600;
@@ -413,6 +500,12 @@ canvas {
 }
 
 @media (max-width: 720px) {
+  .selection-dialog {
+    right: 12px;
+    bottom: 112px;
+    width: min(var(--hud-action-bar-width), calc(100vw - 24px));
+  }
+
   .hud-corner--top-left {
     top: 12px;
     left: 12px;
@@ -429,6 +522,6 @@ canvas {
   }
 
   .shoot-button {
-    width: 84px;
+    width: var(--hud-button-size);
   }
 }

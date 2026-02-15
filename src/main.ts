@@ -9,8 +9,8 @@ import { screenToWorldOnGround } from './utils/coords'
 import { SelectionDialog } from './ui/SelectionDialog'
 import { UpgradeManager } from './game/UpgradeManager'
 import { StructureStore } from './game/structures'
-import { getTowerType } from './game/TowerTypes'
-import type { TowerTypeId } from './game/TowerTypes'
+import { getTowerType, getTowerUpgrade, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
+import type { TowerTypeId, TowerUpgradeId } from './game/TowerTypes'
 import type { DestructibleCollider, Entity, StaticCollider, Tower } from './game/types'
 import { WaypointCache } from './utils/WaypointCache'
 import { SpatialGrid } from './utils/SpatialGrid'
@@ -512,19 +512,22 @@ const syncSelectedStructureOutline = () => {
   structureOutlinePass.selectedObjects = selectedObjects
 }
 
-const applyTowerType = (tower: Tower, typeId: TowerTypeId) => {
-  const typeConfig = getTowerType(typeId)
-  tower.typeId = typeId
-  tower.level = typeConfig.level
-  tower.range = typeConfig.range
-  tower.damage = typeConfig.damage
-  tower.shootCadence = typeConfig.shootCadence
+const applyTowerUpgrade = (tower: Tower, upgradeId: TowerUpgradeId) => {
+  if (upgradeId === 'range') {
+    tower.rangeLevel += 1
+    tower.range += 0.75
+  } else if (upgradeId === 'damage') {
+    tower.damageLevel += 1
+    tower.damage += 2
+  } else if (upgradeId === 'speed') {
+    tower.speedLevel += 1
+    tower.shootCadence = Math.max(0.06, tower.shootCadence * 0.9)
+  }
   tower.rangeRing.geometry.dispose()
-  tower.rangeRing.geometry = new THREE.RingGeometry(typeConfig.range - 0.12, typeConfig.range, 32)
-  ;(tower.mesh.material as THREE.MeshStandardMaterial).color.setHex(typeConfig.color)
+  tower.rangeRing.geometry = new THREE.RingGeometry(tower.range - 0.12, tower.range, 32)
 }
 
-const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId): Tower => {
+const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: string): Tower => {
   const typeConfig = getTowerType(typeId)
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(1, TOWER_HEIGHT, 1),
@@ -551,6 +554,11 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId): Tower => {
     mesh,
     range: typeConfig.range,
     damage: typeConfig.damage,
+    rangeLevel: 0,
+    damageLevel: 0,
+    speedLevel: 0,
+    killCount: 0,
+    builtBy,
     shootCooldown: 0,
     shootCadence: typeConfig.shootCadence,
     laserVisibleTime: 0,
@@ -774,7 +782,11 @@ const selectionDialog = new SelectionDialog(
     selectedCount: 0,
     inRangeCount: 0,
     selectedTowerTypeId: null,
+    buildingHealth: null,
+    upgradeOptions: [],
+    towerDetails: null,
     upgradeBlockedReason: null,
+    canRepair: false,
     canDelete: false,
     activeUpgradeText: null
   },
@@ -787,12 +799,21 @@ const selectionDialog = new SelectionDialog(
       }
       clearSelection()
     },
-    onUpgrade: (targetTypeId) => {
+    onUpgrade: (upgradeId) => {
       const tower = getSingleSelectedTower()
       if (!tower) return
       const [collider] = selectedStructures.values()
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return
-      upgradeManager.startUpgrade(tower, targetTypeId, performance.now())
+      upgradeManager.startUpgrade(tower, upgradeId, performance.now())
+    },
+    onRepair: () => {
+      const [collider] = selectedStructures.values()
+      if (!collider) return
+      if (!isColliderInRange(collider, SELECTION_RADIUS)) return
+      const state = structureStore.structureStates.get(collider)
+      if (!state) return
+      if (state.hp >= state.maxHp) return
+      state.hp = state.maxHp
     }
   }
 )
@@ -801,13 +822,22 @@ const updateSelectionDialog = (nowMs: number) => {
   const selectedCount = selectedStructures.size
   const inRange = getSelectedInRange()
   const tower = getSingleSelectedTower()
+  const [selectedCollider] = selectedStructures.values()
+  const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
   const selectedTowerTypeId = getSelectionTowerTypeId()
+  const upgradeOptions = tower
+    ? getTowerUpgradeOptions(tower).map(option => ({
+        id: option.id,
+        label: option.label,
+        deltaText: getTowerUpgradeDeltaText(option.id)
+      }))
+    : []
   const activeUpgrade = tower ? upgradeManager.getJob(tower) : null
   let upgradeBlockedReason: string | null = null
   let activeUpgradeText: string | null = null
   if (tower && activeUpgrade) {
     const remaining = Math.max(0, Math.ceil((activeUpgrade.endsAtMs - nowMs) / 1000))
-    activeUpgradeText = `Upgrading to ${getTowerType(activeUpgrade.toTypeId).label} (${remaining}s)`
+    activeUpgradeText = `Upgrading ${getTowerUpgrade(activeUpgrade.upgradeId).label} (${remaining}s)`
     upgradeBlockedReason = 'Upgrade already in progress'
   } else if (tower && inRange.length === 0) {
     upgradeBlockedReason = 'Move closer to upgrade'
@@ -819,7 +849,25 @@ const updateSelectionDialog = (nowMs: number) => {
     selectedCount,
     inRangeCount: inRange.length,
     selectedTowerTypeId,
+    buildingHealth: selectedStructureState
+      ? {
+          hp: selectedStructureState.hp,
+          maxHp: selectedStructureState.maxHp
+        }
+      : null,
+    upgradeOptions,
+    towerDetails: tower
+      ? {
+          builtBy: tower.builtBy,
+          killCount: tower.killCount,
+          range: tower.range,
+          damage: tower.damage,
+          speed: 1 / tower.shootCadence,
+          dps: tower.damage * (1 / tower.shootCadence)
+        }
+      : null,
     upgradeBlockedReason,
+    canRepair: selectedStructureState !== null && selectedStructureState.hp < selectedStructureState.maxHp && inRange.length > 0,
     canDelete: inRange.length > 0,
     activeUpgradeText
   })
@@ -886,7 +934,7 @@ const placeBuilding = (center: THREE.Vector3) => {
     staticColliders,
     structureStore,
     scene,
-    createTowerAt: (snapped) => createTowerAt(snapped, 'base'),
+    createTowerAt: (snapped) => createTowerAt(snapped, 'base', player.username ?? 'Player'),
     applyObstacleDelta
   })
   wallCharges -= result.wallSpent
@@ -928,7 +976,7 @@ const addMapTower = (center: THREE.Vector3) => {
   const half = size.clone().multiplyScalar(0.5)
   const snapped = new THREE.Vector3(snapGridValue(center.x), half.y, snapGridValue(center.z))
   if (!canPlaceAt(snapped, half, staticColliders)) return
-  const tower = createTowerAt(snapped, 'base')
+  const tower = createTowerAt(snapped, 'base', 'Map')
   const mesh = tower.mesh
   structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP)
 }
@@ -1192,8 +1240,8 @@ const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RAD
 const tick = (now: number, delta: number) => {
 
   for (const completed of upgradeManager.collectCompleted(now)) {
-    applyTowerType(completed.tower, completed.toTypeId)
-    triggerEventBanner(`${getTowerType(completed.toTypeId).label} online`)
+    applyTowerUpgrade(completed.tower, completed.upgradeId)
+    triggerEventBanner(`${getTowerUpgrade(completed.upgradeId).label} upgraded`)
   }
 
   wallCharges = Math.min(WALL_CHARGE_MAX, wallCharges + WALL_RECHARGE_RATE * delta)
@@ -1255,7 +1303,12 @@ const tick = (now: number, delta: number) => {
       tower.laser.rotateX(Math.PI / 2)
 
       if (tower.shootCooldown <= 0) {
-        target.hp = (target.hp ?? 1) - tower.damage
+        const prevHp = target.hp ?? 1
+        const nextHp = prevHp - tower.damage
+        target.hp = nextHp
+        if (prevHp > 0 && nextHp <= 0) {
+          tower.killCount += 1
+        }
         tower.shootCooldown = tower.shootCadence
         tower.laserVisibleTime = 0.07
       }
