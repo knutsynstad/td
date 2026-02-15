@@ -26,10 +26,8 @@ type SelectionDialogState = {
     speed: number
     dps: number
   } | null
-  upgradeBlockedReason: string | null
   canRepair: boolean
   canDelete: boolean
-  activeUpgradeText: string | null
 }
 
 type SelectionDialogActions = {
@@ -71,9 +69,7 @@ export class SelectionDialog {
       upgradeOptions,
       towerDetails,
       canDelete,
-      canRepair,
-      upgradeBlockedReason,
-      activeUpgradeText
+      canRepair
     } = this.state
     if (selectedCount === 0 || inRangeCount === 0) {
       this.root.style.display = 'none'
@@ -86,7 +82,7 @@ export class SelectionDialog {
       ? `<span class="selection-dialog__title-main">${typeLabel}</span> <span class="selection-dialog__coords">${buildingCoords.x},${buildingCoords.z}</span>`
       : `<span class="selection-dialog__title-main">${typeLabel}</span>`
     const upgradesById = new Map(upgradeOptions.map(option => [option.id, option]))
-    const upgradesDisabled = Boolean(upgradeBlockedReason) || inRangeCount === 0
+    const upgradesDisabled = inRangeCount === 0
     const summaryItems: Array<{ label: string, value: string }> = []
     if (buildingHealth) {
       summaryItems.push({
@@ -150,12 +146,8 @@ export class SelectionDialog {
     const noUpgradesLeftMarkup = towerDetails && upgradeOptions.length === 0
       ? '<div class="selection-dialog__hint">All stats maxed</div>'
       : ''
-    const statusMarkup = (activeUpgradeText || upgradeBlockedReason || noUpgradesLeftMarkup)
-      ? `<div class="selection-dialog__group selection-dialog__group--status">
-          ${activeUpgradeText ? `<div class="selection-dialog__hint">${activeUpgradeText}</div>` : ''}
-          ${upgradeBlockedReason ? `<div class="selection-dialog__hint">${upgradeBlockedReason}</div>` : ''}
-          ${noUpgradesLeftMarkup}
-        </div>`
+    const statusMarkup = noUpgradesLeftMarkup
+      ? `<div class="selection-dialog__group selection-dialog__group--status">${noUpgradesLeftMarkup}</div>`
       : ''
 
     this.root.innerHTML = `

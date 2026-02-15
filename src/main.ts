@@ -7,9 +7,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { FlowField } from './pathfinding/FlowField'
 import { screenToWorldOnGround } from './utils/coords'
 import { SelectionDialog } from './ui/SelectionDialog'
-import { UpgradeManager } from './game/UpgradeManager'
 import { StructureStore } from './game/structures'
-import { getTowerType, getTowerUpgrade, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
+import { getTowerType, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from './game/TowerTypes'
 import type { DestructibleCollider, Entity, StaticCollider, Tower } from './game/types'
 import { WaypointCache } from './utils/WaypointCache'
@@ -339,7 +338,6 @@ const structureStore = new StructureStore(
   towers,
   (tower) => {
     if (selectedTower === tower) selectedTower = null
-    upgradeManager.cancelForTower(tower)
   },
   (added, removed = []) => applyObstacleDelta(added, removed)
 )
@@ -473,7 +471,6 @@ const towerRangeMaterial = new THREE.MeshBasicMaterial({
   opacity: 0.3,
   side: THREE.DoubleSide
 })
-const upgradeManager = new UpgradeManager(8)
 
 const raycaster = new THREE.Raycaster()
 const pointer = new THREE.Vector2()
@@ -904,10 +901,8 @@ const selectionDialog = new SelectionDialog(
     buildingHealth: null,
     upgradeOptions: [],
     towerDetails: null,
-    upgradeBlockedReason: null,
     canRepair: false,
-    canDelete: false,
-    activeUpgradeText: null
+    canDelete: false
   },
   {
     onDelete: () => {
@@ -933,11 +928,8 @@ const selectionDialog = new SelectionDialog(
         triggerEventBanner(`Need ${upgradeCost} energy`)
         return
       }
-      const started = upgradeManager.startUpgrade(tower, upgradeId, performance.now())
-      if (!started) {
-        // Refund when worker constraints block start.
-        addEnergy(upgradeCost)
-      }
+      applyTowerUpgrade(tower, upgradeId)
+      triggerEventBanner('Upgraded')
     },
     onRepair: () => {
       const [collider] = selectedStructures.values()
@@ -951,7 +943,7 @@ const selectionDialog = new SelectionDialog(
   }
 )
 
-const updateSelectionDialog = (nowMs: number) => {
+const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size
   const inRange = getSelectedInRange()
   hudActionsEl.style.display = selectedCount > 0 && inRange.length > 0 ? 'none' : ''
@@ -969,21 +961,6 @@ const updateSelectionDialog = (nowMs: number) => {
         canAfford: energy >= getUpgradeEnergyCost(option.id)
       }))
     : []
-  const activeUpgrade = tower ? upgradeManager.getJob(tower) : null
-  let upgradeBlockedReason: string | null = null
-  let activeUpgradeText: string | null = null
-  if (tower && activeUpgrade) {
-    const remaining = Math.max(0, Math.ceil((activeUpgrade.endsAtMs - nowMs) / 1000))
-    activeUpgradeText = `Upgrading ${getTowerUpgrade(activeUpgrade.upgradeId).label} (${remaining}s)`
-    upgradeBlockedReason = 'Upgrade already in progress'
-  } else if (tower && inRange.length === 0) {
-    upgradeBlockedReason = 'Move closer to upgrade'
-  } else if (tower && upgradeManager.availableWorkers <= 0) {
-    upgradeBlockedReason = 'No workers available'
-  } else if (tower && upgradeOptions.length > 0 && upgradeOptions.every(option => !option.canAfford)) {
-    const cheapestCost = Math.min(...upgradeOptions.map(option => option.cost))
-    upgradeBlockedReason = `Need ${cheapestCost} energy`
-  }
 
   selectionDialog.update({
     selectedCount,
@@ -1012,10 +989,8 @@ const updateSelectionDialog = (nowMs: number) => {
           dps: tower.damage * (1 / tower.shootCadence)
         }
       : null,
-    upgradeBlockedReason,
     canRepair: selectedStructureState !== null && selectedStructureState.hp < selectedStructureState.maxHp && inRange.length > 0,
-    canDelete: inRange.length > 0 && energy >= deleteCost,
-    activeUpgradeText
+    canDelete: inRange.length > 0 && energy >= deleteCost
   })
 }
 
@@ -1177,7 +1152,6 @@ const resetGame = () => {
   mobs.length = 0
 
   for (const tower of towers) {
-    upgradeManager.cancelForTower(tower)
     scene.remove(tower.mesh)
     scene.remove(tower.rangeRing)
     scene.remove(tower.laser)
@@ -1387,12 +1361,6 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
 
 const tick = (now: number, delta: number) => {
-
-  for (const completed of upgradeManager.collectCompleted(now)) {
-    applyTowerUpgrade(completed.tower, completed.upgradeId)
-    triggerEventBanner(`${getTowerUpgrade(completed.upgradeId).label} upgraded`)
-  }
-
   energy = Math.min(ENERGY_CAP, energy + ENERGY_REGEN_RATE * delta)
   if (buildMode === 'wall' && energy < ENERGY_COST_WALL) {
     setBuildMode('off')
@@ -1545,7 +1513,7 @@ const tick = (now: number, delta: number) => {
   
   // Update shoot button state
   shootButton.disabled = selected === null
-  updateSelectionDialog(now)
+  updateSelectionDialog()
   syncSelectedStructureOutline()
   structureOutlinePass.edgeStrength = 3.8 + Math.sin(now * 0.01) * 0.5
 
