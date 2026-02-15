@@ -1,5 +1,9 @@
 import './style.css'
 import * as THREE from 'three'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { FlowField } from './pathfinding/FlowField'
 import { screenToWorldOnGround } from './utils/coords'
 import { SelectionDialog } from './ui/SelectionDialog'
@@ -139,6 +143,22 @@ const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 app.appendChild(renderer.domElement)
+const composer = new EffectComposer(renderer)
+const renderPass = new RenderPass(scene, camera)
+composer.addPass(renderPass)
+const structureOutlinePass = new OutlinePass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  scene,
+  camera
+)
+structureOutlinePass.visibleEdgeColor.set(0xffe066)
+structureOutlinePass.hiddenEdgeColor.set(0x6b5a1a)
+structureOutlinePass.edgeStrength = 4
+structureOutlinePass.edgeThickness = 1.5
+structureOutlinePass.pulsePeriod = 0
+structureOutlinePass.selectedObjects = []
+composer.addPass(structureOutlinePass)
+composer.addPass(new OutputPass())
 
 const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x2b2b2b, 0.9)
 scene.add(hemi)
@@ -482,6 +502,15 @@ makeNpc(new THREE.Vector3(-6, 0, -6), 0xb48cff, 'u/NPC_Beta')
 const selection = createSelectionState()
 const selectedStructures = selection.selectedStructures
 let activePointerId: number | null = null
+const syncSelectedStructureOutline = () => {
+  const selectedObjects: THREE.Object3D[] = []
+  for (const collider of selectedStructures) {
+    const mesh = structureStore.structureStates.get(collider)?.mesh
+    if (!mesh) continue
+    selectedObjects.push(mesh)
+  }
+  structureOutlinePass.selectedObjects = selectedObjects
+}
 
 const applyTowerType = (tower: Tower, typeId: TowerTypeId) => {
   const typeConfig = getTowerType(typeId)
@@ -941,6 +970,7 @@ const resetGame = () => {
   setBuildMode('off')
   selectedTower = null
   selectedStructures.clear()
+  structureOutlinePass.selectedObjects = []
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
@@ -1102,6 +1132,7 @@ window.addEventListener('resize', () => {
   camera.bottom = -orthoSize
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
+  composer.setSize(window.innerWidth, window.innerHeight)
 })
 
 const updateEntityMotion = (entity: Entity, delta: number) => {
@@ -1309,6 +1340,8 @@ const tick = (now: number, delta: number) => {
   // Update shoot button state
   shootButton.disabled = selected === null
   updateSelectionDialog(now)
+  syncSelectedStructureOutline()
+  structureOutlinePass.edgeStrength = 3.8 + Math.sin(now * 0.01) * 0.5
 
   ring.position.set(player.mesh.position.x, 0.02, player.mesh.position.z)
   for (const tower of towers) {
@@ -1446,7 +1479,7 @@ const tick = (now: number, delta: number) => {
   buildTowerBtn.style.setProperty('--cooldown-clip', `inset(0 0 0 ${towerClipPercent}%)`)
   buildTowerBtn.classList.toggle('unlocked', towerCooldownPercent <= 0.01)
 
-  renderer.render(scene, camera)
+  composer.render()
 }
 
 const gameLoop = createGameLoop(tick)
