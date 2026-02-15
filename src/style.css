@@ -39,7 +39,7 @@ canvas {
 .selection-dialog {
   position: fixed;
   right: 32px;
-  bottom: 132px;
+  bottom: 32px;
   left: auto;
   width: min(var(--hud-action-bar-width), calc(100vw - 24px));
   background: rgba(17, 23, 30, 0.95);
@@ -575,7 +575,7 @@ canvas {
 @media (max-width: 720px) {
   .selection-dialog {
     right: 12px;
-    bottom: 112px;
+    bottom: 12px;
     width: min(var(--hud-action-bar-width), calc(100vw - 24px));
   }
 

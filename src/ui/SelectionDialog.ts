@@ -68,7 +68,7 @@ export class SelectionDialog {
       upgradeBlockedReason,
       activeUpgradeText
     } = this.state
-    if (selectedCount === 0) {
+    if (selectedCount === 0 || inRangeCount === 0) {
       this.root.style.display = 'none'
       this.root.innerHTML = ''
       return
@@ -160,11 +160,11 @@ export class SelectionDialog {
       ${statsMarkup}
       ${statusMarkup}
       <div class="selection-dialog__action-bar">
-        <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-          Repair
-        </button>
         <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
           Delete
+        </button>
+        <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
+          Repair
         </button>
       </div>
     `

@@ -112,6 +112,7 @@ const nextWaveRowEl = document.querySelector<HTMLDivElement>('#nextWaveRow')!
 const nextWavePrimaryEl = nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__primary')!
 const nextWaveSecondaryEl = nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__secondary')!
 const eventBannerEl = document.querySelector<HTMLDivElement>('#eventBanner')!
+const hudActionsEl = document.querySelector<HTMLDivElement>('.hud-actions')!
 const buildWallBtn = document.querySelector<HTMLButtonElement>('#buildWall')!
 const buildTowerBtn = document.querySelector<HTMLButtonElement>('#buildTower')!
 const shootButton = document.querySelector<HTMLButtonElement>('#shootButton')!
@@ -822,6 +823,7 @@ const selectionDialog = new SelectionDialog(
 const updateSelectionDialog = (nowMs: number) => {
   const selectedCount = selectedStructures.size
   const inRange = getSelectedInRange()
+  hudActionsEl.style.display = selectedCount > 0 && inRange.length > 0 ? 'none' : ''
   const tower = getSingleSelectedTower()
   const [selectedCollider] = selectedStructures.values()
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
