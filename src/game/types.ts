@@ -38,6 +38,7 @@ export type Entity = {
   siegeAttackCooldown?: number
   unreachableTime?: number
   username?: string
+  lastHitBy?: 'player' | 'tower'
 }
 
 export type Tower = {

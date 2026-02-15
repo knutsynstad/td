@@ -37,6 +37,17 @@ import {
   setSelectedStructures as setSelectedStructuresState
 } from './selection/selection'
 import {
+  ENERGY_CAP,
+  ENERGY_COST_DELETE_TOWER,
+  ENERGY_COST_DELETE_WALL,
+  ENERGY_COST_TOWER,
+  ENERGY_COST_UPGRADE_DAMAGE,
+  ENERGY_COST_UPGRADE_RANGE,
+  ENERGY_COST_UPGRADE_SPEED,
+  ENERGY_COST_WALL,
+  ENERGY_PER_PLAYER_KILL,
+  ENERGY_REGEN_RATE,
+  ENERGY_SYMBOL,
   FLOW_FIELD_RESOLUTION,
   FLOW_FIELD_SIZE,
   GRID_SIZE,
@@ -51,13 +62,9 @@ import {
   SHOOT_COOLDOWN,
   SHOOT_DAMAGE,
   SPATIAL_GRID_CELL_SIZE,
-  TOWER_CHARGE_MAX,
   TOWER_HEIGHT,
   TOWER_HP,
-  TOWER_RECHARGE_RATE,
-  WALL_CHARGE_MAX,
   WALL_HP,
-  WALL_RECHARGE_RATE,
   WORLD_BOUNDS
 } from './game/constants'
 
@@ -79,6 +86,12 @@ app.innerHTML = `
         </div>
       </div>
     </div>
+    <div class="hud-corner hud-corner--top-right">
+      <div class="hud-energy">
+        <span class="hud-energy__icon">${ENERGY_SYMBOL}</span>
+        <span id="energyCount" class="hud-energy__value">100</span>
+      </div>
+    </div>
     <div class="hud-overlay">
       <div id="eventBanner" class="event-banner"></div>
       <div id="finalCountdown" class="final-countdown"></div>
@@ -88,11 +101,11 @@ app.innerHTML = `
         <div class="build-buttons">
           <button id="buildWall" class="hud-button build-button">
             <span class="button-label">Wall</span>
-            <span id="wallCount" class="hud-badge">200</span>
+            <span id="wallCount" class="hud-badge">${ENERGY_SYMBOL}${ENERGY_COST_WALL}</span>
           </button>
           <button id="buildTower" class="hud-button build-button">
             <span class="button-label">Tower</span>
-            <span id="towerCount" class="hud-badge">50</span>
+            <span id="towerCount" class="hud-badge">${ENERGY_SYMBOL}${ENERGY_COST_TOWER}</span>
           </button>
         </div>
         <button id="shootButton" class="shoot-button">Shoot</button>
@@ -107,6 +120,7 @@ const mobsPrimaryEl = mobsRowEl.querySelector<HTMLDivElement>('.hud-status__prim
 const mobsSecondaryEl = mobsRowEl.querySelector<HTMLDivElement>('.hud-status__secondary')!
 const wallCountEl = document.querySelector<HTMLSpanElement>('#wallCount')!
 const towerCountEl = document.querySelector<HTMLSpanElement>('#towerCount')!
+const energyCountEl = document.querySelector<HTMLSpanElement>('#energyCount')!
 const finalCountdownEl = document.querySelector<HTMLDivElement>('#finalCountdown')!
 const nextWaveRowEl = document.querySelector<HTMLDivElement>('#nextWaveRow')!
 const nextWavePrimaryEl = nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__primary')!
@@ -603,7 +617,8 @@ const makeMob = (pos: THREE.Vector3) => {
     siegeMode: false,
     siegeTarget: null,
     siegeAttackCooldown: 0,
-    unreachableTime: 0
+    unreachableTime: 0,
+    lastHitBy: undefined
   })
 }
 
@@ -614,8 +629,7 @@ let laserVisibleTime = 0
 let wave = 0
 let lives = 1
 let nextWaveAt = 0
-let wallCharges = WALL_CHARGE_MAX
-let towerCharges = TOWER_CHARGE_MAX
+let energy = ENERGY_CAP
 let isDraggingWall = false
 let wallDragStart: THREE.Vector3 | null = null
 let wallDragEnd: THREE.Vector3 | null = null
@@ -623,6 +637,28 @@ let wallDragValidPositions: THREE.Vector3[] = []
 const EVENT_BANNER_DURATION = 2.4
 let eventBannerTimer = 0
 let prevMobsCount = 0
+let energyPopTimer = 0
+
+type EnergyTrail = {
+  el: HTMLDivElement
+  startX: number
+  startY: number
+  endX: number
+  endY: number
+  elapsed: number
+  duration: number
+  reward: number
+}
+
+const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
+  if (upgradeId === 'range') return ENERGY_COST_UPGRADE_RANGE
+  if (upgradeId === 'damage') return ENERGY_COST_UPGRADE_DAMAGE
+  return ENERGY_COST_UPGRADE_SPEED
+}
+
+const getDeleteEnergyCost = (collider: DestructibleCollider): number => {
+  return collider.type === 'tower' ? ENERGY_COST_DELETE_TOWER : ENERGY_COST_DELETE_WALL
+}
 
 const particleSystem = createParticleSystem(scene)
 const spawnCubeEffects = particleSystem.spawnCubeEffects
@@ -650,12 +686,83 @@ usernameContainer.style.pointerEvents = 'none'
 usernameContainer.style.zIndex = '1001'
 app.appendChild(usernameContainer)
 
+const energyTrailContainer = document.createElement('div')
+energyTrailContainer.style.position = 'fixed'
+energyTrailContainer.style.top = '0'
+energyTrailContainer.style.left = '0'
+energyTrailContainer.style.width = '100%'
+energyTrailContainer.style.height = '100%'
+energyTrailContainer.style.pointerEvents = 'none'
+energyTrailContainer.style.zIndex = '3500'
+app.appendChild(energyTrailContainer)
+
+const activeEnergyTrails: EnergyTrail[] = []
+
 const worldToScreen = (worldPos: THREE.Vector3): { x: number, y: number } | null => {
   const vector = worldPos.clone()
   vector.project(camera)
   const x = (vector.x * 0.5 + 0.5) * window.innerWidth
   const y = (-vector.y * 0.5 + 0.5) * window.innerHeight
   return { x, y }
+}
+
+const getEnergyCounterAnchor = () => {
+  const rect = energyCountEl.getBoundingClientRect()
+  return { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 }
+}
+
+const addEnergy = (amount: number, withPop = false) => {
+  energy = Math.min(ENERGY_CAP, energy + amount)
+  if (withPop) {
+    energyPopTimer = 0.2
+  }
+}
+
+const spendEnergy = (amount: number) => {
+  if (energy < amount) return false
+  energy = Math.max(0, energy - amount)
+  return true
+}
+
+const spawnEnergyTrail = (fromWorldPos: THREE.Vector3, reward: number) => {
+  const start = worldToScreen(fromWorldPos.clone().setY(fromWorldPos.y + 0.6))
+  if (!start) {
+    addEnergy(reward, true)
+    return
+  }
+  const end = getEnergyCounterAnchor()
+  const orb = document.createElement('div')
+  orb.className = 'energy-trail-orb'
+  energyTrailContainer.appendChild(orb)
+  activeEnergyTrails.push({
+    el: orb,
+    startX: start.x,
+    startY: start.y,
+    endX: end.x,
+    endY: end.y,
+    elapsed: 0,
+    duration: 0.48,
+    reward
+  })
+}
+
+const updateEnergyTrails = (delta: number) => {
+  for (let i = activeEnergyTrails.length - 1; i >= 0; i -= 1) {
+    const trail = activeEnergyTrails[i]!
+    trail.elapsed += delta
+    const t = Math.min(1, trail.elapsed / trail.duration)
+    const ease = 1 - Math.pow(1 - t, 3)
+    const x = trail.startX + (trail.endX - trail.startX) * ease
+    const y = trail.startY + (trail.endY - trail.startY) * ease
+    const lift = (1 - ease) * 22
+    trail.el.style.transform = `translate(${x}px, ${y - lift}px) scale(${1 - t * 0.25})`
+    trail.el.style.opacity = String(1 - t * 0.15)
+    if (t >= 1) {
+      trail.el.remove()
+      activeEnergyTrails.splice(i, 1)
+      addEnergy(trail.reward, true)
+    }
+  }
 }
 
 const updateHealthBars = () => {
@@ -732,7 +839,17 @@ const buildPreview = new THREE.Mesh(
 buildPreview.visible = false
 scene.add(buildPreview)
 
+const canAffordBuildMode = (mode: BuildMode) => {
+  if (mode === 'wall') return energy >= ENERGY_COST_WALL
+  if (mode === 'tower') return energy >= ENERGY_COST_TOWER
+  return true
+}
+
 const setBuildMode = (mode: BuildMode) => {
+  if (mode !== 'off' && !canAffordBuildMode(mode)) {
+    triggerEventBanner('Not enough energy')
+    return
+  }
   if (buildMode === mode) {
     // Toggle off if clicking same button
     buildMode = 'off'
@@ -796,6 +913,11 @@ const selectionDialog = new SelectionDialog(
     onDelete: () => {
       const colliders = getSelectedInRange()
       if (colliders.length === 0) return
+      const deleteCost = colliders.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
+      if (!spendEnergy(deleteCost)) {
+        triggerEventBanner(`Need ${deleteCost} energy`)
+        return
+      }
       for (const collider of colliders) {
         structureStore.removeStructureCollider(collider)
       }
@@ -806,7 +928,16 @@ const selectionDialog = new SelectionDialog(
       if (!tower) return
       const [collider] = selectedStructures.values()
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return
-      upgradeManager.startUpgrade(tower, upgradeId, performance.now())
+      const upgradeCost = getUpgradeEnergyCost(upgradeId)
+      if (!spendEnergy(upgradeCost)) {
+        triggerEventBanner(`Need ${upgradeCost} energy`)
+        return
+      }
+      const started = upgradeManager.startUpgrade(tower, upgradeId, performance.now())
+      if (!started) {
+        // Refund when worker constraints block start.
+        addEnergy(upgradeCost)
+      }
     },
     onRepair: () => {
       const [collider] = selectedStructures.values()
@@ -827,12 +958,15 @@ const updateSelectionDialog = (nowMs: number) => {
   const tower = getSingleSelectedTower()
   const [selectedCollider] = selectedStructures.values()
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
+  const deleteCost = inRange.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
   const selectedTowerTypeId = getSelectionTowerTypeId()
   const upgradeOptions = tower
     ? getTowerUpgradeOptions(tower).map(option => ({
         id: option.id,
         label: option.label,
-        deltaText: getTowerUpgradeDeltaText(option.id)
+        deltaText: getTowerUpgradeDeltaText(option.id),
+        cost: getUpgradeEnergyCost(option.id),
+        canAfford: energy >= getUpgradeEnergyCost(option.id)
       }))
     : []
   const activeUpgrade = tower ? upgradeManager.getJob(tower) : null
@@ -846,6 +980,9 @@ const updateSelectionDialog = (nowMs: number) => {
     upgradeBlockedReason = 'Move closer to upgrade'
   } else if (tower && upgradeManager.availableWorkers <= 0) {
     upgradeBlockedReason = 'No workers available'
+  } else if (tower && upgradeOptions.length > 0 && upgradeOptions.every(option => !option.canAfford)) {
+    const cheapestCost = Math.min(...upgradeOptions.map(option => option.cost))
+    upgradeBlockedReason = `Need ${cheapestCost} energy`
   }
 
   selectionDialog.update({
@@ -877,7 +1014,7 @@ const updateSelectionDialog = (nowMs: number) => {
       : null,
     upgradeBlockedReason,
     canRepair: selectedStructureState !== null && selectedStructureState.hp < selectedStructureState.maxHp && inRange.length > 0,
-    canDelete: inRange.length > 0,
+    canDelete: inRange.length > 0 && energy >= deleteCost,
     activeUpgradeText
   })
 }
@@ -939,44 +1076,43 @@ const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingS
 }
 
 const placeBuilding = (center: THREE.Vector3) => {
-  const result = placeBuildingAt(center, buildMode, towerCharges, wallCharges, {
+  const result = placeBuildingAt(center, buildMode, energy, {
     staticColliders,
     structureStore,
     scene,
     createTowerAt: (snapped) => createTowerAt(snapped, 'base', player.username ?? 'Player'),
     applyObstacleDelta
   })
-  wallCharges -= result.wallSpent
-  towerCharges -= result.towerSpent
+  energy = Math.max(0, energy - result.energySpent)
   return result.placed
 }
 
 const WALL_LINE_SIZE = new THREE.Vector3(1, 1, 1)
 const WALL_LINE_HALF = WALL_LINE_SIZE.clone().multiplyScalar(0.5)
 
-const getWallLinePlacement = (start: THREE.Vector3, end: THREE.Vector3, availableWallCharges: number) => {
-  return computeWallLinePlacement(start, end, availableWallCharges, staticColliders)
+const getWallLinePlacement = (start: THREE.Vector3, end: THREE.Vector3, availableEnergy: number) => {
+  return computeWallLinePlacement(start, end, availableEnergy, staticColliders)
 }
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
-  const placed = placeWallSegment(start, end, wallCharges, {
+  const placed = placeWallSegment(start, end, energy, {
     scene,
     structureStore,
     staticColliders,
     applyObstacleDelta
   })
-  wallCharges -= placed
+  energy = Math.max(0, energy - placed * ENERGY_COST_WALL)
   return placed > 0
 }
 
 const placeWallSegments = (positions: THREE.Vector3[]) => {
-  const placed = placeWallSegmentsAt(positions, wallCharges, {
+  const placed = placeWallSegmentsAt(positions, energy, {
     scene,
     structureStore,
     staticColliders,
     applyObstacleDelta
   })
-  wallCharges -= placed
+  energy = Math.max(0, energy - placed * ENERGY_COST_WALL)
   return placed > 0
 }
 
@@ -1019,6 +1155,8 @@ const resetGame = () => {
   wave = 0
   nextWaveAt = 0
   prevMobsCount = 0
+  energy = ENERGY_CAP
+  energyPopTimer = 0
   eventBannerTimer = 0
   eventBannerEl.classList.remove('show')
   eventBannerEl.textContent = ''
@@ -1056,8 +1194,10 @@ const resetGame = () => {
   staticColliders.length = 0
   staticColliders.push(castleCollider)
 
-  wallCharges = WALL_CHARGE_MAX
-  towerCharges = TOWER_CHARGE_MAX
+  for (const trail of activeEnergyTrails) {
+    trail.el.remove()
+  }
+  activeEnergyTrails.length = 0
 
   flowField.rebuildAll(staticColliders, castleGoal)
   waypointCache.clear()
@@ -1127,7 +1267,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     wallDragEnd = point.clone()
 
     // Show one continuous preview mesh for the wall segment.
-    const availableWallPreview = Math.floor(wallCharges)
+    const availableWallPreview = energy
     const { validPositions, blockedPosition } = getWallLinePlacement(wallDragStart, wallDragEnd, availableWallPreview)
     wallDragValidPositions = validPositions
 
@@ -1156,8 +1296,8 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     const size = isTower ? new THREE.Vector3(1, 2, 1) : new THREE.Vector3(1, 1, 1)
     const half = size.clone().multiplyScalar(0.5)
     const snapped = new THREE.Vector3(snapGridValue(point.x), half.y, snapGridValue(point.z))
-    const chargesAvailable = isTower ? towerCharges : wallCharges
-    const ok = canPlace(snapped, half, true) && chargesAvailable > 0
+    const energyCost = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL
+    const ok = canPlace(snapped, half, true) && energy >= energyCost
     buildPreview.scale.set(size.x, size.y, size.z)
     buildPreview.position.copy(snapped)
     ;(buildPreview.material as THREE.MeshStandardMaterial).color.setHex(ok ? 0x66ff66 : 0xff6666)
@@ -1253,12 +1393,11 @@ const tick = (now: number, delta: number) => {
     triggerEventBanner(`${getTowerUpgrade(completed.upgradeId).label} upgraded`)
   }
 
-  wallCharges = Math.min(WALL_CHARGE_MAX, wallCharges + WALL_RECHARGE_RATE * delta)
-  towerCharges = Math.min(TOWER_CHARGE_MAX, towerCharges + TOWER_RECHARGE_RATE * delta)
-  if (buildMode === 'wall' && wallCharges < 1) {
+  energy = Math.min(ENERGY_CAP, energy + ENERGY_REGEN_RATE * delta)
+  if (buildMode === 'wall' && energy < ENERGY_COST_WALL) {
     setBuildMode('off')
   }
-  if (buildMode === 'tower' && towerCharges < 1) {
+  if (buildMode === 'tower' && energy < ENERGY_COST_TOWER) {
     setBuildMode('off')
   }
 
@@ -1294,6 +1433,7 @@ const tick = (now: number, delta: number) => {
   }
 
   updateParticles(delta)
+  updateEnergyTrails(delta)
 
   for (const tower of towers) {
     tower.shootCooldown = Math.max(tower.shootCooldown - delta, 0)
@@ -1315,6 +1455,7 @@ const tick = (now: number, delta: number) => {
         const prevHp = target.hp ?? 1
         const nextHp = prevHp - tower.damage
         target.hp = nextHp
+        target.lastHitBy = 'tower'
         if (prevHp > 0 && nextHp <= 0) {
           tower.killCount += 1
         }
@@ -1357,6 +1498,9 @@ const tick = (now: number, delta: number) => {
       }
     } else if ((mob.hp ?? 0) <= 0) {
       spawnMobDeathEffects(mob.mesh.position.clone())
+      if (mob.lastHitBy === 'player') {
+        spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL)
+      }
       scene.remove(mob.mesh)
       mobs.splice(i, 1)
     }
@@ -1448,6 +1592,7 @@ const tick = (now: number, delta: number) => {
     shootCooldown -= delta
     if (shootCooldown <= 0) {
       selected.hp = (selected.hp ?? 1) - SHOOT_DAMAGE
+      selected.lastHitBy = 'player'
       shootCooldown = SHOOT_COOLDOWN
       // Show laser for 0.1 seconds when shot fires
       laserVisibleTime = 0.1
@@ -1471,12 +1616,17 @@ const tick = (now: number, delta: number) => {
   updateGroundFromBounds(visibleBounds)
   worldGrid.update(visibleBounds)
 
-  const wallAvailable = Math.floor(wallCharges)
-  const towerAvailable = Math.floor(towerCharges)
-  wallCountEl.textContent = `x${wallAvailable}`
-  towerCountEl.textContent = `x${towerAvailable}`
-  buildWallBtn.disabled = wallAvailable <= 0
-  buildTowerBtn.disabled = towerAvailable <= 0
+  wallCountEl.textContent = `${ENERGY_SYMBOL}${ENERGY_COST_WALL}`
+  towerCountEl.textContent = `${ENERGY_SYMBOL}${ENERGY_COST_TOWER}`
+  energyCountEl.textContent = `${Math.floor(energy)}`
+  buildWallBtn.disabled = energy < ENERGY_COST_WALL
+  buildTowerBtn.disabled = energy < ENERGY_COST_TOWER
+  if (energyPopTimer > 0) {
+    energyPopTimer = Math.max(0, energyPopTimer - delta)
+    energyCountEl.classList.add('pop')
+  } else {
+    energyCountEl.classList.remove('pop')
+  }
   const nextWaveIn = mobs.length === 0 && nextWaveAt !== 0 ? Math.max(0, Math.ceil((nextWaveAt - now) / 1000)) : 0
   const showNextWave = mobs.length === 0 && nextWaveAt !== 0
   waveEl.textContent = String(showNextWave ? wave + 1 : wave)
@@ -1519,27 +1669,10 @@ const tick = (now: number, delta: number) => {
   // Make unlock instant by removing transition when cooldown is complete
   shootButton.classList.toggle('unlocked', cooldownPercent <= 0.01)
 
-  const wallFraction = wallCharges - Math.floor(wallCharges)
-  const wallCooldownPercent =
-    wallCharges >= WALL_CHARGE_MAX
-      ? 0
-      : wallFraction === 0
-        ? 1
-        : 1 - wallFraction
-  const wallClipPercent = (1 - wallCooldownPercent) * 100
-  buildWallBtn.style.setProperty('--cooldown-clip', `inset(0 0 0 ${wallClipPercent}%)`)
-  buildWallBtn.classList.toggle('unlocked', wallCooldownPercent <= 0.01)
-
-  const towerFraction = towerCharges - Math.floor(towerCharges)
-  const towerCooldownPercent =
-    towerCharges >= TOWER_CHARGE_MAX
-      ? 0
-      : towerFraction === 0
-        ? 1
-        : 1 - towerFraction
-  const towerClipPercent = (1 - towerCooldownPercent) * 100
-  buildTowerBtn.style.setProperty('--cooldown-clip', `inset(0 0 0 ${towerClipPercent}%)`)
-  buildTowerBtn.classList.toggle('unlocked', towerCooldownPercent <= 0.01)
+  buildWallBtn.style.setProperty('--cooldown-clip', 'inset(0 100% 0 0)')
+  buildTowerBtn.style.setProperty('--cooldown-clip', 'inset(0 100% 0 0)')
+  buildWallBtn.classList.add('unlocked')
+  buildTowerBtn.classList.add('unlocked')
 
   composer.render()
 }

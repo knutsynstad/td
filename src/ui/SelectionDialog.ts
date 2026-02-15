@@ -1,5 +1,6 @@
 import { getTowerType } from '../game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from '../game/TowerTypes'
+import { ENERGY_SYMBOL } from '../game/constants'
 
 type SelectionDialogState = {
   selectedCount: number
@@ -10,7 +11,13 @@ type SelectionDialogState = {
     hp: number
     maxHp: number
   } | null
-  upgradeOptions: Array<{ id: TowerUpgradeId, label: string, deltaText: string }>
+  upgradeOptions: Array<{
+    id: TowerUpgradeId
+    label: string
+    deltaText: string
+    cost: number
+    canAfford: boolean
+  }>
   towerDetails: {
     builtBy: string
     killCount: number
@@ -105,38 +112,35 @@ export class SelectionDialog {
       ? `<div class="selection-dialog__group selection-dialog__group--stats">
           <div class="selection-dialog__stats">
             <div class="selection-dialog__stat-row">
-              <span class="selection-dialog__stat-label">Range</span>
+              <span class="selection-dialog__stat-label">Range: ${towerDetails.range.toFixed(1)}</span>
               <span class="selection-dialog__stat-controls">
-                <span class="selection-dialog__stat-value-box">${towerDetails.range.toFixed(1)}</span>
                 ${(() => {
                   const upgrade = upgradesById.get('range')
-                  const disabled = upgradesDisabled || !upgrade
-                  const text = '+'
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="range" ${disabled ? 'disabled' : ''}>${text}</button>`
+                  const disabled = upgradesDisabled || !upgrade || !upgrade.canAfford
+                  const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="range" ${disabled ? 'disabled' : ''}>${label}</button>`
                 })()}
               </span>
             </div>
             <div class="selection-dialog__stat-row">
-              <span class="selection-dialog__stat-label">Damage</span>
+              <span class="selection-dialog__stat-label">Damage: ${towerDetails.damage}</span>
               <span class="selection-dialog__stat-controls">
-                <span class="selection-dialog__stat-value-box">${towerDetails.damage}</span>
                 ${(() => {
                   const upgrade = upgradesById.get('damage')
-                  const disabled = upgradesDisabled || !upgrade
-                  const text = '+'
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="damage" ${disabled ? 'disabled' : ''}>${text}</button>`
+                  const disabled = upgradesDisabled || !upgrade || !upgrade.canAfford
+                  const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="damage" ${disabled ? 'disabled' : ''}>${label}</button>`
                 })()}
               </span>
             </div>
             <div class="selection-dialog__stat-row">
-              <span class="selection-dialog__stat-label">Speed</span>
+              <span class="selection-dialog__stat-label">Speed: ${towerDetails.speed.toFixed(2)}/s</span>
               <span class="selection-dialog__stat-controls">
-                <span class="selection-dialog__stat-value-box">${towerDetails.speed.toFixed(2)}/s</span>
                 ${(() => {
                   const upgrade = upgradesById.get('speed')
-                  const disabled = upgradesDisabled || !upgrade
-                  const text = '+'
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="speed" ${disabled ? 'disabled' : ''}>${text}</button>`
+                  const disabled = upgradesDisabled || !upgrade || !upgrade.canAfford
+                  const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="speed" ${disabled ? 'disabled' : ''}>${label}</button>`
                 })()}
               </span>
             </div>

@@ -191,10 +191,9 @@ canvas {
 }
 
 .selection-dialog__stat-upgrade {
-  width: 30px;
-  min-width: 30px;
+  min-width: 48px;
   height: 30px;
-  padding: 0;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -202,11 +201,12 @@ canvas {
   border: 1px solid rgba(113, 231, 150, 0.55);
   background: linear-gradient(135deg, rgba(49, 173, 96, 0.95), rgba(33, 138, 76, 0.95));
   color: #fff;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: 0.78rem;
+  font-weight: 650;
   line-height: 1;
   text-align: center;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .selection-dialog__stat-upgrade:hover:not(:disabled) {
@@ -258,10 +258,63 @@ canvas {
   align-items: flex-start;
 }
 
+.hud-corner--top-right {
+  top: 32px;
+  right: 32px;
+  align-items: flex-start;
+}
+
 .hud-corner--bottom-right {
   right: 32px;
   bottom: 32px;
   align-items: flex-end;
+}
+
+.hud-energy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(30, 37, 45, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f9d978;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+}
+
+.hud-energy__icon {
+  font-size: 1.05rem;
+}
+
+.hud-energy__value {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.hud-energy__value.pop {
+  animation: energy-counter-pop 0.2s ease-out;
+}
+
+@keyframes energy-counter-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.energy-trail-orb {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #fff9be, #f7c74f 70%, #e39f1b 100%);
+  box-shadow: 0 0 10px rgba(247, 199, 79, 0.9);
+  transform: translate(-9999px, -9999px);
 }
 
 .hud-actions {

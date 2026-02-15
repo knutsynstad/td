@@ -1,5 +1,14 @@
 import * as THREE from 'three'
-import { CASTLE_RADIUS, GRID_SIZE, TOWER_HEIGHT, TOWER_HP, WALL_HP, WORLD_BOUNDS } from '../game/constants'
+import {
+  CASTLE_RADIUS,
+  ENERGY_COST_TOWER,
+  ENERGY_COST_WALL,
+  GRID_SIZE,
+  TOWER_HEIGHT,
+  TOWER_HP,
+  WALL_HP,
+  WORLD_BOUNDS
+} from '../game/constants'
 import type { DestructibleCollider, StaticCollider, Tower } from '../game/types'
 import type { StructureStore } from '../game/structures'
 import { aabbOverlap } from '../physics/collision'
@@ -39,23 +48,23 @@ export const canPlace = (
 export const placeBuilding = (
   center: THREE.Vector3,
   buildMode: BuildMode,
-  towerCharges: number,
-  wallCharges: number,
+  energy: number,
   context: PlaceContext
 ) => {
   const isTower = buildMode === 'tower'
   const size = isTower ? new THREE.Vector3(1, TOWER_HEIGHT, 1) : new THREE.Vector3(1, 1, 1)
   const half = size.clone().multiplyScalar(0.5)
   const snapped = new THREE.Vector3(snapToGrid(center.x), half.y, snapToGrid(center.z))
-  if (!canPlace(snapped, half, context.staticColliders, true)) return { placed: false, wallSpent: 0, towerSpent: 0 }
-  if (isTower ? towerCharges < 1 : wallCharges < 1) return { placed: false, wallSpent: 0, towerSpent: 0 }
+  const requiredEnergy = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL
+  if (!canPlace(snapped, half, context.staticColliders, true)) return { placed: false, energySpent: 0 }
+  if (energy < requiredEnergy) return { placed: false, energySpent: 0 }
 
   let addedCollider: DestructibleCollider
   if (isTower) {
     const tower = context.createTowerAt(snapped, 'base')
     addedCollider = context.structureStore.addTowerCollider(snapped, half, tower.mesh, tower, TOWER_HP)
     context.applyObstacleDelta([addedCollider])
-    return { placed: true, wallSpent: 0, towerSpent: 1 }
+    return { placed: true, energySpent: ENERGY_COST_TOWER }
   }
 
   const mesh = new THREE.Mesh(
@@ -66,7 +75,7 @@ export const placeBuilding = (
   context.scene.add(mesh)
   addedCollider = context.structureStore.addWallCollider(snapped, half, mesh, WALL_HP)
   context.applyObstacleDelta([addedCollider])
-  return { placed: true, wallSpent: 1, towerSpent: 0 }
+  return { placed: true, energySpent: ENERGY_COST_WALL }
 }
 
 export const getCardinalWallLine = (start: THREE.Vector3, end: THREE.Vector3): THREE.Vector3[] => {
@@ -107,16 +116,17 @@ const WALL_LINE_HALF = WALL_LINE_SIZE.clone().multiplyScalar(0.5)
 export const getWallLinePlacement = (
   start: THREE.Vector3,
   end: THREE.Vector3,
-  availableWallCharges: number,
+  energy: number,
   staticColliders: StaticCollider[]
 ) => {
+  const availableWallSegments = Math.floor(energy / ENERGY_COST_WALL)
   const positions = getCardinalWallLine(start, end)
   const validPositions: THREE.Vector3[] = []
   const seenKeys = new Set<string>()
   let blockedPosition: THREE.Vector3 | null = null
 
   for (const pos of positions) {
-    if (validPositions.length >= availableWallCharges) break
+    if (validPositions.length >= availableWallSegments) break
     const snapped = new THREE.Vector3(snapToGrid(pos.x), WALL_LINE_HALF.y, snapToGrid(pos.z))
     const key = `${snapped.x},${snapped.z}`
     if (seenKeys.has(key)) continue
@@ -135,27 +145,27 @@ export const getWallLinePlacement = (
 export const placeWallLine = (
   start: THREE.Vector3,
   end: THREE.Vector3,
-  wallCharges: number,
+  energy: number,
   context: Pick<PlaceContext, 'scene' | 'structureStore' | 'staticColliders' | 'applyObstacleDelta'>
 ) => {
-  const availableWallCharges = Math.floor(wallCharges)
-  if (availableWallCharges <= 0) return 0
-  const { validPositions } = getWallLinePlacement(start, end, availableWallCharges, context.staticColliders)
+  const availableWallSegments = Math.floor(energy / ENERGY_COST_WALL)
+  if (availableWallSegments <= 0) return 0
+  const { validPositions } = getWallLinePlacement(start, end, energy, context.staticColliders)
 
-  return placeWallSegments(validPositions, wallCharges, context)
+  return placeWallSegments(validPositions, energy, context)
 }
 
 export const placeWallSegments = (
   positions: THREE.Vector3[],
-  wallCharges: number,
+  energy: number,
   context: Pick<PlaceContext, 'scene' | 'structureStore' | 'staticColliders' | 'applyObstacleDelta'>
 ) => {
-  const availableWallCharges = Math.floor(wallCharges)
-  if (availableWallCharges <= 0 || positions.length === 0) return 0
+  const availableWallSegments = Math.floor(energy / ENERGY_COST_WALL)
+  if (availableWallSegments <= 0 || positions.length === 0) return 0
 
   let placed = 0
   for (const pos of positions) {
-    if (placed >= availableWallCharges) break
+    if (placed >= availableWallSegments) break
     if (!canPlace(pos, WALL_LINE_HALF, context.staticColliders, true)) continue
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(WALL_LINE_SIZE.x, WALL_LINE_SIZE.y, WALL_LINE_SIZE.z),
