@@ -112,7 +112,8 @@ export class SelectionDialog {
               <span class="selection-dialog__stat-controls">
                 ${(() => {
                   const upgrade = upgradesById.get('range')
-                  const disabled = upgradesDisabled || !upgrade || !upgrade.canAfford
+                  if (!upgrade) return '<span class="selection-dialog__stat-max">Max</span>'
+                  const disabled = upgradesDisabled || !upgrade.canAfford
                   const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
                   return `<button class="selection-dialog__stat-upgrade" data-upgrade="range" ${disabled ? 'disabled' : ''}>${label}</button>`
                 })()}
@@ -123,7 +124,8 @@ export class SelectionDialog {
               <span class="selection-dialog__stat-controls">
                 ${(() => {
                   const upgrade = upgradesById.get('damage')
-                  const disabled = upgradesDisabled || !upgrade || !upgrade.canAfford
+                  if (!upgrade) return '<span class="selection-dialog__stat-max">Max</span>'
+                  const disabled = upgradesDisabled || !upgrade.canAfford
                   const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
                   return `<button class="selection-dialog__stat-upgrade" data-upgrade="damage" ${disabled ? 'disabled' : ''}>${label}</button>`
                 })()}
@@ -134,7 +136,8 @@ export class SelectionDialog {
               <span class="selection-dialog__stat-controls">
                 ${(() => {
                   const upgrade = upgradesById.get('speed')
-                  const disabled = upgradesDisabled || !upgrade || !upgrade.canAfford
+                  if (!upgrade) return '<span class="selection-dialog__stat-max">Max</span>'
+                  const disabled = upgradesDisabled || !upgrade.canAfford
                   const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
                   return `<button class="selection-dialog__stat-upgrade" data-upgrade="speed" ${disabled ? 'disabled' : ''}>${label}</button>`
                 })()}
