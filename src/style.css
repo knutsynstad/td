@@ -21,6 +21,8 @@
 body {
   margin: 0;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #app {
@@ -67,6 +69,8 @@ canvas {
 .selection-dialog__coords {
   font-weight: 500;
   opacity: 0.4;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .selection-dialog__meta,
