@@ -39,6 +39,31 @@ export type Entity = {
   unreachableTime?: number
   username?: string
   lastHitBy?: 'player' | 'tower'
+  spawnerId?: string
+  berserkMode?: boolean
+  berserkTarget?: DestructibleCollider | null
+  representedCount?: number
+}
+
+export type SpawnerRouteState = 'reachable' | 'unstable' | 'blocked'
+
+export type WaveSpawner = {
+  id: string
+  position: THREE.Vector3
+  totalCount: number
+  spawnedCount: number
+  aliveCount: number
+  spawnRatePerSecond: number
+  spawnAccumulator: number
+  routeState: SpawnerRouteState
+}
+
+export type MobCohort = {
+  spawnerId: string
+  representedCount: number
+  x: number
+  z: number
+  berserk: boolean
 }
 
 export type Tower = {

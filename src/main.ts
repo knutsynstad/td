@@ -10,13 +10,16 @@ import { SelectionDialog } from './ui/SelectionDialog'
 import { StructureStore } from './game/structures'
 import { getTowerType, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from './game/TowerTypes'
-import type { DestructibleCollider, Entity, StaticCollider, Tower } from './game/types'
-import { WaypointCache } from './utils/WaypointCache'
+import type { DestructibleCollider, Entity, StaticCollider, Tower, WaveSpawner } from './game/types'
 import { SpatialGrid } from './utils/SpatialGrid'
 import { createParticleSystem } from './effects/particles'
 import { clamp, distanceToColliderSurface, resolveCircleCircle } from './physics/collision'
 import { createEntityMotionSystem } from './entities/motion'
 import { createGameLoop } from './game/GameLoop'
+import { createWaveSpawners, emitFromSpawner, areWaveSpawnersDone } from './game/spawners'
+import { buildSpawnerPathline, type SpawnerPathline } from './pathfinding/spawnerPathlines'
+import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
+import { CohortStore } from './game/cohorts'
 import {
   canPlace as canPlaceAt,
   getWallLinePlacement as computeWallLinePlacement,
@@ -50,11 +53,18 @@ import {
   FLOW_FIELD_RESOLUTION,
   FLOW_FIELD_SIZE,
   GRID_SIZE,
+  HEALTHBAR_MAX_VISIBLE,
+  MAX_VISIBLE_MOB_INSTANCES,
+  MOB_INSTANCE_CAP,
+  MOB_INSTANCE_RENDER_RADIUS,
   MOB_SIEGE_ATTACK_COOLDOWN,
   MOB_SIEGE_DAMAGE,
   MOB_SIEGE_RANGE_BUFFER,
   MOB_SIEGE_UNREACHABLE_GRACE,
   MOB_SPEED,
+  PATHLINE_MAX_STEPS,
+  PATHLINE_SAMPLE_EVERY,
+  PATHLINE_STEP_DISTANCE,
   NPC_SPEED,
   PLAYER_SPEED,
   SELECTION_RADIUS,
@@ -63,6 +73,11 @@ import {
   SPATIAL_GRID_CELL_SIZE,
   TOWER_HEIGHT,
   TOWER_HP,
+  WAVE_MAX_SPAWNERS,
+  WAVE_MIN_SPAWNERS,
+  WAVE_SPAWNER_BASE_RATE,
+  WAVE_SPAWN_RADIUS_MAX,
+  WAVE_SPAWN_RADIUS_MIN,
   WALL_HP,
   WORLD_BOUNDS
 } from './game/constants'
@@ -395,28 +410,51 @@ const flowField = new FlowField({
   worldBounds: WORLD_BOUNDS
 })
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
-const waypointCache = new WaypointCache(GRID_SIZE * 2) // Share waypoints within 2 grid cells
 const castleGoal = new THREE.Vector3(0, 0, 0)
-let pendingWaypointRefresh = false
-let pendingWaypointRefreshIndex = 0
-const WAYPOINT_REFRESH_BATCH_SIZE = 200
+const activeWaveSpawners: WaveSpawner[] = []
+const spawnerById = new Map<string, WaveSpawner>()
+const spawnerPathlineCache = new Map<string, SpawnerPathline>()
+const spawnerRouteOverlay = new SpawnerPathOverlay(scene)
+const cohortStore = new CohortStore()
 
-const refreshAllMobWaypoints = () => {
-  pendingWaypointRefresh = false
-  pendingWaypointRefreshIndex = 0
-  for (const mob of mobs) {
-    const waypoints = flowField.computeWaypoints(mob.mesh.position, castleGoal)
-    mob.waypoints = waypoints
-    mob.waypointIndex = 0
+const mobInstanceMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(0.8, 0.8, 0.8),
+  new THREE.MeshStandardMaterial({ color: 0xff7a7a }),
+  MOB_INSTANCE_CAP
+)
+mobInstanceMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+mobInstanceMesh.frustumCulled = false
+scene.add(mobInstanceMesh)
+const mobLogicGeometry = new THREE.BoxGeometry(0.8, 0.8, 0.8)
+const mobLogicMaterial = new THREE.MeshBasicMaterial({ visible: false })
+const mobInstanceDummy = new THREE.Object3D()
+const normalMobColor = new THREE.Color(0xff7a7a)
+const berserkMobColor = new THREE.Color(0xff3a3a)
+
+const refreshSpawnerPathline = (spawner: WaveSpawner) => {
+  const route = buildSpawnerPathline({
+    flowField,
+    start: spawner.position,
+    goal: castleGoal,
+    stepDistance: PATHLINE_STEP_DISTANCE,
+    sampleEvery: PATHLINE_SAMPLE_EVERY,
+    maxSteps: PATHLINE_MAX_STEPS
+  })
+  spawner.routeState = route.state
+  spawnerPathlineCache.set(spawner.id, route)
+  spawnerRouteOverlay.upsert(spawner.id, route.points, route.state)
+}
+
+const refreshAllSpawnerPathlines = () => {
+  for (const spawner of activeWaveSpawners) {
+    refreshSpawnerPathline(spawner)
   }
 }
 
 const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] = []) => {
   const changed = flowField.applyObstacleDelta(staticColliders, added, removed, castleGoal)
   if (!changed) return
-  waypointCache.clear()
-  pendingWaypointRefresh = true
-  pendingWaypointRefreshIndex = 0
+  refreshAllSpawnerPathlines()
 }
 
 // Compute initial flow field (exclude castle from pathfinding)
@@ -577,21 +615,12 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
   return tower
 }
 
-const makeMob = (pos: THREE.Vector3) => {
-  const mob = new THREE.Mesh(
-    new THREE.BoxGeometry(0.8, 0.8, 0.8),
-    new THREE.MeshStandardMaterial({ color: 0xff7a7a })
-  )
+const makeMob = (spawner: WaveSpawner) => {
+  const jitter = new THREE.Vector3((Math.random() - 0.5) * 0.6, 0, (Math.random() - 0.5) * 0.6)
+  const pos = spawner.position.clone().add(jitter)
+  const mob = new THREE.Mesh(mobLogicGeometry, mobLogicMaterial)
   mob.position.copy(pos).setY(0.4)
-  scene.add(mob)
-  
-  // Try to get cached waypoints, otherwise compute new ones
-  let waypoints = waypointCache.get(pos)
-  if (!waypoints) {
-    waypoints = flowField.computeWaypoints(pos, castleGoal)
-    waypointCache.set(pos, waypoints)
-  }
-  
+
   const maxHp = 3
   mobs.push({
     mesh: mob,
@@ -603,13 +632,14 @@ const makeMob = (pos: THREE.Vector3) => {
     hp: maxHp,
     maxHp: maxHp,
     baseY: 0.4,
-    waypoints: waypoints.map(w => w.clone()), // Clone for this mob
-    waypointIndex: 0,
-    siegeMode: false,
-    siegeTarget: null,
+    waypoints: undefined,
+    waypointIndex: undefined,
+    berserkMode: false,
+    berserkTarget: null,
     siegeAttackCooldown: 0,
     unreachableTime: 0,
-    lastHitBy: undefined
+    lastHitBy: undefined,
+    spawnerId: spawner.id
   })
 }
 
@@ -840,8 +870,9 @@ const updateFloatingDamageTexts = (delta: number) => {
 const updateHealthBars = () => {
   // Clear existing health bars
   healthBarContainer.innerHTML = ''
-  
+  let renderedBars = 0
   for (const mob of mobs) {
+    if (renderedBars >= HEALTHBAR_MAX_VISIBLE) break
     if (mob.maxHp === undefined) continue
     // Only show health bar if not full
     if (mob.hp !== undefined && mob.maxHp !== undefined && mob.hp >= mob.maxHp) continue
@@ -872,6 +903,7 @@ const updateHealthBars = () => {
     
     healthBar.appendChild(healthFill)
     healthBarContainer.appendChild(healthBar)
+    renderedBars += 1
   }
 }
 
@@ -1200,8 +1232,7 @@ for (const pos of prebuiltTowers) {
 
 // Rebuild once after initial static map setup.
 flowField.rebuildAll(staticColliders, castleGoal)
-waypointCache.clear()
-refreshAllMobWaypoints()
+refreshAllSpawnerPathlines()
 
 const resetGame = () => {
   lives = 1
@@ -1225,9 +1256,18 @@ const resetGame = () => {
   wallDragValidPositions = []
 
   for (const mob of mobs) {
-    scene.remove(mob.mesh)
+    if (mob.spawnerId) {
+      const spawner = spawnerById.get(mob.spawnerId)
+      if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
+    }
   }
   mobs.length = 0
+  mobInstanceMesh.count = 0
+  spawnerById.clear()
+  activeWaveSpawners.length = 0
+  spawnerPathlineCache.clear()
+  spawnerRouteOverlay.clear()
+  cohortStore.clear()
 
   for (const tower of towers) {
     scene.remove(tower.mesh)
@@ -1252,7 +1292,7 @@ const resetGame = () => {
   activeEnergyTrails.length = 0
 
   flowField.rebuildAll(staticColliders, castleGoal)
-  waypointCache.clear()
+  refreshAllSpawnerPathlines()
 }
 
 const setMoveTarget = (pos: THREE.Vector3) => {
@@ -1281,10 +1321,10 @@ const motionSystem = createEntityMotionSystem({
   npcs,
   castleGoal,
   constants: {
-    mobSiegeAttackCooldown: MOB_SIEGE_ATTACK_COOLDOWN,
-    mobSiegeDamage: MOB_SIEGE_DAMAGE,
-    mobSiegeRangeBuffer: MOB_SIEGE_RANGE_BUFFER,
-    mobSiegeUnreachableGrace: MOB_SIEGE_UNREACHABLE_GRACE,
+    mobBerserkAttackCooldown: MOB_SIEGE_ATTACK_COOLDOWN,
+    mobBerserkDamage: MOB_SIEGE_DAMAGE,
+    mobBerserkRangeBuffer: MOB_SIEGE_RANGE_BUFFER,
+    mobBerserkUnreachableGrace: MOB_SIEGE_UNREACHABLE_GRACE,
     worldBounds: WORLD_BOUNDS,
     gridSize: GRID_SIZE
   },
@@ -1422,13 +1462,26 @@ const triggerEventBanner = (text: string) => {
 const spawnWave = () => {
   wave += 1
   const count = (5 + wave * 2) * 10
-  for (let i = 0; i < count; i += 1) {
-    const angle = Math.random() * Math.PI * 2
-    const radius = 22 + Math.random() * 6
-    const pos = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
-    makeMob(pos)
+  spawnerRouteOverlay.clear()
+  spawnerPathlineCache.clear()
+  cohortStore.clear()
+  activeWaveSpawners.length = 0
+  spawnerById.clear()
+  const created = createWaveSpawners({
+    wave,
+    totalMobCount: count,
+    minSpawners: WAVE_MIN_SPAWNERS,
+    maxSpawners: WAVE_MAX_SPAWNERS,
+    minRadius: WAVE_SPAWN_RADIUS_MIN,
+    maxRadius: WAVE_SPAWN_RADIUS_MAX,
+    baseSpawnRate: WAVE_SPAWNER_BASE_RATE
+  })
+  for (const spawner of created) {
+    activeWaveSpawners.push(spawner)
+    spawnerById.set(spawner.id, spawner)
+    refreshSpawnerPathline(spawner)
   }
-  triggerEventBanner(`Wave ${wave} spawned`)
+  triggerEventBanner(`Wave ${wave} spawned (${activeWaveSpawners.length} spawners)`)
 }
 
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
@@ -1451,6 +1504,35 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 
 const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
 
+const updateMobInstanceRender = () => {
+  const maxVisible = Math.min(MAX_VISIBLE_MOB_INSTANCES, MOB_INSTANCE_CAP)
+  const camX = camera.position.x
+  const camZ = camera.position.z
+  let renderCount = 0
+
+  for (const mob of mobs) {
+    const dx = mob.mesh.position.x - camX
+    const dz = mob.mesh.position.z - camZ
+    const distSq = dx * dx + dz * dz
+    if (distSq > MOB_INSTANCE_RENDER_RADIUS * MOB_INSTANCE_RENDER_RADIUS) continue
+    if (renderCount >= maxVisible) break
+    mobInstanceDummy.position.copy(mob.mesh.position)
+    mobInstanceDummy.position.y = mob.baseY
+    mobInstanceDummy.scale.setScalar(1)
+    mobInstanceDummy.rotation.set(0, 0, 0)
+    mobInstanceDummy.updateMatrix()
+    mobInstanceMesh.setMatrixAt(renderCount, mobInstanceDummy.matrix)
+    mobInstanceMesh.setColorAt(renderCount, mob.berserkMode ? berserkMobColor : normalMobColor)
+    renderCount += 1
+  }
+
+  mobInstanceMesh.count = renderCount
+  mobInstanceMesh.instanceMatrix.needsUpdate = true
+  if (mobInstanceMesh.instanceColor) {
+    mobInstanceMesh.instanceColor.needsUpdate = true
+  }
+}
+
 const tick = (now: number, delta: number) => {
   energy = Math.min(ENERGY_CAP, energy + ENERGY_REGEN_RATE * delta)
   if (buildMode === 'wall' && energy < ENERGY_COST_WALL) {
@@ -1460,18 +1542,10 @@ const tick = (now: number, delta: number) => {
     setBuildMode('off')
   }
 
-  if (pendingWaypointRefresh) {
-    const stop = Math.min(mobs.length, pendingWaypointRefreshIndex + WAYPOINT_REFRESH_BATCH_SIZE)
-    for (let i = pendingWaypointRefreshIndex; i < stop; i += 1) {
-      const mob = mobs[i]!
-      mob.waypoints = flowField.computeWaypoints(mob.mesh.position, castleGoal)
-      mob.waypointIndex = 0
-    }
-    pendingWaypointRefreshIndex = stop
-    if (pendingWaypointRefreshIndex >= mobs.length) {
-      pendingWaypointRefresh = false
-      pendingWaypointRefreshIndex = 0
-    }
+  for (const spawner of activeWaveSpawners) {
+    emitFromSpawner(spawner, delta, (fromSpawner) => {
+      makeMob(fromSpawner)
+    })
   }
 
   updateNpcTargets()
@@ -1483,6 +1557,14 @@ const tick = (now: number, delta: number) => {
   for (const mob of mobs) {
     mob.target.set(0, 0, 0)
     updateEntityMotion(mob, delta)
+  }
+
+  for (const spawner of activeWaveSpawners) {
+    const mobCountForSpawner = mobs.filter((mob) => mob.spawnerId === spawner.id).length
+    const sample = mobs.find((mob) => mob.spawnerId === spawner.id)
+    const samplePos = sample?.mesh.position ?? spawner.position
+    const berserk = mobs.some((mob) => mob.spawnerId === spawner.id && mob.berserkMode)
+    cohortStore.setRepresented(spawner.id, samplePos.x, samplePos.z, mobCountForSpawner, berserk)
   }
 
   spatialGrid.clear()
@@ -1546,7 +1628,10 @@ const tick = (now: number, delta: number) => {
     if (distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) <= 0.2) {
       spawnCubeEffects(mob.mesh.position.clone())
       lives = Math.max(lives - 1, 0)
-      scene.remove(mob.mesh)
+      if (mob.spawnerId) {
+        const spawner = spawnerById.get(mob.spawnerId)
+        if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
+      }
       mobs.splice(i, 1)
       if (lives === 0) {
         resetGame()
@@ -1557,15 +1642,19 @@ const tick = (now: number, delta: number) => {
       if (mob.lastHitBy === 'player') {
         spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL)
       }
-      scene.remove(mob.mesh)
+      if (mob.spawnerId) {
+        const spawner = spawnerById.get(mob.spawnerId)
+        if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
+      }
       mobs.splice(i, 1)
     }
   }
 
-  if (wave > 0 && mobs.length === 0 && nextWaveAt === 0) {
+  const waveComplete = wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
+  if (waveComplete && nextWaveAt === 0) {
     nextWaveAt = now + 10000
   }
-  if (mobs.length === 0 && now >= nextWaveAt && nextWaveAt !== 0) {
+  if (waveComplete && now >= nextWaveAt && nextWaveAt !== 0) {
     nextWaveAt = 0
     spawnWave()
   }
@@ -1665,6 +1754,7 @@ const tick = (now: number, delta: number) => {
   camera.position.copy(player.mesh.position).add(cameraOffset)
   camera.lookAt(player.mesh.position)
   camera.updateMatrixWorld()
+  updateMobInstanceRender()
 
   updateHealthBars()
   updateUsernameLabels()
@@ -1685,8 +1775,8 @@ const tick = (now: number, delta: number) => {
   } else {
     energyCountEl.classList.remove('pop')
   }
-  const nextWaveIn = mobs.length === 0 && nextWaveAt !== 0 ? Math.max(0, Math.ceil((nextWaveAt - now) / 1000)) : 0
-  const showNextWave = mobs.length === 0 && nextWaveAt !== 0
+  const nextWaveIn = waveComplete && nextWaveAt !== 0 ? Math.max(0, Math.ceil((nextWaveAt - now) / 1000)) : 0
+  const showNextWave = waveComplete && nextWaveAt !== 0
   waveEl.textContent = String(showNextWave ? wave + 1 : wave)
   nextWaveRowEl.style.display = showNextWave ? '' : 'none'
   mobsRowEl.style.display = showNextWave ? 'none' : ''
@@ -1695,7 +1785,8 @@ const tick = (now: number, delta: number) => {
     nextWaveSecondaryEl.textContent = `In ${nextWaveIn} seconds`
   } else {
     mobsPrimaryEl.textContent = ''
-    mobsSecondaryEl.textContent = `${mobs.length} mobs left`
+    const representedMobs = Math.max(mobs.length, cohortStore.getTotalRepresented())
+    mobsSecondaryEl.textContent = `${representedMobs} mobs left`
   }
 
   if (nextWaveIn > 0 && nextWaveIn <= 5) {
@@ -1706,7 +1797,7 @@ const tick = (now: number, delta: number) => {
     finalCountdownEl.textContent = ''
   }
 
-  if (prevMobsCount > 0 && mobs.length === 0) {
+  if (prevMobsCount > 0 && waveComplete) {
     triggerEventBanner('Wave cleared')
   }
 
@@ -1718,7 +1809,7 @@ const tick = (now: number, delta: number) => {
     }
   }
 
-  prevMobsCount = mobs.length
+  prevMobsCount = Math.max(mobs.length, cohortStore.getTotalRepresented())
   
   // Update shoot button cooldown visual
   const cooldownPercent = Math.min(1, shootCooldown / SHOOT_COOLDOWN)

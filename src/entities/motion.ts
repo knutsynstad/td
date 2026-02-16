@@ -6,10 +6,10 @@ import type { SpatialGrid } from '../utils/SpatialGrid'
 import { clamp, distanceToColliderSurface, resolveCircleAabb } from '../physics/collision'
 
 type MobConstants = {
-  mobSiegeAttackCooldown: number
-  mobSiegeDamage: number
-  mobSiegeRangeBuffer: number
-  mobSiegeUnreachableGrace: number
+  mobBerserkAttackCooldown: number
+  mobBerserkDamage: number
+  mobBerserkRangeBuffer: number
+  mobBerserkUnreachableGrace: number
   worldBounds: number
   gridSize: number
 }
@@ -43,7 +43,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     return false
   }
 
-  const pickSiegeTarget = (mob: Entity): DestructibleCollider | null => {
+  const pickBerserkTarget = (mob: Entity): DestructibleCollider | null => {
     const options = context.structureStore.getDestructibleColliders()
     if (options.length === 0) return null
 
@@ -56,7 +56,8 @@ export const createEntityMotionSystem = (context: MotionContext) => {
       const planarDist = Math.hypot(toTarget.x, toTarget.z)
       const dirToTarget = planarDist > 0.0001 ? toTarget.multiplyScalar(1 / planarDist) : null
       const alignment = towardWall && dirToTarget ? Math.max(0, towardWall.dot(dirToTarget)) : 0
-      const score = planarDist - alignment * 3
+      const towerPriorityBonus = collider.type === 'tower' ? 8 : 0
+      const score = planarDist - alignment * 3 - towerPriorityBonus
       if (score < bestScore) {
         bestScore = score
         best = collider
@@ -65,42 +66,42 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     return best
   }
 
-  const updateMobSiegeState = (mob: Entity, delta: number) => {
+  const updateMobBerserkState = (mob: Entity, delta: number) => {
     mob.siegeAttackCooldown = Math.max((mob.siegeAttackCooldown ?? 0) - delta, 0)
     const reachable = context.flowField.isReachable(mob.mesh.position)
     if (reachable) {
       mob.unreachableTime = 0
-      mob.siegeMode = false
-      mob.siegeTarget = null
+      mob.berserkMode = false
+      mob.berserkTarget = null
       return
     }
 
     mob.unreachableTime = (mob.unreachableTime ?? 0) + delta
-    if (!mob.siegeMode && (mob.unreachableTime ?? 0) >= context.constants.mobSiegeUnreachableGrace) {
-      mob.siegeTarget = pickSiegeTarget(mob)
-      mob.siegeMode = mob.siegeTarget !== null
+    if (!mob.berserkMode && (mob.unreachableTime ?? 0) >= context.constants.mobBerserkUnreachableGrace) {
+      mob.berserkTarget = pickBerserkTarget(mob)
+      mob.berserkMode = mob.berserkTarget !== null
     }
   }
 
-  const getMobSiegeDirection = (mob: Entity): THREE.Vector3 | null => {
-    if (!mob.siegeMode) return null
+  const getMobBerserkDirection = (mob: Entity): THREE.Vector3 | null => {
+    if (!mob.berserkMode) return null
 
-    if (!mob.siegeTarget || !context.structureStore.structureStates.has(mob.siegeTarget)) {
-      mob.siegeTarget = pickSiegeTarget(mob)
-      if (!mob.siegeTarget) {
-        mob.siegeMode = false
+    if (!mob.berserkTarget || !context.structureStore.structureStates.has(mob.berserkTarget)) {
+      mob.berserkTarget = pickBerserkTarget(mob)
+      if (!mob.berserkTarget) {
+        mob.berserkMode = false
         return null
       }
     }
 
-    const target = mob.siegeTarget
+    const target = mob.berserkTarget
     const distanceToSurface = distanceToColliderSurface(mob.mesh.position, mob.radius, target)
-    if (distanceToSurface <= context.constants.mobSiegeRangeBuffer) {
+    if (distanceToSurface <= context.constants.mobBerserkRangeBuffer) {
       if ((mob.siegeAttackCooldown ?? 0) <= 0) {
-        context.structureStore.damageStructure(target, context.constants.mobSiegeDamage, (collider) => {
+        context.structureStore.damageStructure(target, context.constants.mobBerserkDamage, (collider) => {
           context.spawnCubeEffects(collider.center.clone())
         })
-        mob.siegeAttackCooldown = context.constants.mobSiegeAttackCooldown
+        mob.siegeAttackCooldown = context.constants.mobBerserkAttackCooldown
       }
       return new THREE.Vector3(0, 0, 0)
     }
@@ -141,12 +142,12 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     let dir = new THREE.Vector3()
 
     if (entity.kind === 'mob' && entity.waypoints && entity.waypointIndex !== undefined) {
-      updateMobSiegeState(entity, delta)
+      updateMobBerserkState(entity, delta)
 
-      if (entity.siegeMode) {
-        const siegeDir = getMobSiegeDirection(entity)
-        if (siegeDir) {
-          dir.copy(siegeDir)
+      if (entity.berserkMode) {
+        const berserkDir = getMobBerserkDirection(entity)
+        if (berserkDir) {
+          dir.copy(berserkDir)
         } else {
           dir = context.flowField.getDirection(entity.mesh.position)
         }
@@ -189,14 +190,14 @@ export const createEntityMotionSystem = (context: MotionContext) => {
         }
       }
     } else if (entity.kind === 'mob') {
-      updateMobSiegeState(entity, delta)
+      updateMobBerserkState(entity, delta)
 
-      if (entity.siegeMode) {
-        const siegeDir = getMobSiegeDirection(entity)
-        if (siegeDir) dir.copy(siegeDir)
+      if (entity.berserkMode) {
+        const berserkDir = getMobBerserkDirection(entity)
+        if (berserkDir) dir.copy(berserkDir)
       }
 
-      if (!entity.siegeMode) {
+      if (!entity.berserkMode) {
         dir = context.flowField.getDirection(entity.mesh.position)
         applyAvoidance(entity, dir)
       }
