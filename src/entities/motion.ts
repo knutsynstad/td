@@ -148,16 +148,6 @@ export const createEntityMotionSystem = (context: MotionContext) => {
         let waypointIdx = entity.waypointIndex
 
         if (waypointIdx < waypoints.length) {
-          // If we're already closer to a forward waypoint, skip stale behind points.
-          while (
-            waypointIdx + 1 < waypoints.length &&
-            entity.mesh.position.distanceTo(waypoints[waypointIdx + 1]!) + 0.05 <
-              entity.mesh.position.distanceTo(waypoints[waypointIdx]!)
-          ) {
-            waypointIdx += 1
-            entity.waypointIndex = waypointIdx
-          }
-
           const targetWaypoint = waypoints[waypointIdx]
           const distToWaypoint = entity.mesh.position.distanceTo(targetWaypoint)
           // Let mobs "claim" a waypoint earlier when crowded to reduce waypoint pileups.
@@ -186,24 +176,6 @@ export const createEntityMotionSystem = (context: MotionContext) => {
         }
 
         applyAvoidance(entity, dir, 0.12)
-
-        if (entity.waypointIndex !== undefined && entity.waypointIndex < waypoints.length) {
-          const currentIdx = entity.waypointIndex
-          const currentDist = entity.mesh.position.distanceTo(waypoints[currentIdx]!)
-          if (currentDist > context.constants.gridSize * 8) {
-            const probeLimit = Math.min(waypoints.length, currentIdx + 20)
-            let bestIdx = currentIdx
-            let bestDist = currentDist
-            for (let i = currentIdx; i < probeLimit; i += 1) {
-              const d = entity.mesh.position.distanceTo(waypoints[i]!)
-              if (d < bestDist) {
-                bestDist = d
-                bestIdx = i
-              }
-            }
-            entity.waypointIndex = bestIdx
-          }
-        }
       }
     } else if (entity.kind === 'mob') {
       updateMobBerserkState(entity, delta)
