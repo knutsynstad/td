@@ -274,16 +274,24 @@ class WorldGrid {
     }
     this.lines = []
 
-    const minX = Math.floor((bounds.minX - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
-    const maxX = Math.ceil((bounds.maxX - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
-    const minZ = Math.floor((bounds.minZ - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
-    const maxZ = Math.ceil((bounds.maxZ - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
+    const clampedMinX = Math.max(bounds.minX, -WORLD_BOUNDS)
+    const clampedMaxX = Math.min(bounds.maxX, WORLD_BOUNDS)
+    const clampedMinZ = Math.max(bounds.minZ, -WORLD_BOUNDS)
+    const clampedMaxZ = Math.min(bounds.maxZ, WORLD_BOUNDS)
+    if (clampedMinX > clampedMaxX || clampedMinZ > clampedMaxZ) {
+      return
+    }
+
+    const minX = Math.ceil((clampedMinX - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
+    const maxX = Math.floor((clampedMaxX - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
+    const minZ = Math.ceil((clampedMinZ - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
+    const maxZ = Math.floor((clampedMaxZ - this.halfGrid) / GRID_SIZE) * GRID_SIZE + this.halfGrid
 
     // Create vertical lines (along Z axis)
     for (let x = minX; x <= maxX; x += GRID_SIZE) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x, 0.01, bounds.minZ),
-        new THREE.Vector3(x, 0.01, bounds.maxZ)
+        new THREE.Vector3(x, 0.01, clampedMinZ),
+        new THREE.Vector3(x, 0.01, clampedMaxZ)
       ])
       const line = new THREE.Line(geometry, this.lineMaterial)
       this.group.add(line)
@@ -293,8 +301,8 @@ class WorldGrid {
     // Create horizontal lines (along X axis)
     for (let z = minZ; z <= maxZ; z += GRID_SIZE) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(bounds.minX, 0.01, z),
-        new THREE.Vector3(bounds.maxX, 0.01, z)
+        new THREE.Vector3(clampedMinX, 0.01, z),
+        new THREE.Vector3(clampedMaxX, 0.01, z)
       ])
       const line = new THREE.Line(geometry, this.lineMaterial)
       this.group.add(line)
@@ -317,77 +325,6 @@ class WorldBorder {
     const material = new THREE.LineBasicMaterial({ color: 0xd96464, transparent: true, opacity: 0.95 })
     this.line = new THREE.LineLoop(geometry, material)
     scene.add(this.line)
-  }
-}
-
-class OutsidePattern {
-  private readonly material: THREE.LineBasicMaterial
-  private lineSegments: THREE.LineSegments | null = null
-  private lastBounds: GroundBounds | null = null
-  private readonly stripeSpacing: number
-
-  constructor() {
-    this.material = new THREE.LineBasicMaterial({ color: 0x3a4652, transparent: true, opacity: 0.45 })
-    this.stripeSpacing = GRID_SIZE * 8
-  }
-
-  private addRectStripes(vertices: number[], minX: number, maxX: number, minZ: number, maxZ: number) {
-    if (maxX - minX <= 0.001 || maxZ - minZ <= 0.001) return
-    for (let x = minX; x <= maxX; x += this.stripeSpacing) {
-      const len = Math.min(maxX - x, maxZ - minZ)
-      if (len <= 0) continue
-      vertices.push(x, 0.03, minZ, x + len, 0.03, minZ + len)
-    }
-    for (let z = minZ + this.stripeSpacing; z <= maxZ; z += this.stripeSpacing) {
-      const len = Math.min(maxX - minX, maxZ - z)
-      if (len <= 0) continue
-      vertices.push(minX, 0.03, z, minX + len, 0.03, z + len)
-    }
-  }
-
-  update(bounds: GroundBounds) {
-    if (
-      this.lastBounds &&
-      this.lastBounds.minX === bounds.minX &&
-      this.lastBounds.maxX === bounds.maxX &&
-      this.lastBounds.minZ === bounds.minZ &&
-      this.lastBounds.maxZ === bounds.maxZ
-    ) {
-      return
-    }
-    this.lastBounds = bounds
-
-    if (this.lineSegments) {
-      scene.remove(this.lineSegments)
-      this.lineSegments.geometry.dispose()
-      this.lineSegments = null
-    }
-
-    const vertices: number[] = []
-    // Left and right outside regions.
-    if (bounds.minX < -WORLD_BOUNDS) {
-      this.addRectStripes(vertices, bounds.minX, -WORLD_BOUNDS, bounds.minZ, bounds.maxZ)
-    }
-    if (bounds.maxX > WORLD_BOUNDS) {
-      this.addRectStripes(vertices, WORLD_BOUNDS, bounds.maxX, bounds.minZ, bounds.maxZ)
-    }
-    // Top and bottom outside regions (interior X-span only).
-    const innerMinX = Math.max(bounds.minX, -WORLD_BOUNDS)
-    const innerMaxX = Math.min(bounds.maxX, WORLD_BOUNDS)
-    if (innerMaxX - innerMinX > 0.001) {
-      if (bounds.minZ < -WORLD_BOUNDS) {
-        this.addRectStripes(vertices, innerMinX, innerMaxX, bounds.minZ, -WORLD_BOUNDS)
-      }
-      if (bounds.maxZ > WORLD_BOUNDS) {
-        this.addRectStripes(vertices, innerMinX, innerMaxX, WORLD_BOUNDS, bounds.maxZ)
-      }
-    }
-
-    if (vertices.length === 0) return
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
-    this.lineSegments = new THREE.LineSegments(geometry, this.material)
-    scene.add(this.lineSegments)
   }
 }
 
@@ -420,24 +357,33 @@ class SpawnContainerOverlay {
 
 const worldGrid = new WorldGrid()
 new WorldBorder()
-const outsidePattern = new OutsidePattern()
 const spawnContainerOverlay = new SpawnContainerOverlay()
 let lastGroundBounds: GroundBounds | null = null
 const updateGroundFromBounds = (bounds: GroundBounds) => {
+  const clampedBounds: GroundBounds = {
+    minX: Math.max(bounds.minX, -WORLD_BOUNDS),
+    maxX: Math.min(bounds.maxX, WORLD_BOUNDS),
+    minZ: Math.max(bounds.minZ, -WORLD_BOUNDS),
+    maxZ: Math.min(bounds.maxZ, WORLD_BOUNDS)
+  }
+  if (clampedBounds.minX > clampedBounds.maxX || clampedBounds.minZ > clampedBounds.maxZ) {
+    return
+  }
+
   if (
     lastGroundBounds &&
-    lastGroundBounds.minX === bounds.minX &&
-    lastGroundBounds.maxX === bounds.maxX &&
-    lastGroundBounds.minZ === bounds.minZ &&
-    lastGroundBounds.maxZ === bounds.maxZ
+    lastGroundBounds.minX === clampedBounds.minX &&
+    lastGroundBounds.maxX === clampedBounds.maxX &&
+    lastGroundBounds.minZ === clampedBounds.minZ &&
+    lastGroundBounds.maxZ === clampedBounds.maxZ
   ) {
     return
   }
-  lastGroundBounds = bounds
-  const width = bounds.maxX - bounds.minX
-  const depth = bounds.maxZ - bounds.minZ
+  lastGroundBounds = clampedBounds
+  const width = clampedBounds.maxX - clampedBounds.minX
+  const depth = clampedBounds.maxZ - clampedBounds.minZ
   ground.scale.set(width, depth, 1)
-  ground.position.set((bounds.minX + bounds.maxX) * 0.5, 0, (bounds.minZ + bounds.maxZ) * 0.5)
+  ground.position.set((clampedBounds.minX + clampedBounds.maxX) * 0.5, 0, (clampedBounds.minZ + clampedBounds.maxZ) * 0.5)
 }
 
 const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x1b232b })
@@ -2037,7 +1983,6 @@ const tick = (now: number, delta: number) => {
   const visibleBounds = getVisibleGroundBounds(camera)
   updateGroundFromBounds(visibleBounds)
   worldGrid.update(visibleBounds)
-  outsidePattern.update(visibleBounds)
 
   wallCountEl.textContent = `${ENERGY_SYMBOL}${ENERGY_COST_WALL}`
   towerCountEl.textContent = `${ENERGY_SYMBOL}${ENERGY_COST_TOWER}`
