@@ -116,6 +116,11 @@ app.innerHTML = `
         <button id="shootButton" class="shoot-button">Shoot</button>
       </div>
     </div>
+    <div class="hud-corner hud-corner--bottom-left">
+      <div class="hud-minimap-wrap">
+        <canvas id="hudMinimap" class="hud-minimap" aria-label="Mob minimap"></canvas>
+      </div>
+    </div>
   </div>
 `
 
@@ -135,6 +140,8 @@ const hudActionsEl = document.querySelector<HTMLDivElement>('.hud-actions')!
 const buildWallBtn = document.querySelector<HTMLButtonElement>('#buildWall')!
 const buildTowerBtn = document.querySelector<HTMLButtonElement>('#buildTower')!
 const shootButton = document.querySelector<HTMLButtonElement>('#shootButton')!
+const minimapCanvasEl = document.querySelector<HTMLCanvasElement>('#hudMinimap')!
+const minimapCtx = minimapCanvasEl.getContext('2d')
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x10151a)
@@ -993,6 +1000,66 @@ const activeDamageTexts: FloatingDamageText[] = []
 const CRIT_CHANCE = 1 / 8
 const CRIT_MULTIPLIER = 2
 
+const syncMinimapCanvasSize = () => {
+  const rect = minimapCanvasEl.getBoundingClientRect()
+  const pixelRatio = Math.max(1, Math.min(window.devicePixelRatio, 2))
+  const width = Math.max(1, Math.round(rect.width * pixelRatio))
+  const height = Math.max(1, Math.round(rect.height * pixelRatio))
+  if (minimapCanvasEl.width !== width || minimapCanvasEl.height !== height) {
+    minimapCanvasEl.width = width
+    minimapCanvasEl.height = height
+  }
+}
+
+const drawMinimap = () => {
+  if (!minimapCtx) return
+  const width = minimapCanvasEl.width
+  const height = minimapCanvasEl.height
+  if (width <= 0 || height <= 0) return
+
+  minimapCtx.clearRect(0, 0, width, height)
+  minimapCtx.fillStyle = 'rgba(22, 28, 35, 0.92)'
+  minimapCtx.fillRect(0, 0, width, height)
+
+  // Keep minimap orientation aligned with the camera view.
+  const forward3 = camera.getWorldDirection(new THREE.Vector3())
+  const forward2 = new THREE.Vector2(forward3.x, forward3.z)
+  if (forward2.lengthSq() <= 1e-5) {
+    forward2.set(0, -1)
+  } else {
+    forward2.normalize()
+  }
+  const right2 = new THREE.Vector2(-forward2.y, forward2.x)
+  const axisExtent = WORLD_BOUNDS * Math.SQRT2
+
+  const worldToMap = (x: number, z: number) => {
+    const rx = (x * right2.x + z * right2.y) / axisExtent
+    const ry = (x * forward2.x + z * forward2.y) / axisExtent
+    return {
+      x: clamp((rx + 1) * 0.5, 0, 1) * width,
+      y: clamp((1 - (ry + 1) * 0.5), 0, 1) * height
+    }
+  }
+
+  const center = worldToMap(0, 0)
+  minimapCtx.fillStyle = '#f0d066'
+  minimapCtx.fillRect(center.x - 1.5, center.y - 1.5, 3, 3)
+
+  const playerPoint = worldToMap(player.mesh.position.x, player.mesh.position.z)
+  minimapCtx.fillStyle = '#62ff9a'
+  minimapCtx.beginPath()
+  minimapCtx.arc(playerPoint.x, playerPoint.y, 2.6, 0, Math.PI * 2)
+  minimapCtx.fill()
+
+  minimapCtx.fillStyle = '#ff6a6a'
+  for (const mob of mobs) {
+    const point = worldToMap(mob.mesh.position.x, mob.mesh.position.z)
+    minimapCtx.beginPath()
+    minimapCtx.arc(point.x, point.y, 1.8, 0, Math.PI * 2)
+    minimapCtx.fill()
+  }
+}
+
 const worldToScreen = (worldPos: THREE.Vector3): { x: number, y: number } | null => {
   const vector = worldPos.clone()
   vector.project(camera)
@@ -1648,6 +1715,7 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
+  syncMinimapCanvasSize()
 })
 
 const updateEntityMotion = (entity: Entity, delta: number) => {
@@ -2029,8 +2097,10 @@ const tick = (now: number, delta: number) => {
   buildWallBtn.classList.add('unlocked')
   buildTowerBtn.classList.add('unlocked')
 
+  drawMinimap()
   composer.render()
 }
 
 const gameLoop = createGameLoop(tick)
+syncMinimapCanvasSize()
 gameLoop.start()

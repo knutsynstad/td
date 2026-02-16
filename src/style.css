@@ -305,6 +305,12 @@ canvas {
   align-items: flex-end;
 }
 
+.hud-corner--bottom-left {
+  left: 32px;
+  bottom: 32px;
+  align-items: flex-end;
+}
+
 .hud-energy {
   display: inline-flex;
   align-items: center;
@@ -395,6 +401,22 @@ canvas {
   justify-content: flex-end;
   width: var(--hud-action-bar-width);
   pointer-events: auto;
+}
+
+.hud-minimap-wrap {
+  width: var(--hud-button-size);
+  height: var(--hud-button-size);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(30, 37, 45, 0.9);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hud-minimap {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .hud-status-stack {
@@ -709,6 +731,11 @@ canvas {
 
   .hud-corner--bottom-right {
     right: 12px;
+    bottom: 12px;
+  }
+
+  .hud-corner--bottom-left {
+    left: 12px;
     bottom: 12px;
   }
 
