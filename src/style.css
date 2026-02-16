@@ -139,7 +139,18 @@ canvas {
 
 .selection-dialog__stats {
   display: grid;
+  gap: 0;
+  margin: 0 -10px;
+}
+
+.selection-dialog__stat-item {
+  display: grid;
   gap: 6px;
+  padding: 10px 10px;
+}
+
+.selection-dialog__stat-item + .selection-dialog__stat-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .selection-dialog__action-bar {
@@ -151,10 +162,34 @@ canvas {
 
 .selection-dialog__stat-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 2px 0;
+  padding: 0;
+}
+
+.selection-dialog__stat-level-wrap {
+  width: 100%;
+  margin: 0;
+}
+
+.selection-dialog__stat-level-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+}
+
+.selection-dialog__stat-level-segment {
+  height: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.selection-dialog__stat-level-segment.is-active {
+  border-color: rgba(122, 209, 255, 0.78);
+  background: linear-gradient(135deg, rgba(122, 209, 255, 0.95), rgba(72, 169, 232, 0.95));
 }
 
 .selection-dialog__stat-label {
@@ -218,24 +253,6 @@ canvas {
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(60, 74, 90, 0.6);
   cursor: not-allowed;
-}
-
-.selection-dialog__stat-max {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 48px;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: transparent;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .selection-dialog__action {

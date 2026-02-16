@@ -520,13 +520,14 @@ const syncSelectedStructureOutline = () => {
 const applyTowerUpgrade = (tower: Tower, upgradeId: TowerUpgradeId) => {
   if (upgradeId === 'range') {
     tower.rangeLevel += 1
-    tower.range += 0.75
+    tower.range += 1
   } else if (upgradeId === 'damage') {
     tower.damageLevel += 1
-    tower.damage += 2
+    tower.damage += 1
   } else if (upgradeId === 'speed') {
     tower.speedLevel += 1
-    tower.shootCadence = Math.max(0.06, tower.shootCadence * 0.9)
+    const shotsPerSecond = 4 + tower.speedLevel * 2
+    tower.shootCadence = 1 / shotsPerSecond
   }
   tower.rangeRing.geometry.dispose()
   tower.rangeRing.geometry = new THREE.RingGeometry(tower.range - 0.12, tower.range, 32)
@@ -979,7 +980,10 @@ const updateSelectionDialog = () => {
           range: tower.range,
           damage: tower.damage,
           speed: 1 / tower.shootCadence,
-          dps: tower.damage * (1 / tower.shootCadence)
+          dps: tower.damage * (1 / tower.shootCadence),
+          rangeLevel: tower.rangeLevel,
+          damageLevel: tower.damageLevel,
+          speedLevel: tower.speedLevel
         }
       : null,
     canRepair: selectedStructureState !== null && selectedStructureState.hp < selectedStructureState.maxHp && inRange.length > 0,

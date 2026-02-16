@@ -19,7 +19,7 @@ export const TOWER_TYPES: Record<TowerTypeId, TowerTypeConfig> = {
     level: 1,
     color: 0x5aa4ff,
     range: 8,
-    damage: 5,
+    damage: 4,
     shootCadence: 0.25
   }
 }
@@ -61,9 +61,9 @@ export const TOWER_UPGRADES: Record<TowerUpgradeId, TowerUpgradeConfig> = {
 export const getTowerType = (towerTypeId: TowerTypeId): TowerTypeConfig => TOWER_TYPES[towerTypeId]
 export const getTowerUpgrade = (upgradeId: TowerUpgradeId): TowerUpgradeConfig => TOWER_UPGRADES[upgradeId]
 export const getTowerUpgradeDeltaText = (upgradeId: TowerUpgradeId): string => {
-  if (upgradeId === 'range') return '+0.75'
-  if (upgradeId === 'damage') return '+2'
-  return '+10%'
+  if (upgradeId === 'range') return '+1'
+  if (upgradeId === 'damage') return '+1'
+  return '+2/s'
 }
 export const getTowerUpgradeOptions = (tower: Tower): TowerUpgradeConfig[] => {
   const options: TowerUpgradeConfig[] = []

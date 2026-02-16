@@ -1,4 +1,4 @@
-import { getTowerType } from '../game/TowerTypes'
+import { getTowerType, getTowerUpgrade } from '../game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from '../game/TowerTypes'
 import { ENERGY_SYMBOL } from '../game/constants'
 
@@ -25,6 +25,9 @@ type SelectionDialogState = {
     damage: number
     speed: number
     dps: number
+    rangeLevel: number
+    damageLevel: number
+    speedLevel: number
   } | null
   canRepair: boolean
   canDelete: boolean
@@ -83,6 +86,10 @@ export class SelectionDialog {
       : `<span class="selection-dialog__title-main">${typeLabel}</span>`
     const upgradesById = new Map(upgradeOptions.map(option => [option.id, option]))
     const upgradesDisabled = inRangeCount === 0
+    const formatStatNumber = (value: number, maxDecimals = 2): string => {
+      const rounded = Number(value.toFixed(maxDecimals))
+      return String(rounded)
+    }
     const summaryItems: Array<{ label: string, value: string }> = []
     if (buildingHealth) {
       summaryItems.push({
@@ -107,42 +114,40 @@ export class SelectionDialog {
     const statsMarkup = towerDetails
       ? `<div class="selection-dialog__group selection-dialog__group--stats">
           <div class="selection-dialog__stats">
-            <div class="selection-dialog__stat-row">
-              <span class="selection-dialog__stat-label">Range: ${towerDetails.range.toFixed(1)}</span>
-              <span class="selection-dialog__stat-controls">
-                ${(() => {
-                  const upgrade = upgradesById.get('range')
-                  if (!upgrade) return '<span class="selection-dialog__stat-max">Max</span>'
+            ${(() => {
+              const renderStatRow = (upgradeId: TowerUpgradeId, label: string, value: string, level: number) => {
+                const maxLevel = getTowerUpgrade(upgradeId).maxLevel
+                const safeLevel = Math.max(0, Math.min(level, maxLevel))
+                const levelSegments = Array.from({ length: maxLevel }, (_, idx) => `
+                  <span class="selection-dialog__stat-level-segment ${idx < safeLevel ? 'is-active' : ''}"></span>
+                `).join('')
+                const upgrade = upgradesById.get(upgradeId)
+                const controlsMarkup = (() => {
+                  if (!upgrade) return ''
                   const disabled = upgradesDisabled || !upgrade.canAfford
-                  const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="range" ${disabled ? 'disabled' : ''}>${label}</button>`
-                })()}
-              </span>
-            </div>
-            <div class="selection-dialog__stat-row">
-              <span class="selection-dialog__stat-label">Damage: ${towerDetails.damage}</span>
-              <span class="selection-dialog__stat-controls">
-                ${(() => {
-                  const upgrade = upgradesById.get('damage')
-                  if (!upgrade) return '<span class="selection-dialog__stat-max">Max</span>'
-                  const disabled = upgradesDisabled || !upgrade.canAfford
-                  const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="damage" ${disabled ? 'disabled' : ''}>${label}</button>`
-                })()}
-              </span>
-            </div>
-            <div class="selection-dialog__stat-row">
-              <span class="selection-dialog__stat-label">Speed: ${towerDetails.speed.toFixed(2)}/s</span>
-              <span class="selection-dialog__stat-controls">
-                ${(() => {
-                  const upgrade = upgradesById.get('speed')
-                  if (!upgrade) return '<span class="selection-dialog__stat-max">Max</span>'
-                  const disabled = upgradesDisabled || !upgrade.canAfford
-                  const label = upgrade ? `+ (${ENERGY_SYMBOL}${upgrade.cost})` : '+'
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="speed" ${disabled ? 'disabled' : ''}>${label}</button>`
-                })()}
-              </span>
-            </div>
+                  const buttonLabel = `Upgrade ${ENERGY_SYMBOL}${upgrade.cost}`
+                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="${upgradeId}" ${disabled ? 'disabled' : ''}>${buttonLabel}</button>`
+                })()
+                return `
+                  <div class="selection-dialog__stat-item">
+                    <div class="selection-dialog__stat-row">
+                      <span class="selection-dialog__stat-label">${label}: ${value}</span>
+                      <span class="selection-dialog__stat-controls">
+                        ${controlsMarkup}
+                      </span>
+                    </div>
+                    <div class="selection-dialog__stat-level-wrap" aria-label="${label} level progress">
+                      <span class="selection-dialog__stat-level-bar">${levelSegments}</span>
+                    </div>
+                  </div>
+                `
+              }
+              return [
+                renderStatRow('range', 'Range', `${formatStatNumber(towerDetails.range, 2)}m`, towerDetails.rangeLevel),
+                renderStatRow('damage', 'Damage', String(towerDetails.damage), towerDetails.damageLevel),
+                renderStatRow('speed', 'Speed', `${formatStatNumber(towerDetails.speed, 2)}/s`, towerDetails.speedLevel)
+              ].join('')
+            })()}
           </div>
         </div>`
       : ''
