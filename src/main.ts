@@ -1706,7 +1706,7 @@ const spawnWave = () => {
     spawnerById.set(spawner.id, spawner)
     refreshSpawnerPathline(spawner)
   }
-  triggerEventBanner(`Wave ${wave} spawned (${activeWaveSpawners.length} spawners)`)
+  triggerEventBanner(`Wave ${wave} spawned`)
 }
 
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
