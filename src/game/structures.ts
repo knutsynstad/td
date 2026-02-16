@@ -55,6 +55,16 @@ export class StructureStore {
     const state = this.structureStates.get(collider)
     if (!state) return
 
+    const disposeMesh = (mesh: THREE.Mesh) => {
+      mesh.geometry.dispose()
+      if (Array.isArray(mesh.material)) {
+        for (const material of mesh.material) material.dispose()
+      } else {
+        mesh.material.dispose()
+      }
+    }
+
+    disposeMesh(state.mesh)
     this.scene.remove(state.mesh)
     this.structureMeshToCollider.delete(state.mesh)
     if (collider.type === 'wall') {
@@ -65,6 +75,7 @@ export class StructureStore {
     if (state.tower) {
       this.scene.remove(state.tower.rangeRing)
       this.scene.remove(state.tower.laser)
+      state.tower.rangeRing.geometry.dispose()
       const towerIdx = this.towers.indexOf(state.tower)
       if (towerIdx >= 0) this.towers.splice(towerIdx, 1)
       this.onRemoveTower(state.tower)

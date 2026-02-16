@@ -69,9 +69,18 @@ const simplifyCollinear = (points: THREE.Vector3[], epsilon = 0.01) => {
     const prev = out[out.length - 1]!
     const curr = points[i]!
     const next = points[i + 1]!
-    const d1 = new THREE.Vector3(curr.x - prev.x, 0, curr.z - prev.z).normalize()
-    const d2 = new THREE.Vector3(next.x - curr.x, 0, next.z - curr.z).normalize()
-    if (1 - Math.abs(d1.dot(d2)) > epsilon) out.push(curr.clone())
+    const d1x = curr.x - prev.x
+    const d1z = curr.z - prev.z
+    const d2x = next.x - curr.x
+    const d2z = next.z - curr.z
+    const len1 = Math.hypot(d1x, d1z)
+    const len2 = Math.hypot(d2x, d2z)
+    if (len1 <= 1e-6 || len2 <= 1e-6) {
+      out.push(curr.clone())
+      continue
+    }
+    const dot = (d1x / len1) * (d2x / len2) + (d1z / len1) * (d2z / len2)
+    if (1 - Math.abs(dot) > epsilon) out.push(curr.clone())
   }
   out.push(points[points.length - 1]!.clone())
   return out

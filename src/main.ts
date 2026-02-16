@@ -9,15 +9,25 @@ import { SelectionDialog } from './ui/SelectionDialog'
 import { StructureStore } from './game/structures'
 import { getTowerType, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from './game/TowerTypes'
-import type { DestructibleCollider, Entity, StaticCollider, Tower, WaveSpawner } from './game/types'
+import type {
+  DestructibleCollider,
+  Entity,
+  MobEntity,
+  NpcEntity,
+  PlayerEntity,
+  StaticCollider,
+  Tower,
+  WaveSpawner
+} from './game/types'
 import { SpatialGrid } from './utils/SpatialGrid'
 import { createParticleSystem } from './effects/particles'
 import { clamp, distanceToColliderSurface, resolveCircleCircle } from './physics/collision'
 import { createEntityMotionSystem } from './entities/motion'
 import { createGameLoop } from './game/GameLoop'
-import { createWaveSpawners, emitFromSpawner, areWaveSpawnersDone } from './game/spawners'
-import { getAllBorderDoors, selectActiveDoorsForWave } from './game/borderDoors'
+import { areWaveSpawnersDone } from './game/spawners'
+import { getAllBorderDoors } from './game/borderDoors'
 import { computeLanePathAStar, type LanePathResult } from './pathfinding/laneAStar'
+import { computeDirtyBounds } from './pathfinding/obstacleDelta'
 import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
 import {
   canPlace as canPlaceAt,
@@ -72,8 +82,26 @@ import {
   WALL_HP,
   WORLD_BOUNDS
 } from './game/constants'
+import { createGameState } from './game/state/GameState'
+import { createInputController } from './input/InputController'
+import { updateHud } from './presentation/HudPresenter'
+import { renderVisibleMobInstances } from './presentation/RenderCoordinator'
+import { createWaveAndSpawnSystem } from './game/systems/WaveAndSpawnSystem'
+import {
+  assertEnergyInBounds,
+  assertMobSpawnerReferences,
+  assertSpawnerCounts,
+  assertStructureStoreConsistency
+} from './game/invariants'
+import { createRandomSource } from './utils/rng'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
+const seedParam = new URLSearchParams(window.location.search).get('seed')
+const parsedSeed = seedParam === null ? undefined : Number(seedParam)
+const randomSource = createRandomSource(
+  parsedSeed !== undefined && Number.isFinite(parsedSeed) ? parsedSeed : undefined
+)
+const random = () => randomSource.next()
 app.innerHTML = `
   <div id="hud" class="hud">
     <div class="hud-corner hud-corner--top-left">
@@ -309,6 +337,16 @@ class WorldGrid {
       this.lines.push(line)
     }
   }
+
+  dispose() {
+    for (const line of this.lines) {
+      this.group.remove(line)
+      line.geometry.dispose()
+    }
+    this.lines = []
+    this.lineMaterial.dispose()
+    scene.remove(this.group)
+  }
 }
 
 class WorldBorder {
@@ -325,6 +363,12 @@ class WorldBorder {
     const material = new THREE.LineBasicMaterial({ color: 0xd96464, transparent: true, opacity: 0.95 })
     this.line = new THREE.LineLoop(geometry, material)
     scene.add(this.line)
+  }
+
+  dispose() {
+    scene.remove(this.line)
+    this.line.geometry.dispose()
+    ;(this.line.material as THREE.Material).dispose()
   }
 }
 
@@ -353,10 +397,15 @@ class SpawnContainerOverlay {
     }
     this.lines.clear()
   }
+
+  dispose() {
+    this.clear()
+    this.material.dispose()
+  }
 }
 
 const worldGrid = new WorldGrid()
-new WorldBorder()
+const worldBorder = new WorldBorder()
 const spawnContainerOverlay = new SpawnContainerOverlay()
 let lastGroundBounds: GroundBounds | null = null
 const updateGroundFromBounds = (bounds: GroundBounds) => {
@@ -406,7 +455,7 @@ const castleCollider: StaticCollider = {
   type: 'castle'
 }
 const staticColliders: StaticCollider[] = [castleCollider]
-const mobs: Entity[] = []
+const mobs: MobEntity[] = []
 const towers: Tower[] = []
 let selectedTower: Tower | null = null
 const structureStore = new StructureStore(
@@ -469,9 +518,21 @@ addMapWall(new THREE.Vector3(0, 0.5, 12), new THREE.Vector3(5, 0.5, 0.5))
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
 const castleGoal = new THREE.Vector3(0, 0, 0)
 const borderDoors = getAllBorderDoors(WORLD_BOUNDS)
+const waveAndSpawnSystem = createWaveAndSpawnSystem({
+  borderDoors,
+  minSpawners: WAVE_MIN_SPAWNERS,
+  maxSpawners: WAVE_MAX_SPAWNERS,
+  baseSpawnRate: WAVE_SPAWNER_BASE_RATE,
+  random
+})
 const activeWaveSpawners: WaveSpawner[] = []
 const spawnerById = new Map<string, WaveSpawner>()
 const spawnerPathlineCache = new Map<string, LanePathResult>()
+const pendingSpawnerPathRefresh = new Set<string>()
+const pendingSpawnerPathOrder: string[] = []
+const PATHLINE_REFRESH_BUDGET_PER_FRAME = 2
+const collisionNearbyScratch: Entity[] = []
+const rangeCandidateScratch: Entity[] = []
 const spawnerRouteOverlay = new SpawnerPathOverlay(scene)
 
 const mobInstanceMesh = new THREE.InstancedMesh(
@@ -647,6 +708,24 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   }
 }
 
+const enqueueSpawnerPathRefresh = (spawnerId: string) => {
+  if (pendingSpawnerPathRefresh.has(spawnerId)) return
+  pendingSpawnerPathRefresh.add(spawnerId)
+  pendingSpawnerPathOrder.push(spawnerId)
+}
+
+const processSpawnerPathlineQueue = (budget = PATHLINE_REFRESH_BUDGET_PER_FRAME) => {
+  let processed = 0
+  while (processed < budget && pendingSpawnerPathOrder.length > 0) {
+    const spawnerId = pendingSpawnerPathOrder.shift()!
+    pendingSpawnerPathRefresh.delete(spawnerId)
+    const spawner = spawnerById.get(spawnerId)
+    if (!spawner) continue
+    refreshSpawnerPathline(spawner)
+    processed += 1
+  }
+}
+
 const refreshAllSpawnerPathlines = () => {
   for (const spawner of activeWaveSpawners) {
     refreshSpawnerPathline(spawner)
@@ -655,7 +734,33 @@ const refreshAllSpawnerPathlines = () => {
 
 const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] = []) => {
   if (added.length === 0 && removed.length === 0) return
-  refreshAllSpawnerPathlines()
+  if (activeWaveSpawners.length === 0) return
+
+  const gridSize = Math.max(2, Math.ceil((WORLD_BOUNDS * 2) / GRID_SIZE) + 1)
+  const dirty = computeDirtyBounds(added, removed, WORLD_BOUNDS, GRID_SIZE, gridSize, 0.6)
+  if (!dirty) return
+
+  const dirtyMinX = -WORLD_BOUNDS + dirty.minX * GRID_SIZE - GRID_SIZE
+  const dirtyMaxX = -WORLD_BOUNDS + dirty.maxX * GRID_SIZE + GRID_SIZE
+  const dirtyMinZ = -WORLD_BOUNDS + dirty.minZ * GRID_SIZE - GRID_SIZE
+  const dirtyMaxZ = -WORLD_BOUNDS + dirty.maxZ * GRID_SIZE + GRID_SIZE
+
+  for (const spawner of activeWaveSpawners) {
+    const route = spawnerPathlineCache.get(spawner.id)
+    if (!route || route.points.length === 0) {
+      enqueueSpawnerPathRefresh(spawner.id)
+      continue
+    }
+
+    let affected = false
+    for (const point of route.points) {
+      if (point.x >= dirtyMinX && point.x <= dirtyMaxX && point.z >= dirtyMinZ && point.z <= dirtyMaxZ) {
+        affected = true
+        break
+      }
+    }
+    if (affected) enqueueSpawnerPathRefresh(spawner.id)
+  }
 }
 
 const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.001, 0x4ad1ff)
@@ -707,7 +812,7 @@ const pointer = new THREE.Vector2()
 const makeCapsule = (color: number) =>
   new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.6, 4, 10), new THREE.MeshStandardMaterial({ color }))
 
-const player: Entity = {
+const player: PlayerEntity = {
   mesh: makeCapsule(0x62ff9a),
   radius: 0.45,
   speed: PLAYER_SPEED,
@@ -721,9 +826,9 @@ player.mesh.position.set(4, player.baseY, 4)
 player.target.set(player.mesh.position.x, 0, player.mesh.position.z)
 scene.add(player.mesh)
 
-const npcs: Entity[] = []
+const npcs: NpcEntity[] = []
 const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
-  const npc: Entity = {
+  const npc: NpcEntity = {
     mesh: makeCapsule(color),
     radius: 0.45,
     speed: NPC_SPEED,
@@ -848,28 +953,17 @@ const makeMob = (spawner: WaveSpawner) => {
   return true
 }
 
-let buildMode: BuildMode = 'off'
-let isShooting = false
-let shootCooldown = 0
-let laserVisibleTime = 0
-let wave = 0
-let lives = 1
-let nextWaveAt = 0
-let energy = ENERGY_CAP
+const gameState = createGameState(ENERGY_CAP)
 let isDraggingWall = false
 let wallDragStart: THREE.Vector3 | null = null
 let wallDragEnd: THREE.Vector3 | null = null
 let wallDragValidPositions: THREE.Vector3[] = []
-const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
-const pressedMovementKeys = new Set<string>()
+const inputController = createInputController()
 const keyboardForward = new THREE.Vector3()
 const keyboardRight = new THREE.Vector3()
 const keyboardMoveDir = new THREE.Vector3()
 let wasKeyboardMoving = false
 const EVENT_BANNER_DURATION = 2.4
-let eventBannerTimer = 0
-let prevMobsCount = 0
-let energyPopTimer = 0
 
 type EnergyTrail = {
   el: HTMLDivElement
@@ -1026,15 +1120,15 @@ const getEnergyCounterAnchor = () => {
 }
 
 const addEnergy = (amount: number, withPop = false) => {
-  energy = Math.min(ENERGY_CAP, energy + amount)
+  gameState.energy = Math.min(ENERGY_CAP, gameState.energy + amount)
   if (withPop) {
-    energyPopTimer = 0.2
+    gameState.energyPopTimer = 0.2
   }
 }
 
 const spendEnergy = (amount: number) => {
-  if (energy < amount) return false
-  energy = Math.max(0, energy - amount)
+  if (gameState.energy < amount) return false
+  gameState.energy = Math.max(0, gameState.energy - amount)
   return true
 }
 
@@ -1180,8 +1274,8 @@ buildPreview.visible = false
 scene.add(buildPreview)
 
 const canAffordBuildMode = (mode: BuildMode) => {
-  if (mode === 'wall') return energy >= ENERGY_COST_WALL
-  if (mode === 'tower') return energy >= ENERGY_COST_TOWER
+  if (mode === 'wall') return gameState.energy >= ENERGY_COST_WALL
+  if (mode === 'tower') return gameState.energy >= ENERGY_COST_TOWER
   return true
 }
 
@@ -1190,16 +1284,16 @@ const setBuildMode = (mode: BuildMode) => {
     triggerEventBanner('Not enough energy')
     return
   }
-  if (buildMode === mode) {
+  if (gameState.buildMode === mode) {
     // Toggle off if clicking same button
-    buildMode = 'off'
+    gameState.buildMode = 'off'
   } else {
-    buildMode = mode
+    gameState.buildMode = mode
   }
-  buildWallBtn.classList.toggle('active', buildMode === 'wall')
-  buildTowerBtn.classList.toggle('active', buildMode === 'tower')
-  buildPreview.visible = buildMode !== 'off'
-  if (buildMode !== 'off') {
+  buildWallBtn.classList.toggle('active', gameState.buildMode === 'wall')
+  buildTowerBtn.classList.toggle('active', gameState.buildMode === 'tower')
+  buildPreview.visible = gameState.buildMode !== 'off'
+  if (gameState.buildMode !== 'off') {
     clearSelectionState(selection)
     selectedTower = selection.selectedTower
   }
@@ -1301,7 +1395,7 @@ const updateSelectionDialog = () => {
         label: option.label,
         deltaText: getTowerUpgradeDeltaText(option.id),
         cost: getUpgradeEnergyCost(option.id),
-        canAfford: energy >= getUpgradeEnergyCost(option.id)
+        canAfford: gameState.energy >= getUpgradeEnergyCost(option.id)
       }))
     : []
 
@@ -1336,7 +1430,7 @@ const updateSelectionDialog = () => {
         }
       : null,
     canRepair: selectedStructureState !== null && selectedStructureState.hp < selectedStructureState.maxHp && inRange.length > 0,
-    canDelete: inRange.length > 0 && energy >= deleteCost
+    canDelete: inRange.length > 0 && gameState.energy >= deleteCost
   })
 }
 
@@ -1344,24 +1438,24 @@ buildWallBtn.addEventListener('click', () => setBuildMode('wall'))
 buildTowerBtn.addEventListener('click', () => setBuildMode('tower'))
 
 shootButton.addEventListener('pointerdown', () => {
-  isShooting = true
+  gameState.isShooting = true
 })
 shootButton.addEventListener('pointerup', () => {
-  isShooting = false
+  gameState.isShooting = false
 })
 shootButton.addEventListener('pointerleave', () => {
-  isShooting = false
+  gameState.isShooting = false
 })
 
 window.addEventListener('keydown', (event) => {
-  if (movementKeys.has(event.code)) {
-    if (!(event.target instanceof HTMLElement && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable))) {
-      event.preventDefault()
-      pressedMovementKeys.add(event.code)
-    }
+  const isEditableTarget =
+    event.target instanceof HTMLElement &&
+    (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable)
+  if (inputController.handleKeyDown(event, isEditableTarget)) {
+    event.preventDefault()
   } else if (event.code === 'Space') {
     event.preventDefault()
-    isShooting = true
+    gameState.isShooting = true
   } else if (event.code === 'Escape') {
     event.preventDefault()
     setBuildMode('off')
@@ -1369,20 +1463,20 @@ window.addEventListener('keydown', (event) => {
 })
 
 window.addEventListener('keyup', (event) => {
-  if (movementKeys.has(event.code)) {
-    if (!(event.target instanceof HTMLElement && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable))) {
-      event.preventDefault()
-      pressedMovementKeys.delete(event.code)
-    }
+  const isEditableTarget =
+    event.target instanceof HTMLElement &&
+    (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable)
+  if (inputController.handleKeyUp(event, isEditableTarget)) {
+    event.preventDefault()
   } else if (event.code === 'Space') {
     event.preventDefault()
-    isShooting = false
+    gameState.isShooting = false
   }
 })
 
 window.addEventListener('blur', () => {
-  pressedMovementKeys.clear()
-  isShooting = false
+  inputController.clearMovement()
+  gameState.isShooting = false
 })
 
 const updatePointer = (event: PointerEvent) => {
@@ -1412,14 +1506,14 @@ const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingS
 }
 
 const placeBuilding = (center: THREE.Vector3) => {
-  const result = placeBuildingAt(center, buildMode, energy, {
+  const result = placeBuildingAt(center, gameState.buildMode, gameState.energy, {
     staticColliders,
     structureStore,
     scene,
     createTowerAt: (snapped) => createTowerAt(snapped, 'base', player.username ?? 'Player'),
     applyObstacleDelta
   })
-  energy = Math.max(0, energy - result.energySpent)
+  gameState.energy = Math.max(0, gameState.energy - result.energySpent)
   return result.placed
 }
 
@@ -1431,24 +1525,24 @@ const getWallLinePlacement = (start: THREE.Vector3, end: THREE.Vector3, availabl
 }
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
-  const placed = placeWallSegment(start, end, energy, {
+  const placed = placeWallSegment(start, end, gameState.energy, {
     scene,
     structureStore,
     staticColliders,
     applyObstacleDelta
   })
-  energy = Math.max(0, energy - placed * ENERGY_COST_WALL)
+  gameState.energy = Math.max(0, gameState.energy - placed * ENERGY_COST_WALL)
   return placed > 0
 }
 
 const placeWallSegments = (positions: THREE.Vector3[]) => {
-  const placed = placeWallSegmentsAt(positions, energy, {
+  const placed = placeWallSegmentsAt(positions, gameState.energy, {
     scene,
     structureStore,
     staticColliders,
     applyObstacleDelta
   })
-  energy = Math.max(0, energy - placed * ENERGY_COST_WALL)
+  gameState.energy = Math.max(0, gameState.energy - placed * ENERGY_COST_WALL)
   return placed > 0
 }
 
@@ -1485,13 +1579,13 @@ for (const pos of prebuiltTowers) {
 refreshAllSpawnerPathlines()
 
 const resetGame = () => {
-  lives = 1
-  wave = 0
-  nextWaveAt = 0
-  prevMobsCount = 0
-  energy = ENERGY_CAP
-  energyPopTimer = 0
-  eventBannerTimer = 0
+  gameState.lives = 1
+  gameState.wave = 0
+  gameState.nextWaveAt = 0
+  gameState.prevMobsCount = 0
+  gameState.energy = ENERGY_CAP
+  gameState.energyPopTimer = 0
+  gameState.eventBannerTimer = 0
   eventBannerEl.classList.remove('show')
   eventBannerEl.textContent = ''
   finalCountdownEl.classList.remove('show')
@@ -1516,18 +1610,26 @@ const resetGame = () => {
   spawnerById.clear()
   activeWaveSpawners.length = 0
   spawnerPathlineCache.clear()
+  pendingSpawnerPathRefresh.clear()
+  pendingSpawnerPathOrder.length = 0
   spawnerRouteOverlay.clear()
   spawnContainerOverlay.clear()
+  particleSystem.dispose()
 
   for (const tower of towers) {
     scene.remove(tower.mesh)
     scene.remove(tower.rangeRing)
     scene.remove(tower.laser)
+    tower.mesh.geometry.dispose()
+    ;(tower.mesh.material as THREE.Material).dispose()
+    tower.rangeRing.geometry.dispose()
   }
   towers.length = 0
 
   for (const wall of structureStore.wallMeshes) {
     scene.remove(wall)
+    wall.geometry.dispose()
+    ;(wall.material as THREE.Material).dispose()
   }
   structureStore.wallMeshes.length = 0
   structureStore.structureStates.clear()
@@ -1547,33 +1649,6 @@ const resetGame = () => {
 const setMoveTarget = (pos: THREE.Vector3) => {
   const clamped = new THREE.Vector3(clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS), 0, clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS))
   player.target.copy(clamped)
-}
-
-const getKeyboardMoveDirection = () => {
-  const up = (pressedMovementKeys.has('KeyW') || pressedMovementKeys.has('ArrowUp')) ? 1 : 0
-  const down = (pressedMovementKeys.has('KeyS') || pressedMovementKeys.has('ArrowDown')) ? 1 : 0
-  const left = (pressedMovementKeys.has('KeyA') || pressedMovementKeys.has('ArrowLeft')) ? 1 : 0
-  const right = (pressedMovementKeys.has('KeyD') || pressedMovementKeys.has('ArrowRight')) ? 1 : 0
-  const vertical = up - down
-  const horizontal = right - left
-  if (vertical === 0 && horizontal === 0) return null
-
-  camera.getWorldDirection(keyboardForward)
-  keyboardForward.y = 0
-  if (keyboardForward.lengthSq() <= 1e-6) {
-    keyboardForward.set(0, 0, -1)
-  } else {
-    keyboardForward.normalize()
-  }
-
-  keyboardRight.set(-keyboardForward.z, 0, keyboardForward.x)
-  keyboardMoveDir
-    .copy(keyboardForward)
-    .multiplyScalar(vertical)
-    .addScaledVector(keyboardRight, horizontal)
-  if (keyboardMoveDir.lengthSq() <= 1e-6) return null
-  keyboardMoveDir.normalize()
-  return keyboardMoveDir
 }
 
 const hasPlayerReachedBlockedTarget = () => {
@@ -1602,6 +1677,7 @@ const motionSystem = createEntityMotionSystem({
     worldBounds: WORLD_BOUNDS,
     gridSize: GRID_SIZE
   },
+  random,
   spawnCubeEffects
 })
 
@@ -1609,10 +1685,10 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   if ((event.target as HTMLElement).closest('#hud, .selection-dialog')) return
   activePointerId = event.pointerId
   renderer.domElement.setPointerCapture(event.pointerId)
-  if (buildMode !== 'off') {
+  if (gameState.buildMode !== 'off') {
     const point = getGroundPoint(event)
     if (!point) return
-    if (buildMode === 'wall') {
+    if (gameState.buildMode === 'wall') {
       isDraggingWall = true
       wallDragStart = point.clone()
       wallDragEnd = point.clone()
@@ -1638,15 +1714,15 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
 })
 
 renderer.domElement.addEventListener('pointermove', (event) => {
-  if (buildMode === 'off') return
+  if (gameState.buildMode === 'off') return
   const point = getGroundPoint(event)
   if (!point) return
   
-  if (buildMode === 'wall' && isDraggingWall && wallDragStart) {
+  if (gameState.buildMode === 'wall' && isDraggingWall && wallDragStart) {
     wallDragEnd = point.clone()
 
     // Show one continuous preview mesh for the wall segment.
-    const availableWallPreview = energy
+    const availableWallPreview = gameState.energy
     const { validPositions, blockedPosition } = getWallLinePlacement(wallDragStart, wallDragEnd, availableWallPreview)
     wallDragValidPositions = validPositions
 
@@ -1671,12 +1747,12 @@ renderer.domElement.addEventListener('pointermove', (event) => {
       buildPreview.visible = false
     }
   } else {
-    const isTower = buildMode === 'tower'
+    const isTower = gameState.buildMode === 'tower'
     const size = isTower ? new THREE.Vector3(1, 2, 1) : new THREE.Vector3(1, 1, 1)
     const half = size.clone().multiplyScalar(0.5)
     const snapped = new THREE.Vector3(snapGridValue(point.x), half.y, snapGridValue(point.z))
     const energyCost = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL
-    const ok = canPlace(snapped, half, true) && energy >= energyCost
+    const ok = canPlace(snapped, half, true) && gameState.energy >= energyCost
     buildPreview.scale.set(size.x, size.y, size.z)
     buildPreview.position.copy(snapped)
     ;(buildPreview.material as THREE.MeshStandardMaterial).color.setHex(ok ? 0x66ff66 : 0xff6666)
@@ -1689,8 +1765,8 @@ window.addEventListener('pointerup', (event) => {
     renderer.domElement.releasePointerCapture(activePointerId)
     activePointerId = null
   }
-  isShooting = false
-  if (buildMode === 'wall' && isDraggingWall && wallDragStart && wallDragEnd) {
+  gameState.isShooting = false
+  if (gameState.buildMode === 'wall' && isDraggingWall && wallDragStart && wallDragEnd) {
     if (wallDragValidPositions.length > 0) {
       placeWallSegments(wallDragValidPositions)
     } else {
@@ -1731,36 +1807,30 @@ const triggerEventBanner = (text: string) => {
   eventBannerEl.classList.remove('show')
   void eventBannerEl.offsetWidth
   eventBannerEl.classList.add('show')
-  eventBannerTimer = EVENT_BANNER_DURATION
+  gameState.eventBannerTimer = EVENT_BANNER_DURATION
 }
 
 const spawnWave = () => {
-  wave += 1
-  const count = (5 + wave * 2) * 10
-  spawnerRouteOverlay.clear()
-  spawnerPathlineCache.clear()
-  spawnContainerOverlay.clear()
-  activeWaveSpawners.length = 0
-  spawnerById.clear()
-  const activeDoors = selectActiveDoorsForWave(borderDoors, wave, WAVE_MIN_SPAWNERS, WAVE_MAX_SPAWNERS)
-  const created = createWaveSpawners({
-    wave,
-    totalMobCount: count,
-    doorPositions: activeDoors,
-    baseSpawnRate: WAVE_SPAWNER_BASE_RATE
+  gameState.wave = waveAndSpawnSystem.spawnWave({
+    wave: gameState.wave,
+    activeWaveSpawners,
+    spawnerById,
+    refreshSpawnerPathline,
+    clearWaveOverlays: () => {
+      spawnerRouteOverlay.clear()
+      spawnerPathlineCache.clear()
+      spawnContainerOverlay.clear()
+      pendingSpawnerPathRefresh.clear()
+      pendingSpawnerPathOrder.length = 0
+    }
   })
-  for (const spawner of created) {
-    activeWaveSpawners.push(spawner)
-    spawnerById.set(spawner.id, spawner)
-    refreshSpawnerPathline(spawner)
-  }
-  triggerEventBanner(`Wave ${wave} spawned`)
+  triggerEventBanner(`Wave ${gameState.wave} spawned`)
 }
 
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
   let best: Entity | null = null
   let bestDistToBase = Number.POSITIVE_INFINITY
-  const candidates = spatialGrid.getNearby(center, radius)
+  const candidates = spatialGrid.getNearbyInto(center, radius, rangeCandidateScratch)
   for (const mob of candidates) {
     if (mob.kind !== 'mob') continue
     if ((mob.hp ?? 0) <= 0) continue
@@ -1778,50 +1848,37 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
 
 const updateMobInstanceRender = () => {
-  const maxVisible = Math.min(MAX_VISIBLE_MOB_INSTANCES, MOB_INSTANCE_CAP)
-  const camX = camera.position.x
-  const camZ = camera.position.z
-  let renderCount = 0
-
-  for (const mob of mobs) {
-    const dx = mob.mesh.position.x - camX
-    const dz = mob.mesh.position.z - camZ
-    const distSq = dx * dx + dz * dz
-    if (distSq > MOB_INSTANCE_RENDER_RADIUS * MOB_INSTANCE_RENDER_RADIUS) continue
-    if (renderCount >= maxVisible) break
-    mobInstanceDummy.position.copy(mob.mesh.position)
-    mobInstanceDummy.position.y = mob.baseY
-    mobInstanceDummy.scale.setScalar(1)
-    mobInstanceDummy.rotation.set(0, 0, 0)
-    mobInstanceDummy.updateMatrix()
-    mobInstanceMesh.setMatrixAt(renderCount, mobInstanceDummy.matrix)
-    mobInstanceMesh.setColorAt(renderCount, mob.berserkMode ? berserkMobColor : normalMobColor)
-    renderCount += 1
-  }
-
-  mobInstanceMesh.count = renderCount
-  mobInstanceMesh.instanceMatrix.needsUpdate = true
-  if (mobInstanceMesh.instanceColor) {
-    mobInstanceMesh.instanceColor.needsUpdate = true
-  }
+  renderVisibleMobInstances({
+    mobs,
+    camera,
+    mobInstanceMesh,
+    mobInstanceDummy,
+    maxVisibleMobInstances: MAX_VISIBLE_MOB_INSTANCES,
+    mobInstanceCap: MOB_INSTANCE_CAP,
+    mobInstanceRenderRadius: MOB_INSTANCE_RENDER_RADIUS,
+    normalMobColor,
+    berserkMobColor
+  })
 }
 
 const tick = (now: number, delta: number) => {
-  energy = Math.min(ENERGY_CAP, energy + ENERGY_REGEN_RATE * delta)
-  if (buildMode === 'wall' && energy < ENERGY_COST_WALL) {
+  gameState.energy = Math.min(ENERGY_CAP, gameState.energy + ENERGY_REGEN_RATE * delta)
+  if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
     setBuildMode('off')
   }
-  if (buildMode === 'tower' && energy < ENERGY_COST_TOWER) {
+  if (gameState.buildMode === 'tower' && gameState.energy < ENERGY_COST_TOWER) {
     setBuildMode('off')
   }
 
-  for (const spawner of activeWaveSpawners) {
-    emitFromSpawner(spawner, delta, (fromSpawner) => {
-      return makeMob(fromSpawner)
-    })
-  }
+  waveAndSpawnSystem.emit(activeWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
+  processSpawnerPathlineQueue()
 
-  const keyboardDir = getKeyboardMoveDirection()
+  const keyboardDir = inputController.getKeyboardMoveDirection({
+    camera,
+    keyboardForward,
+    keyboardRight,
+    keyboardMoveDir
+  })
   const isKeyboardMoving = keyboardDir !== null
   if (keyboardDir) {
     const keyboardMoveDistance = Math.max(GRID_SIZE, player.speed * 0.35)
@@ -1892,7 +1949,11 @@ const tick = (now: number, delta: number) => {
   const processed = new Set<Entity>()
   for (const entity of dynamicEntities) {
     processed.add(entity)
-    const nearby = spatialGrid.getNearby(entity.mesh.position, (entity.radius + 0.5) * 2)
+    const nearby = spatialGrid.getNearbyInto(
+      entity.mesh.position,
+      (entity.radius + 0.5) * 2,
+      collisionNearbyScratch
+    )
     for (const other of nearby) {
       if (processed.has(other)) continue // Already processed this pair
       resolveCircleCircle(entity, other)
@@ -1903,13 +1964,13 @@ const tick = (now: number, delta: number) => {
     const mob = mobs[i]!
     if (distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) <= 0.2) {
       spawnCubeEffects(mob.mesh.position.clone())
-      lives = Math.max(lives - 1, 0)
+      gameState.lives = Math.max(gameState.lives - 1, 0)
       if (mob.spawnerId) {
         const spawner = spawnerById.get(mob.spawnerId)
         if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
       }
       mobs.splice(i, 1)
-      if (lives === 0) {
+      if (gameState.lives === 0) {
         resetGame()
         break
       }
@@ -1931,15 +1992,15 @@ const tick = (now: number, delta: number) => {
     spawner.aliveCount = mobCountForSpawner
   }
 
-  const waveComplete = wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
-  if (waveComplete && nextWaveAt === 0) {
-    nextWaveAt = now + 10000
+  const waveComplete = gameState.wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
+  if (waveComplete && gameState.nextWaveAt === 0) {
+    gameState.nextWaveAt = now + 10000
   }
-  if (waveComplete && now >= nextWaveAt && nextWaveAt !== 0) {
-    nextWaveAt = 0
+  if (waveComplete && now >= gameState.nextWaveAt && gameState.nextWaveAt !== 0) {
+    gameState.nextWaveAt = 0
     spawnWave()
   }
-  if (wave === 0) {
+  if (gameState.wave === 0) {
     spawnWave()
   }
 
@@ -1998,11 +2059,11 @@ const tick = (now: number, delta: number) => {
   }
 
   // Update laser visibility timer
-  if (laserVisibleTime > 0) {
-    laserVisibleTime -= delta
+  if (gameState.laserVisibleTime > 0) {
+    gameState.laserVisibleTime -= delta
   }
   
-  if (isShooting && selected) {
+  if (gameState.isShooting && selected) {
     const start = player.mesh.position.clone()
     const end = selected.mesh.position.clone()
     const direction = new THREE.Vector3().subVectors(end, start)
@@ -2014,22 +2075,22 @@ const tick = (now: number, delta: number) => {
     laser.lookAt(end)
     laser.rotateX(Math.PI / 2)
     
-    shootCooldown -= delta
-    if (shootCooldown <= 0) {
+    gameState.shootCooldown -= delta
+    if (gameState.shootCooldown <= 0) {
       const attack = rollAttackDamage(SHOOT_DAMAGE)
       selected.hp = (selected.hp ?? 0) - attack.damage
       selected.lastHitBy = 'player'
       spawnFloatingDamageText(selected, attack.damage, 'player', attack.isCrit)
-      shootCooldown = SHOOT_COOLDOWN
+      gameState.shootCooldown = SHOOT_COOLDOWN
       // Show laser for 0.1 seconds when shot fires
-      laserVisibleTime = 0.1
+      gameState.laserVisibleTime = 0.1
     }
   } else {
-    shootCooldown = Math.max(shootCooldown - delta, 0)
+    gameState.shootCooldown = Math.max(gameState.shootCooldown - delta, 0)
   }
   
   // Only show laser when visibility timer is active
-  laser.visible = laserVisibleTime > 0 && selected !== null
+  laser.visible = gameState.laserVisibleTime > 0 && selected !== null
 
   camera.position.copy(player.mesh.position).add(cameraOffset)
   camera.lookAt(player.mesh.position)
@@ -2044,68 +2105,110 @@ const tick = (now: number, delta: number) => {
   updateGroundFromBounds(visibleBounds)
   worldGrid.update(visibleBounds)
 
-  wallCountEl.textContent = `${ENERGY_SYMBOL}${ENERGY_COST_WALL}`
-  towerCountEl.textContent = `${ENERGY_SYMBOL}${ENERGY_COST_TOWER}`
-  energyCountEl.textContent = `${Math.floor(energy)}`
-  buildWallBtn.disabled = energy < ENERGY_COST_WALL
-  buildTowerBtn.disabled = energy < ENERGY_COST_TOWER
-  if (energyPopTimer > 0) {
-    energyPopTimer = Math.max(0, energyPopTimer - delta)
-    energyCountEl.classList.add('pop')
-  } else {
-    energyCountEl.classList.remove('pop')
-  }
-  const nextWaveIn = waveComplete && nextWaveAt !== 0 ? Math.max(0, Math.ceil((nextWaveAt - now) / 1000)) : 0
-  const showNextWave = waveComplete && nextWaveAt !== 0
-  waveEl.textContent = String(showNextWave ? wave + 1 : wave)
-  nextWaveRowEl.style.display = showNextWave ? '' : 'none'
-  mobsRowEl.style.display = showNextWave ? 'none' : ''
-  if (showNextWave) {
-    nextWavePrimaryEl.textContent = ''
-    nextWaveSecondaryEl.textContent = `In ${nextWaveIn} seconds`
-  } else {
-    mobsPrimaryEl.textContent = ''
-    mobsSecondaryEl.textContent = `${mobs.length} mobs left`
-  }
+  gameState.energyPopTimer = Math.max(0, gameState.energyPopTimer - delta)
+  updateHud(
+    {
+      wallCountEl,
+      towerCountEl,
+      energyCountEl,
+      buildWallBtn,
+      buildTowerBtn,
+      waveEl,
+      nextWaveRowEl,
+      mobsRowEl,
+      nextWavePrimaryEl,
+      nextWaveSecondaryEl,
+      mobsPrimaryEl,
+      mobsSecondaryEl,
+      finalCountdownEl,
+      shootButton
+    },
+    {
+      energy: gameState.energy,
+      wave: gameState.wave,
+      waveComplete,
+      nextWaveAt: gameState.nextWaveAt,
+      now,
+      mobsCount: mobs.length,
+      energyPopTimer: gameState.energyPopTimer,
+      shootCooldown: gameState.shootCooldown
+    },
+    {
+      energySymbol: ENERGY_SYMBOL,
+      energyCostWall: ENERGY_COST_WALL,
+      energyCostTower: ENERGY_COST_TOWER,
+      shootCooldownMax: SHOOT_COOLDOWN
+    }
+  )
 
-  if (nextWaveIn > 0 && nextWaveIn <= 5) {
-    finalCountdownEl.textContent = String(nextWaveIn)
-    finalCountdownEl.classList.add('show')
-  } else {
-    finalCountdownEl.classList.remove('show')
-    finalCountdownEl.textContent = ''
-  }
-
-  if (prevMobsCount > 0 && waveComplete) {
+  if (gameState.prevMobsCount > 0 && waveComplete) {
     triggerEventBanner('Wave cleared')
   }
 
-  if (eventBannerTimer > 0) {
-    eventBannerTimer = Math.max(0, eventBannerTimer - delta)
-    if (eventBannerTimer === 0) {
+  if (gameState.eventBannerTimer > 0) {
+    gameState.eventBannerTimer = Math.max(0, gameState.eventBannerTimer - delta)
+    if (gameState.eventBannerTimer === 0) {
       eventBannerEl.classList.remove('show')
       eventBannerEl.textContent = ''
     }
   }
 
-  prevMobsCount = mobs.length
-  
-  // Update shoot button cooldown visual
-  const cooldownPercent = Math.min(1, shootCooldown / SHOOT_COOLDOWN)
-  const clipPercent = (1 - cooldownPercent) * 100
-  shootButton.style.setProperty('--cooldown-clip', `inset(0 0 0 ${clipPercent}%)`)
-  // Make unlock instant by removing transition when cooldown is complete
-  shootButton.classList.toggle('unlocked', cooldownPercent <= 0.01)
-
-  buildWallBtn.style.setProperty('--cooldown-clip', 'inset(0 100% 0 0)')
-  buildTowerBtn.style.setProperty('--cooldown-clip', 'inset(0 100% 0 0)')
-  buildWallBtn.classList.add('unlocked')
-  buildTowerBtn.classList.add('unlocked')
+  gameState.prevMobsCount = mobs.length
+  if (import.meta.env.DEV) {
+    assertEnergyInBounds(gameState.energy, ENERGY_CAP)
+    assertSpawnerCounts(activeWaveSpawners)
+    assertStructureStoreConsistency(structureStore, staticColliders)
+    assertMobSpawnerReferences(mobs, new Set(spawnerById.keys()))
+  }
 
   drawMinimap()
   composer.render()
 }
 
 const gameLoop = createGameLoop(tick)
+let disposed = false
+const disposeApp = () => {
+  if (disposed) return
+  disposed = true
+
+  particleSystem.dispose()
+  spawnContainerOverlay.dispose()
+  spawnerRouteOverlay.clear()
+  worldGrid.dispose()
+  worldBorder.dispose()
+
+  scene.remove(laser)
+  laser.geometry.dispose()
+  ;(laser.material as THREE.Material).dispose()
+  shaftGeometry.dispose()
+  shaftMaterial.dispose()
+  headGeometry.dispose()
+  headMaterial.dispose()
+
+  scene.remove(buildPreview)
+  buildPreview.geometry.dispose()
+  ;(buildPreview.material as THREE.Material).dispose()
+
+  scene.remove(mobInstanceMesh)
+  mobInstanceMesh.geometry.dispose()
+  ;(mobInstanceMesh.material as THREE.Material).dispose()
+  mobLogicGeometry.dispose()
+  mobLogicMaterial.dispose()
+  towerLaserGeometry.dispose()
+  towerLaserMaterial.dispose()
+  towerRangeMaterial.dispose()
+
+  scene.remove(ground)
+  ground.geometry.dispose()
+  groundMaterial.dispose()
+  scene.remove(castle)
+  castle.geometry.dispose()
+  ;(castle.material as THREE.Material).dispose()
+
+  composer.dispose()
+  renderer.dispose()
+}
+
+window.addEventListener('beforeunload', disposeApp)
 syncMinimapCanvasSize()
 gameLoop.start()

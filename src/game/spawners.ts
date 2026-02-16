@@ -6,11 +6,12 @@ type SpawnerOptions = {
   totalMobCount: number
   doorPositions: THREE.Vector3[]
   baseSpawnRate: number
+  random?: () => number
 }
 
-const weightedSplit = (total: number, count: number): number[] => {
+const weightedSplit = (total: number, count: number, random: () => number): number[] => {
   if (count <= 0) return []
-  const weights = Array.from({ length: count }, () => 0.75 + Math.random())
+  const weights = Array.from({ length: count }, () => 0.75 + random())
   const weightSum = weights.reduce((sum, value) => sum + value, 0)
   const raw = weights.map((weight) => (weight / weightSum) * total)
   const base = raw.map((value) => Math.floor(value))
@@ -32,9 +33,10 @@ const weightedSplit = (total: number, count: number): number[] => {
 }
 
 export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
+  const random = opts.random ?? Math.random
   const spawnerCount = opts.doorPositions.length
   if (spawnerCount === 0) return []
-  const split = weightedSplit(opts.totalMobCount, spawnerCount)
+  const split = weightedSplit(opts.totalMobCount, spawnerCount, random)
 
   return split.map((count, index) => {
     const position = opts.doorPositions[index]!.clone()
@@ -45,7 +47,7 @@ export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
       totalCount: count,
       spawnedCount: 0,
       aliveCount: 0,
-      spawnRatePerSecond: opts.baseSpawnRate * (0.9 + Math.random() * 0.4),
+      spawnRatePerSecond: opts.baseSpawnRate * (0.9 + random() * 0.4),
       spawnAccumulator: 0,
       routeState: 'reachable'
     }

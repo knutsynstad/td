@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { DestructibleCollider, Entity, StaticCollider } from '../game/types'
+import type { DestructibleCollider, Entity, MobEntity, StaticCollider } from '../game/types'
 import type { StructureStore } from '../game/structures'
 import type { SpatialGrid } from '../utils/SpatialGrid'
 import { clamp, distanceToColliderSurface, resolveCircleAabb } from '../physics/collision'
@@ -19,10 +19,13 @@ type MotionContext = {
   spatialGrid: SpatialGrid
   npcs: Entity[]
   constants: MobConstants
+  random: () => number
   spawnCubeEffects: (pos: THREE.Vector3) => void
 }
 
 export const createEntityMotionSystem = (context: MotionContext) => {
+  const nearbyScratch: Entity[] = []
+  const progressScratch: Entity[] = []
   const hasReachedBlockedTarget = (entity: Entity): boolean => {
     if (entity.kind !== 'player') return false
 
@@ -40,7 +43,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     return false
   }
 
-  const pickBerserkTarget = (mob: Entity): DestructibleCollider | null => {
+  const pickBerserkTarget = (mob: MobEntity): DestructibleCollider | null => {
     const options = context.structureStore.getDestructibleColliders()
     if (options.length === 0) return null
 
@@ -48,8 +51,9 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     let bestScore = Number.POSITIVE_INFINITY
 
     for (const collider of options) {
-      const toTarget = new THREE.Vector3().subVectors(collider.center, mob.mesh.position)
-      const planarDist = Math.hypot(toTarget.x, toTarget.z)
+      const dx = collider.center.x - mob.mesh.position.x
+      const dz = collider.center.z - mob.mesh.position.z
+      const planarDist = Math.hypot(dx, dz)
       const towerPriorityBonus = collider.type === 'tower' ? 8 : 0
       const score = planarDist - towerPriorityBonus
       if (score < bestScore) {
@@ -60,9 +64,9 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     return best
   }
 
-  const updateMobBerserkState = (mob: Entity, delta: number) => {
-    mob.siegeAttackCooldown = Math.max((mob.siegeAttackCooldown ?? 0) - delta, 0)
-    const reachable = mob.laneBlocked !== true
+  const updateMobBerserkState = (mob: MobEntity, delta: number) => {
+    mob.siegeAttackCooldown = Math.max(mob.siegeAttackCooldown - delta, 0)
+    const reachable = !mob.laneBlocked
     if (reachable) {
       mob.unreachableTime = 0
       mob.berserkMode = false
@@ -70,14 +74,14 @@ export const createEntityMotionSystem = (context: MotionContext) => {
       return
     }
 
-    mob.unreachableTime = (mob.unreachableTime ?? 0) + delta
-    if (!mob.berserkMode && (mob.unreachableTime ?? 0) >= context.constants.mobBerserkUnreachableGrace) {
+    mob.unreachableTime += delta
+    if (!mob.berserkMode && mob.unreachableTime >= context.constants.mobBerserkUnreachableGrace) {
       mob.berserkTarget = pickBerserkTarget(mob)
       mob.berserkMode = mob.berserkTarget !== null
     }
   }
 
-  const getMobBerserkDirection = (mob: Entity): THREE.Vector3 | null => {
+  const getMobBerserkDirection = (mob: MobEntity): THREE.Vector3 | null => {
     if (!mob.berserkMode) return null
 
     if (!mob.berserkTarget || !context.structureStore.structureStates.has(mob.berserkTarget)) {
@@ -91,7 +95,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     const target = mob.berserkTarget
     const distanceToSurface = distanceToColliderSurface(mob.mesh.position, mob.radius, target)
     if (distanceToSurface <= context.constants.mobBerserkRangeBuffer) {
-      if ((mob.siegeAttackCooldown ?? 0) <= 0) {
+      if (mob.siegeAttackCooldown <= 0) {
         context.structureStore.damageStructure(target, context.constants.mobBerserkDamage, (collider) => {
           context.spawnCubeEffects(collider.center.clone())
         })
@@ -107,7 +111,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
 
   const applyAvoidance = (entity: Entity, dir: THREE.Vector3, strengthScale = 0.3) => {
     const avoidanceRadius = entity.radius * 2 + 0.5
-    const nearby = context.spatialGrid.getNearby(entity.mesh.position, avoidanceRadius)
+    const nearby = context.spatialGrid.getNearbyInto(entity.mesh.position, avoidanceRadius, nearbyScratch)
 
     const avoidance = new THREE.Vector3()
     for (const other of nearby) {
@@ -153,7 +157,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
           // Let mobs "claim" a waypoint earlier when crowded to reduce waypoint pileups.
           const nearbyForProgress = Math.max(
             0,
-            context.spatialGrid.getNearby(entity.mesh.position, entity.radius * 4).length - 1
+            context.spatialGrid.getNearbyInto(entity.mesh.position, entity.radius * 4, progressScratch).length - 1
           )
           const crowdBonus = Math.min(1.4, nearbyForProgress * 0.08)
           const waypointReachRadius = entity.radius + 1.0 + crowdBonus
@@ -226,9 +230,9 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     for (const npc of context.npcs) {
       if (npc.mesh.position.distanceTo(npc.target) < 0.5) {
         npc.target.set(
-          (Math.random() - 0.5) * context.constants.worldBounds * 1.2,
+          (context.random() - 0.5) * context.constants.worldBounds * 1.2,
           0,
-          (Math.random() - 0.5) * context.constants.worldBounds * 1.2
+          (context.random() - 0.5) * context.constants.worldBounds * 1.2
         )
       }
     }

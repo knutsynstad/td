@@ -19,10 +19,10 @@ const clampInt = (value: number, min: number, max: number) => {
   return Math.max(min, Math.min(max, Math.floor(value)))
 }
 
-const pickUniqueRandom = <T>(items: T[], count: number): T[] => {
+const pickUniqueRandom = <T>(items: T[], count: number, random: () => number): T[] => {
   const pool = items.slice()
   for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
+    const j = Math.floor(random() * (i + 1))
     const tmp = pool[i]
     pool[i] = pool[j]!
     pool[j] = tmp!
@@ -34,14 +34,15 @@ export const selectActiveDoorsForWave = (
   allDoors: THREE.Vector3[],
   wave: number,
   minSpawners: number,
-  maxSpawners: number
+  maxSpawners: number,
+  random: () => number = Math.random
 ): THREE.Vector3[] => {
   if (allDoors.length === 0) return []
   const waveCap = Math.min(maxSpawners, minSpawners + Math.floor(wave / 3))
   const count = clampInt(
-    minSpawners + Math.random() * (waveCap - minSpawners + 1),
+    minSpawners + random() * (waveCap - minSpawners + 1),
     minSpawners,
     Math.min(maxSpawners, allDoors.length)
   )
-  return pickUniqueRandom(allDoors, count).map((door) => door.clone())
+  return pickUniqueRandom(allDoors, count, random).map((door) => door.clone())
 }

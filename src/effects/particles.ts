@@ -31,6 +31,7 @@ export type ParticleSystem = {
   spawnCubeEffects: (pos: THREE.Vector3, options?: CubeEffectOptions) => void
   spawnMobDeathEffects: (pos: THREE.Vector3) => void
   updateParticles: (delta: number) => void
+  dispose: () => void
 }
 
 export const createParticleSystem = (scene: THREE.Scene): ParticleSystem => {
@@ -121,14 +122,26 @@ export const createParticleSystem = (scene: THREE.Scene): ParticleSystem => {
 
       if (particle.lifetime <= 0 || particle.mesh.position.y < -1) {
         scene.remove(particle.mesh)
+        particle.mesh.geometry.dispose()
+        ;(particle.mesh.material as THREE.Material).dispose()
         cubeParticles.splice(i, 1)
       }
     }
   }
 
+  const dispose = () => {
+    for (const particle of cubeParticles) {
+      scene.remove(particle.mesh)
+      particle.mesh.geometry.dispose()
+      ;(particle.mesh.material as THREE.Material).dispose()
+    }
+    cubeParticles.length = 0
+  }
+
   return {
     spawnCubeEffects,
     spawnMobDeathEffects,
-    updateParticles
+    updateParticles,
+    dispose
   }
 }

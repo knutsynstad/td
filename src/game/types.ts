@@ -21,30 +21,42 @@ export type DestructibleCollider = StaticCollider & {
   type: StructureType
 }
 
-export type Entity = {
+type EntityBase = {
   mesh: THREE.Mesh
   radius: number
   speed: number
   velocity: THREE.Vector3
   target: THREE.Vector3
-  kind: 'player' | 'mob' | 'npc'
-  hp?: number
-  maxHp?: number
   baseY: number
+}
+
+export type PlayerEntity = EntityBase & {
+  kind: 'player'
+  username: string
+}
+
+export type NpcEntity = EntityBase & {
+  kind: 'npc'
+  username: string
+}
+
+export type MobEntity = EntityBase & {
+  kind: 'mob'
+  hp: number
+  maxHp: number
   waypoints?: THREE.Vector3[]
   waypointIndex?: number
-  siegeMode?: boolean
-  siegeTarget?: DestructibleCollider | null
-  siegeAttackCooldown?: number
-  unreachableTime?: number
-  username?: string
+  siegeAttackCooldown: number
+  unreachableTime: number
   lastHitBy?: 'player' | 'tower'
   spawnerId?: string
-  berserkMode?: boolean
-  berserkTarget?: DestructibleCollider | null
-  laneBlocked?: boolean
+  berserkMode: boolean
+  berserkTarget: DestructibleCollider | null
+  laneBlocked: boolean
   representedCount?: number
 }
+
+export type Entity = PlayerEntity | NpcEntity | MobEntity
 
 export type SpawnerRouteState = 'reachable' | 'unstable' | 'blocked'
 

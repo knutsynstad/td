@@ -28,8 +28,8 @@ export class SpatialGrid {
     this.cells.get(key)!.push(entity)
   }
 
-  getNearby(pos: THREE.Vector3, radius: number): Entity[] {
-    const results: Entity[] = []
+  getNearbyInto(pos: THREE.Vector3, radius: number, out: Entity[]): Entity[] {
+    out.length = 0
     const minGx = Math.floor((pos.x - radius) / this.cellSize)
     const maxGx = Math.floor((pos.x + radius) / this.cellSize)
     const minGz = Math.floor((pos.z - radius) / this.cellSize)
@@ -45,11 +45,15 @@ export class SpatialGrid {
           const dz = entity.mesh.position.z - pos.z
           const distSq = dx * dx + dz * dz
           if (distSq <= radius * radius) {
-            results.push(entity)
+            out.push(entity)
           }
         }
       }
     }
-    return results
+    return out
+  }
+
+  getNearby(pos: THREE.Vector3, radius: number): Entity[] {
+    return this.getNearbyInto(pos, radius, [])
   }
 }

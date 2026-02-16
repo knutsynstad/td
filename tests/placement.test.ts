@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { getCardinalWallLine, getWallLinePlacement, placeWallSegments } from '../src/placement/building'
-import type { StaticCollider } from '../src/game/types'
+import type { StaticCollider, Tower } from '../src/game/types'
 import { StructureStore } from '../src/game/structures'
 
 describe('placement helpers', () => {
@@ -33,7 +33,7 @@ describe('placement helpers', () => {
   it('places drag walls as individual segments', () => {
     const scene = new THREE.Scene()
     const staticColliders: StaticCollider[] = []
-    const towers = []
+    const towers: Tower[] = []
     const structureStore = new StructureStore(scene, staticColliders, towers, () => undefined, () => undefined)
 
     const positions = [
