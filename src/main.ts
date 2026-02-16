@@ -641,6 +641,15 @@ type EnergyTrail = {
   reward: number
 }
 
+type FloatingDamageText = {
+  el: HTMLDivElement
+  target: Entity | null
+  worldPos: THREE.Vector3
+  elapsed: number
+  duration: number
+  driftX: number
+}
+
 const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
   if (upgradeId === 'range') return ENERGY_COST_UPGRADE_RANGE
   if (upgradeId === 'damage') return ENERGY_COST_UPGRADE_DAMAGE
@@ -687,7 +696,18 @@ energyTrailContainer.style.pointerEvents = 'none'
 energyTrailContainer.style.zIndex = '3500'
 app.appendChild(energyTrailContainer)
 
+const damageTextContainer = document.createElement('div')
+damageTextContainer.style.position = 'fixed'
+damageTextContainer.style.top = '0'
+damageTextContainer.style.left = '0'
+damageTextContainer.style.width = '100%'
+damageTextContainer.style.height = '100%'
+damageTextContainer.style.pointerEvents = 'none'
+damageTextContainer.style.zIndex = '1200'
+app.appendChild(damageTextContainer)
+
 const activeEnergyTrails: EnergyTrail[] = []
+const activeDamageTexts: FloatingDamageText[] = []
 
 const worldToScreen = (worldPos: THREE.Vector3): { x: number, y: number } | null => {
   const vector = worldPos.clone()
@@ -752,6 +772,52 @@ const updateEnergyTrails = (delta: number) => {
       trail.el.remove()
       activeEnergyTrails.splice(i, 1)
       addEnergy(trail.reward, true)
+    }
+  }
+}
+
+const spawnFloatingDamageText = (mob: Entity, damage: number, source: 'player' | 'tower') => {
+  if (damage <= 0) return
+  const text = document.createElement('div')
+  text.className = source === 'tower'
+    ? 'floating-damage-text floating-damage-text--tower'
+    : 'floating-damage-text'
+  text.textContent = `-${Math.round(damage)}`
+  damageTextContainer.appendChild(text)
+  activeDamageTexts.push({
+    el: text,
+    target: mob,
+    worldPos: mob.mesh.position.clone().setY(mob.baseY + 1.1),
+    elapsed: 0,
+    duration: 0.65,
+    driftX: (Math.random() - 0.5) * 20
+  })
+}
+
+const updateFloatingDamageTexts = (delta: number) => {
+  for (let i = activeDamageTexts.length - 1; i >= 0; i -= 1) {
+    const text = activeDamageTexts[i]!
+    text.elapsed += delta
+    const t = Math.min(1, text.elapsed / text.duration)
+    const easeOut = 1 - Math.pow(1 - t, 2)
+
+    if (text.target !== null) {
+      text.worldPos.copy(text.target.mesh.position).setY(text.target.baseY + 1.1)
+    }
+
+    const liftedWorldPos = text.worldPos.clone().setY(text.worldPos.y + easeOut * 0.55)
+    const screenPos = worldToScreen(liftedWorldPos)
+    if (screenPos) {
+      const swayX = Math.sin(t * Math.PI) * text.driftX
+      text.el.style.left = `${screenPos.x + swayX}px`
+      text.el.style.top = `${screenPos.y}px`
+      text.el.style.opacity = String(1 - t)
+      text.el.style.transform = `translate(-50%, -100%) scale(${1 + (1 - t) * 0.2})`
+    }
+
+    if (t >= 1) {
+      text.el.remove()
+      activeDamageTexts.splice(i, 1)
     }
   }
 }
@@ -1399,6 +1465,7 @@ const tick = (now: number, delta: number) => {
 
   updateParticles(delta)
   updateEnergyTrails(delta)
+  updateFloatingDamageTexts(delta)
 
   for (const tower of towers) {
     tower.shootCooldown = Math.max(tower.shootCooldown - delta, 0)
@@ -1419,8 +1486,10 @@ const tick = (now: number, delta: number) => {
       if (tower.shootCooldown <= 0) {
         const prevHp = target.hp ?? 1
         const nextHp = prevHp - tower.damage
+        const dealtDamage = Math.min(prevHp, tower.damage)
         target.hp = nextHp
         target.lastHitBy = 'tower'
+        spawnFloatingDamageText(target, dealtDamage, 'tower')
         if (prevHp > 0 && nextHp <= 0) {
           tower.killCount += 1
         }
@@ -1555,8 +1624,11 @@ const tick = (now: number, delta: number) => {
     
     shootCooldown -= delta
     if (shootCooldown <= 0) {
-      selected.hp = (selected.hp ?? 1) - SHOOT_DAMAGE
+      const prevHp = selected.hp ?? 1
+      const dealtDamage = Math.min(prevHp, SHOOT_DAMAGE)
+      selected.hp = prevHp - SHOOT_DAMAGE
       selected.lastHitBy = 'player'
+      spawnFloatingDamageText(selected, dealtDamage, 'player')
       shootCooldown = SHOOT_COOLDOWN
       // Show laser for 0.1 seconds when shot fires
       laserVisibleTime = 0.1

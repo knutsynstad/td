@@ -352,6 +352,27 @@ canvas {
   transform: translate(-9999px, -9999px);
 }
 
+.floating-damage-text {
+  position: absolute;
+  transform: translate(-9999px, -9999px);
+  color: #ffe7a1;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.75),
+    0 0 12px rgba(255, 176, 64, 0.45);
+  white-space: nowrap;
+  will-change: transform, opacity, left, top;
+}
+
+.floating-damage-text--tower {
+  color: #bce9ff;
+  text-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.75),
+    0 0 12px rgba(98, 188, 255, 0.45);
+}
+
 .hud-actions {
   display: flex;
   align-items: flex-end;
