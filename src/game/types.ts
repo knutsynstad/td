@@ -42,6 +42,7 @@ export type Entity = {
   spawnerId?: string
   berserkMode?: boolean
   berserkTarget?: DestructibleCollider | null
+  laneBlocked?: boolean
   representedCount?: number
 }
 

@@ -4,15 +4,8 @@ import type { WaveSpawner } from './types'
 type SpawnerOptions = {
   wave: number
   totalMobCount: number
-  minSpawners: number
-  maxSpawners: number
-  minRadius: number
-  maxRadius: number
+  doorPositions: THREE.Vector3[]
   baseSpawnRate: number
-}
-
-const clampInt = (value: number, min: number, max: number) => {
-  return Math.max(min, Math.min(max, Math.floor(value)))
 }
 
 const weightedSplit = (total: number, count: number): number[] => {
@@ -39,19 +32,12 @@ const weightedSplit = (total: number, count: number): number[] => {
 }
 
 export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
-  const maxForWave = Math.min(opts.maxSpawners, 1 + Math.floor(opts.wave / 3))
-  const spawnerCount = clampInt(
-    opts.minSpawners + Math.random() * (maxForWave - opts.minSpawners + 1),
-    opts.minSpawners,
-    opts.maxSpawners
-  )
+  const spawnerCount = opts.doorPositions.length
+  if (spawnerCount === 0) return []
   const split = weightedSplit(opts.totalMobCount, spawnerCount)
-  const offset = Math.random() * Math.PI * 2
 
   return split.map((count, index) => {
-    const angle = offset + (index / spawnerCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.45
-    const radius = opts.minRadius + Math.random() * (opts.maxRadius - opts.minRadius)
-    const position = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
+    const position = opts.doorPositions[index]!.clone()
     const id = `wave-${opts.wave}-spawner-${index}`
     return {
       id,
@@ -69,16 +55,18 @@ export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
 export const emitFromSpawner = (
   spawner: WaveSpawner,
   delta: number,
-  onSpawn: (spawner: WaveSpawner) => void
+  onSpawn: (spawner: WaveSpawner) => boolean
 ) => {
   if (spawner.spawnedCount >= spawner.totalCount) return
   spawner.spawnAccumulator += spawner.spawnRatePerSecond * delta
   const remaining = spawner.totalCount - spawner.spawnedCount
-  const toSpawn = Math.min(remaining, Math.floor(spawner.spawnAccumulator))
+  // Keep door output gradual: never burst large batches in one tick.
+  const toSpawn = Math.min(remaining, Math.floor(spawner.spawnAccumulator), 1)
   if (toSpawn <= 0) return
-  spawner.spawnAccumulator -= toSpawn
   for (let i = 0; i < toSpawn; i += 1) {
-    onSpawn(spawner)
+    const didSpawn = onSpawn(spawner)
+    if (!didSpawn) break
+    spawner.spawnAccumulator -= 1
     spawner.spawnedCount += 1
     spawner.aliveCount += 1
   }

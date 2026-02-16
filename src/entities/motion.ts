@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import type { DestructibleCollider, Entity, StaticCollider } from '../game/types'
 import type { StructureStore } from '../game/structures'
-import type { FlowField } from '../pathfinding/FlowField'
 import type { SpatialGrid } from '../utils/SpatialGrid'
 import { clamp, distanceToColliderSurface, resolveCircleAabb } from '../physics/collision'
 
@@ -15,12 +14,10 @@ type MobConstants = {
 }
 
 type MotionContext = {
-  flowField: FlowField
   structureStore: StructureStore
   staticColliders: StaticCollider[]
   spatialGrid: SpatialGrid
   npcs: Entity[]
-  castleGoal: THREE.Vector3
   constants: MobConstants
   spawnCubeEffects: (pos: THREE.Vector3) => void
 }
@@ -47,17 +44,14 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     const options = context.structureStore.getDestructibleColliders()
     if (options.length === 0) return null
 
-    const towardWall = context.flowField.getDirectionTowardNearestWall(mob.mesh.position)
     let best: DestructibleCollider | null = null
     let bestScore = Number.POSITIVE_INFINITY
 
     for (const collider of options) {
       const toTarget = new THREE.Vector3().subVectors(collider.center, mob.mesh.position)
       const planarDist = Math.hypot(toTarget.x, toTarget.z)
-      const dirToTarget = planarDist > 0.0001 ? toTarget.multiplyScalar(1 / planarDist) : null
-      const alignment = towardWall && dirToTarget ? Math.max(0, towardWall.dot(dirToTarget)) : 0
       const towerPriorityBonus = collider.type === 'tower' ? 8 : 0
-      const score = planarDist - alignment * 3 - towerPriorityBonus
+      const score = planarDist - towerPriorityBonus
       if (score < bestScore) {
         bestScore = score
         best = collider
@@ -68,7 +62,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
 
   const updateMobBerserkState = (mob: Entity, delta: number) => {
     mob.siegeAttackCooldown = Math.max((mob.siegeAttackCooldown ?? 0) - delta, 0)
-    const reachable = context.flowField.isReachable(mob.mesh.position)
+    const reachable = mob.laneBlocked !== true
     if (reachable) {
       mob.unreachableTime = 0
       mob.berserkMode = false
@@ -111,7 +105,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     return dir.normalize()
   }
 
-  const applyAvoidance = (entity: Entity, dir: THREE.Vector3) => {
+  const applyAvoidance = (entity: Entity, dir: THREE.Vector3, strengthScale = 0.3) => {
     const avoidanceRadius = entity.radius * 2 + 0.5
     const nearby = context.spatialGrid.getNearby(entity.mesh.position, avoidanceRadius)
 
@@ -133,7 +127,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     }
 
     if (avoidance.length() > 0.001) {
-      avoidance.normalize().multiplyScalar(0.3)
+      avoidance.normalize().multiplyScalar(strengthScale)
       dir.add(avoidance).normalize()
     }
   }
@@ -148,17 +142,32 @@ export const createEntityMotionSystem = (context: MotionContext) => {
         const berserkDir = getMobBerserkDirection(entity)
         if (berserkDir) {
           dir.copy(berserkDir)
-        } else {
-          dir = context.flowField.getDirection(entity.mesh.position)
         }
       } else {
         const waypoints = entity.waypoints
         let waypointIdx = entity.waypointIndex
 
         if (waypointIdx < waypoints.length) {
+          // If we're already closer to a forward waypoint, skip stale behind points.
+          while (
+            waypointIdx + 1 < waypoints.length &&
+            entity.mesh.position.distanceTo(waypoints[waypointIdx + 1]!) + 0.05 <
+              entity.mesh.position.distanceTo(waypoints[waypointIdx]!)
+          ) {
+            waypointIdx += 1
+            entity.waypointIndex = waypointIdx
+          }
+
           const targetWaypoint = waypoints[waypointIdx]
           const distToWaypoint = entity.mesh.position.distanceTo(targetWaypoint)
-          if (distToWaypoint < entity.radius + 0.5) {
+          // Let mobs "claim" a waypoint earlier when crowded to reduce waypoint pileups.
+          const nearbyForProgress = Math.max(
+            0,
+            context.spatialGrid.getNearby(entity.mesh.position, entity.radius * 4).length - 1
+          )
+          const crowdBonus = Math.min(1.4, nearbyForProgress * 0.08)
+          const waypointReachRadius = entity.radius + 1.0 + crowdBonus
+          if (distToWaypoint < waypointReachRadius) {
             waypointIdx++
             entity.waypointIndex = waypointIdx
           }
@@ -174,18 +183,25 @@ export const createEntityMotionSystem = (context: MotionContext) => {
             dir = new THREE.Vector3(-entity.mesh.position.x, 0, -entity.mesh.position.z)
             if (dir.length() > 0.1) dir.normalize()
           }
-        } else {
-          dir = context.flowField.getDirection(entity.mesh.position)
         }
 
-        applyAvoidance(entity, dir)
+        applyAvoidance(entity, dir, 0.12)
 
-        if (waypointIdx < waypoints.length && waypointIdx > 0) {
-          const expectedPos = waypoints[waypointIdx - 1]
-          const distOffTrack = entity.mesh.position.distanceTo(expectedPos)
-          if (distOffTrack > context.constants.gridSize * 3) {
-            entity.waypoints = context.flowField.computeWaypoints(entity.mesh.position, context.castleGoal)
-            entity.waypointIndex = 0
+        if (entity.waypointIndex !== undefined && entity.waypointIndex < waypoints.length) {
+          const currentIdx = entity.waypointIndex
+          const currentDist = entity.mesh.position.distanceTo(waypoints[currentIdx]!)
+          if (currentDist > context.constants.gridSize * 8) {
+            const probeLimit = Math.min(waypoints.length, currentIdx + 20)
+            let bestIdx = currentIdx
+            let bestDist = currentDist
+            for (let i = currentIdx; i < probeLimit; i += 1) {
+              const d = entity.mesh.position.distanceTo(waypoints[i]!)
+              if (d < bestDist) {
+                bestDist = d
+                bestIdx = i
+              }
+            }
+            entity.waypointIndex = bestIdx
           }
         }
       }
@@ -198,8 +214,9 @@ export const createEntityMotionSystem = (context: MotionContext) => {
       }
 
       if (!entity.berserkMode) {
-        dir = context.flowField.getDirection(entity.mesh.position)
-        applyAvoidance(entity, dir)
+        dir = new THREE.Vector3(-entity.mesh.position.x, 0, -entity.mesh.position.z)
+        if (dir.length() > 0.1) dir.normalize()
+        applyAvoidance(entity, dir, 0.2)
       }
     } else {
       if (hasReachedBlockedTarget(entity)) {
