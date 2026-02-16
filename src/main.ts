@@ -708,6 +708,8 @@ app.appendChild(damageTextContainer)
 
 const activeEnergyTrails: EnergyTrail[] = []
 const activeDamageTexts: FloatingDamageText[] = []
+const CRIT_CHANCE = 1 / 8
+const CRIT_MULTIPLIER = 2
 
 const worldToScreen = (worldPos: THREE.Vector3): { x: number, y: number } | null => {
   const vector = worldPos.clone()
@@ -776,13 +778,26 @@ const updateEnergyTrails = (delta: number) => {
   }
 }
 
-const spawnFloatingDamageText = (mob: Entity, damage: number, source: 'player' | 'tower') => {
+const rollAttackDamage = (baseDamage: number) => {
+  const isCrit = Math.random() < CRIT_CHANCE
+  return {
+    damage: isCrit ? baseDamage * CRIT_MULTIPLIER : baseDamage,
+    isCrit
+  }
+}
+
+const spawnFloatingDamageText = (mob: Entity, damage: number, source: 'player' | 'tower', isCrit = false) => {
   if (damage <= 0) return
   const text = document.createElement('div')
-  text.className = source === 'tower'
-    ? 'floating-damage-text floating-damage-text--tower'
-    : 'floating-damage-text'
-  text.textContent = `-${Math.round(damage)}`
+  const classes = ['floating-damage-text']
+  if (source === 'player') {
+    classes.push('floating-damage-text--player')
+  } else {
+    classes.push('floating-damage-text--tower')
+  }
+  if (isCrit) classes.push('floating-damage-text--crit')
+  text.className = classes.join(' ')
+  text.textContent = `${Math.round(damage)}${isCrit ? '!' : ''}`
   damageTextContainer.appendChild(text)
   activeDamageTexts.push({
     el: text,
@@ -1498,11 +1513,11 @@ const tick = (now: number, delta: number) => {
 
       if (tower.shootCooldown <= 0) {
         const prevHp = target.hp ?? 1
-        const nextHp = prevHp - tower.damage
-        const dealtDamage = Math.min(prevHp, tower.damage)
+        const attack = rollAttackDamage(tower.damage)
+        const nextHp = prevHp - attack.damage
         target.hp = nextHp
         target.lastHitBy = 'tower'
-        spawnFloatingDamageText(target, dealtDamage, 'tower')
+        spawnFloatingDamageText(target, attack.damage, 'tower', attack.isCrit)
         if (prevHp > 0 && nextHp <= 0) {
           tower.killCount += 1
         }
@@ -1632,10 +1647,10 @@ const tick = (now: number, delta: number) => {
     shootCooldown -= delta
     if (shootCooldown <= 0) {
       const prevHp = selected.hp ?? 1
-      const dealtDamage = Math.min(prevHp, SHOOT_DAMAGE)
-      selected.hp = prevHp - SHOOT_DAMAGE
+      const attack = rollAttackDamage(SHOOT_DAMAGE)
+      selected.hp = prevHp - attack.damage
       selected.lastHitBy = 'player'
-      spawnFloatingDamageText(selected, dealtDamage, 'player')
+      spawnFloatingDamageText(selected, attack.damage, 'player', attack.isCrit)
       shootCooldown = SHOOT_COOLDOWN
       // Show laser for 0.1 seconds when shot fires
       laserVisibleTime = 0.1
