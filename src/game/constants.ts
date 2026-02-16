@@ -1,7 +1,7 @@
 export const SELECTION_RADIUS = 8
 export const WORLD_BOUNDS = 64
 export const GRID_SIZE = 1
-export const CASTLE_RADIUS = 0.5
+export const CASTLE_RADIUS = 3.5
 export const PLAYER_SPEED = 6
 export const MOB_SPEED = 3
 export const NPC_SPEED = 4

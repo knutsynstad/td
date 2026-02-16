@@ -440,7 +440,7 @@ ground.position.y = 0
 scene.add(ground)
 
 const castle = new THREE.Mesh(
-  new THREE.PlaneGeometry(1, 1),
+  new THREE.PlaneGeometry(7, 7),
   new THREE.MeshStandardMaterial({ color: 0xe0c34a })
 )
 castle.rotation.x = -Math.PI / 2
@@ -449,7 +449,7 @@ scene.add(castle)
 
 const castleCollider: StaticCollider = {
   center: new THREE.Vector3(0, 0.02, 0),
-  halfSize: new THREE.Vector3(0.5, 0.01, 0.5),
+  halfSize: new THREE.Vector3(3.5, 0.01, 3.5),
   type: 'castle'
 }
 const staticColliders: StaticCollider[] = [castleCollider]
@@ -616,6 +616,59 @@ const getSpawnContainerCorners = (spawnerPos: THREE.Vector3) => {
   ]
 }
 
+const isPointInsideCastle = (point: THREE.Vector3) => (
+  Math.abs(point.x - castleCollider.center.x) <= castleCollider.halfSize.x &&
+  Math.abs(point.z - castleCollider.center.z) <= castleCollider.halfSize.z
+)
+
+const getCastleBoundaryIntersection = (from: THREE.Vector3, to: THREE.Vector3) => {
+  const minX = castleCollider.center.x - castleCollider.halfSize.x
+  const maxX = castleCollider.center.x + castleCollider.halfSize.x
+  const minZ = castleCollider.center.z - castleCollider.halfSize.z
+  const maxZ = castleCollider.center.z + castleCollider.halfSize.z
+  const dx = to.x - from.x
+  const dz = to.z - from.z
+  const eps = 1e-6
+  const candidates: number[] = []
+
+  if (Math.abs(dx) > eps) {
+    candidates.push((minX - from.x) / dx, (maxX - from.x) / dx)
+  }
+  if (Math.abs(dz) > eps) {
+    candidates.push((minZ - from.z) / dz, (maxZ - from.z) / dz)
+  }
+
+  let bestT = Number.POSITIVE_INFINITY
+  for (const t of candidates) {
+    if (t < 0 || t > 1) continue
+    const x = from.x + dx * t
+    const z = from.z + dz * t
+    const onFaceX = x >= minX - eps && x <= maxX + eps
+    const onFaceZ = z >= minZ - eps && z <= maxZ + eps
+    if (!onFaceX || !onFaceZ) continue
+    if (t < bestT) bestT = t
+  }
+
+  if (!Number.isFinite(bestT)) return to.clone()
+  return new THREE.Vector3(from.x + dx * bestT, to.y, from.z + dz * bestT)
+}
+
+const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
+  if (points.length < 2) return points.map((point) => point.clone())
+
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1]!
+    const curr = points[i]!
+    if (!isPointInsideCastle(prev) && isPointInsideCastle(curr)) {
+      const clipped = points.slice(0, i).map((point) => point.clone())
+      clipped.push(getCastleBoundaryIntersection(prev, curr))
+      return clipped
+    }
+  }
+
+  return points.map((point) => point.clone())
+}
+
 const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   const entry = getSpawnerEntryPoint(spawner.position)
   const route = computeLanePathAStar({
@@ -628,7 +681,8 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   })
   spawner.routeState = route.state
   spawnerPathlineCache.set(spawner.id, route)
-  spawnerRouteOverlay.upsert(spawner.id, route.points, route.state)
+  const displayPoints = trimPathToCastleBoundary(route.points)
+  spawnerRouteOverlay.upsert(spawner.id, displayPoints, route.state)
   spawnContainerOverlay.upsert(spawner.id, getSpawnContainerCorners(spawner.position))
   for (const mob of mobs) {
     if (mob.spawnerId !== spawner.id) continue
