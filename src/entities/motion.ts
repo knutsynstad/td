@@ -26,6 +26,23 @@ type MotionContext = {
 }
 
 export const createEntityMotionSystem = (context: MotionContext) => {
+  const hasReachedBlockedTarget = (entity: Entity): boolean => {
+    if (entity.kind !== 'player') return false
+
+    for (const collider of context.staticColliders) {
+      const targetInsideCollider =
+        Math.abs(entity.target.x - collider.center.x) <= collider.halfSize.x &&
+        Math.abs(entity.target.z - collider.center.z) <= collider.halfSize.z
+      if (!targetInsideCollider) continue
+
+      // If target is inside a collider, touching its surface should count as arrival.
+      if (distanceToColliderSurface(entity.mesh.position, entity.radius, collider) <= 0.05) {
+        return true
+      }
+    }
+    return false
+  }
+
   const pickSiegeTarget = (mob: Entity): DestructibleCollider | null => {
     const options = context.structureStore.getDestructibleColliders()
     if (options.length === 0) return null
@@ -184,11 +201,15 @@ export const createEntityMotionSystem = (context: MotionContext) => {
         applyAvoidance(entity, dir)
       }
     } else {
-      dir = new THREE.Vector3(entity.target.x - entity.mesh.position.x, 0, entity.target.z - entity.mesh.position.z)
-      if (dir.length() > 0.1) {
-        dir.normalize()
-      } else {
+      if (hasReachedBlockedTarget(entity)) {
         dir.set(0, 0, 0)
+      } else {
+        dir = new THREE.Vector3(entity.target.x - entity.mesh.position.x, 0, entity.target.z - entity.mesh.position.z)
+        if (dir.length() > 0.1) {
+          dir.normalize()
+        } else {
+          dir.set(0, 0, 0)
+        }
       }
     }
 

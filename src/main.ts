@@ -14,7 +14,7 @@ import type { DestructibleCollider, Entity, StaticCollider, Tower } from './game
 import { WaypointCache } from './utils/WaypointCache'
 import { SpatialGrid } from './utils/SpatialGrid'
 import { createParticleSystem } from './effects/particles'
-import { clamp, resolveCircleCircle } from './physics/collision'
+import { clamp, distanceToColliderSurface, resolveCircleCircle } from './physics/collision'
 import { createEntityMotionSystem } from './entities/motion'
 import { createGameLoop } from './game/GameLoop'
 import {
@@ -1245,6 +1245,19 @@ const setMoveTarget = (pos: THREE.Vector3) => {
   player.target.copy(clamped)
 }
 
+const hasPlayerReachedBlockedTarget = () => {
+  for (const collider of staticColliders) {
+    const targetInsideCollider =
+      Math.abs(player.target.x - collider.center.x) <= collider.halfSize.x &&
+      Math.abs(player.target.z - collider.center.z) <= collider.halfSize.z
+    if (!targetInsideCollider) continue
+    if (distanceToColliderSurface(player.mesh.position, player.radius, collider) <= 0.05) {
+      return true
+    }
+  }
+  return false
+}
+
 const motionSystem = createEntityMotionSystem({
   flowField,
   structureStore,
@@ -1514,14 +1527,8 @@ const tick = (now: number, delta: number) => {
 
   for (let i = mobs.length - 1; i >= 0; i -= 1) {
     const mob = mobs[i]
-    // Check if mob has reached castle - distance from mob center to castle center
-    // should be less than castle halfSize + mob radius (they're touching)
-    const dx = mob.mesh.position.x - castleCollider.center.x
-    const dz = mob.mesh.position.z - castleCollider.center.z
-    const distToCastleCenter = Math.sqrt(dx * dx + dz * dz)
-    const castleReachDistance = castleCollider.halfSize.x + mob.radius + 0.2 // small buffer
-    
-    if (distToCastleCenter < castleReachDistance) {
+    // Square-aware castle contact check: use circle-to-AABB surface distance.
+    if (distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) <= 0.2) {
       spawnCubeEffects(mob.mesh.position.clone())
       lives = Math.max(lives - 1, 0)
       scene.remove(mob.mesh)
@@ -1594,7 +1601,7 @@ const tick = (now: number, delta: number) => {
     0,
     player.target.z - player.mesh.position.z
   )
-  const arrowLength = arrowDir.length()
+  const arrowLength = hasPlayerReachedBlockedTarget() ? 0 : arrowDir.length()
   if (arrowLength >= 1.0) {
     arrowDir.normalize()
     arrow.position.copy(player.mesh.position)
