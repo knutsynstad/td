@@ -422,13 +422,6 @@ const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] =
 // Compute initial flow field (exclude castle from pathfinding)
 flowField.rebuildAll(staticColliders, castleGoal)
 
-const ring = new THREE.Mesh(
-  new THREE.RingGeometry(SELECTION_RADIUS - 0.1, SELECTION_RADIUS, 32),
-  new THREE.MeshBasicMaterial({ color: 0x4ad1ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-)
-ring.rotation.x = -Math.PI / 2
-scene.add(ring)
-
 const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.001, 0x4ad1ff)
 scene.add(arrow)
 
@@ -1517,7 +1510,6 @@ const tick = (now: number, delta: number) => {
   syncSelectedStructureOutline()
   structureOutlinePass.edgeStrength = 3.8 + Math.sin(now * 0.01) * 0.5
 
-  ring.position.set(player.mesh.position.x, 0.02, player.mesh.position.z)
   for (const tower of towers) {
     tower.rangeRing.position.set(tower.mesh.position.x, 0.02, tower.mesh.position.z)
     const collider = structureStore.structureMeshToCollider.get(tower.mesh)
