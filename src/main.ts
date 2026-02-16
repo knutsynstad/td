@@ -860,6 +860,12 @@ let isDraggingWall = false
 let wallDragStart: THREE.Vector3 | null = null
 let wallDragEnd: THREE.Vector3 | null = null
 let wallDragValidPositions: THREE.Vector3[] = []
+const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
+const pressedMovementKeys = new Set<string>()
+const keyboardForward = new THREE.Vector3()
+const keyboardRight = new THREE.Vector3()
+const keyboardMoveDir = new THREE.Vector3()
+let wasKeyboardMoving = false
 const EVENT_BANNER_DURATION = 2.4
 let eventBannerTimer = 0
 let prevMobsCount = 0
@@ -1348,7 +1354,12 @@ shootButton.addEventListener('pointerleave', () => {
 })
 
 window.addEventListener('keydown', (event) => {
-  if (event.code === 'Space') {
+  if (movementKeys.has(event.code)) {
+    if (!(event.target instanceof HTMLElement && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable))) {
+      event.preventDefault()
+      pressedMovementKeys.add(event.code)
+    }
+  } else if (event.code === 'Space') {
     event.preventDefault()
     isShooting = true
   } else if (event.code === 'Escape') {
@@ -1358,10 +1369,20 @@ window.addEventListener('keydown', (event) => {
 })
 
 window.addEventListener('keyup', (event) => {
-  if (event.code === 'Space') {
+  if (movementKeys.has(event.code)) {
+    if (!(event.target instanceof HTMLElement && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable))) {
+      event.preventDefault()
+      pressedMovementKeys.delete(event.code)
+    }
+  } else if (event.code === 'Space') {
     event.preventDefault()
     isShooting = false
   }
+})
+
+window.addEventListener('blur', () => {
+  pressedMovementKeys.clear()
+  isShooting = false
 })
 
 const updatePointer = (event: PointerEvent) => {
@@ -1526,6 +1547,33 @@ const resetGame = () => {
 const setMoveTarget = (pos: THREE.Vector3) => {
   const clamped = new THREE.Vector3(clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS), 0, clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS))
   player.target.copy(clamped)
+}
+
+const getKeyboardMoveDirection = () => {
+  const up = (pressedMovementKeys.has('KeyW') || pressedMovementKeys.has('ArrowUp')) ? 1 : 0
+  const down = (pressedMovementKeys.has('KeyS') || pressedMovementKeys.has('ArrowDown')) ? 1 : 0
+  const left = (pressedMovementKeys.has('KeyA') || pressedMovementKeys.has('ArrowLeft')) ? 1 : 0
+  const right = (pressedMovementKeys.has('KeyD') || pressedMovementKeys.has('ArrowRight')) ? 1 : 0
+  const vertical = up - down
+  const horizontal = right - left
+  if (vertical === 0 && horizontal === 0) return null
+
+  camera.getWorldDirection(keyboardForward)
+  keyboardForward.y = 0
+  if (keyboardForward.lengthSq() <= 1e-6) {
+    keyboardForward.set(0, 0, -1)
+  } else {
+    keyboardForward.normalize()
+  }
+
+  keyboardRight.set(-keyboardForward.z, 0, keyboardForward.x)
+  keyboardMoveDir
+    .copy(keyboardForward)
+    .multiplyScalar(vertical)
+    .addScaledVector(keyboardRight, horizontal)
+  if (keyboardMoveDir.lengthSq() <= 1e-6) return null
+  keyboardMoveDir.normalize()
+  return keyboardMoveDir
 }
 
 const hasPlayerReachedBlockedTarget = () => {
@@ -1773,6 +1821,18 @@ const tick = (now: number, delta: number) => {
     })
   }
 
+  const keyboardDir = getKeyboardMoveDirection()
+  const isKeyboardMoving = keyboardDir !== null
+  if (keyboardDir) {
+    const keyboardMoveDistance = Math.max(GRID_SIZE, player.speed * 0.35)
+    setMoveTarget(player.mesh.position.clone().addScaledVector(keyboardDir, keyboardMoveDistance))
+    wasKeyboardMoving = true
+  } else if (wasKeyboardMoving) {
+    // Release-to-stop behavior for keyboard movement.
+    setMoveTarget(player.mesh.position)
+    wasKeyboardMoving = false
+  }
+
   updateNpcTargets()
   updateEntityMotion(player, delta)
   for (const npc of npcs) {
@@ -1927,7 +1987,7 @@ const tick = (now: number, delta: number) => {
     player.target.z - player.mesh.position.z
   )
   const arrowLength = hasPlayerReachedBlockedTarget() ? 0 : arrowDir.length()
-  if (arrowLength >= 1.0) {
+  if (!isKeyboardMoving && arrowLength >= 1.0) {
     arrowDir.normalize()
     arrow.position.copy(player.mesh.position)
     arrow.setDirection(arrowDir)
