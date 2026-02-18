@@ -217,7 +217,6 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     entity.mesh.position.z += entity.velocity.z * delta
 
     for (const collider of context.staticColliders) {
-      if (collider.type === 'castle') continue
       resolveCircleAabb(entity.mesh.position, entity.radius, collider)
     }
 

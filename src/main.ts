@@ -1,9 +1,11 @@
 import './style.css'
 import * as THREE from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import castleModelUrl from './assets/models/castle.glb?url'
 import { screenToWorldOnGround } from './utils/coords'
 import { SelectionDialog } from './ui/SelectionDialog'
 import { StructureStore } from './game/structures'
@@ -197,6 +199,8 @@ const cameraOffset = new THREE.Vector3(
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.VSMShadowMap
 app.appendChild(renderer.domElement)
 const composer = new EffectComposer(renderer)
 const renderPass = new RenderPass(scene, camera)
@@ -215,10 +219,24 @@ structureOutlinePass.selectedObjects = []
 composer.addPass(structureOutlinePass)
 composer.addPass(new OutputPass())
 
-const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x2b2b2b, 0.9)
+const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x2b2b2b, 1.15)
 scene.add(hemi)
-const dir = new THREE.DirectionalLight(0xffffff, 0.7)
-dir.position.set(6, 12, 4)
+const ambient = new THREE.AmbientLight(0xffffff, 0.85)
+scene.add(ambient)
+const dir = new THREE.DirectionalLight(0xffffff, 1.25)
+dir.position.set(18, 10, -14)
+dir.castShadow = true
+dir.shadow.mapSize.set(2048, 2048)
+dir.shadow.camera.near = 1
+dir.shadow.camera.far = 70
+dir.shadow.camera.left = -24
+dir.shadow.camera.right = 24
+dir.shadow.camera.top = 24
+dir.shadow.camera.bottom = -24
+dir.shadow.bias = -0.0005
+dir.shadow.normalBias = 0.02
+dir.shadow.radius = 10
+dir.shadow.blurSamples = 16
 scene.add(dir)
 
 type GroundBounds = { minX: number, maxX: number, minZ: number, maxZ: number }
@@ -435,26 +453,84 @@ const updateGroundFromBounds = (bounds: GroundBounds) => {
   ground.position.set((clampedBounds.minX + clampedBounds.maxX) * 0.5, 0, (clampedBounds.minZ + clampedBounds.maxZ) * 0.5)
 }
 
-const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x1b232b })
+const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x52a384 })
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), groundMaterial)
 ground.rotation.x = -Math.PI / 2
 ground.position.y = 0
+ground.receiveShadow = true
 scene.add(ground)
 
-const castle = new THREE.Mesh(
-  new THREE.PlaneGeometry(7, 7),
-  new THREE.MeshStandardMaterial({ color: 0xe0c34a })
-)
-castle.rotation.x = -Math.PI / 2
-castle.position.set(0, 0.02, 0)
+const castle = new THREE.Group()
+castle.position.set(0, 0, 0)
 scene.add(castle)
+let castleContentLoaded = false
+
+const replaceCastleContent = (object: THREE.Object3D) => {
+  while (castle.children.length > 0) {
+    castle.remove(castle.children[0]!)
+  }
+  castle.add(object)
+}
 
 const castleCollider: StaticCollider = {
-  center: new THREE.Vector3(0, 0.02, 0),
-  halfSize: new THREE.Vector3(3.5, 0.01, 3.5),
+  center: new THREE.Vector3(0, 0, 0),
+  halfSize: new THREE.Vector3(3.5, 0.5, 3.5),
   type: 'castle'
 }
 const staticColliders: StaticCollider[] = [castleCollider]
+
+const updateCastleColliderFromObject = (object: THREE.Object3D) => {
+  const bounds = new THREE.Box3().setFromObject(object)
+  if (bounds.isEmpty()) return
+  const size = new THREE.Vector3()
+  const center = new THREE.Vector3()
+  bounds.getSize(size)
+  bounds.getCenter(center)
+  const minHalfSize = GRID_SIZE * 0.5
+  const collisionPadding = 0.15
+  castleCollider.center.set(center.x, 0, center.z)
+  castleCollider.halfSize.set(
+    Math.max(minHalfSize, size.x * 0.5 + collisionPadding),
+    0.5,
+    Math.max(minHalfSize, size.z * 0.5 + collisionPadding)
+  )
+}
+
+const gltfLoader = new GLTFLoader()
+gltfLoader.load(
+  castleModelUrl,
+  (gltf) => {
+    if (castleContentLoaded) return
+    castleContentLoaded = true
+    const model = gltf.scene
+    model.position.set(0, 0, 0)
+    model.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      child.castShadow = true
+      child.receiveShadow = true
+    })
+    replaceCastleContent(model)
+    updateCastleColliderFromObject(model)
+    refreshAllSpawnerPathlines()
+  },
+  undefined,
+  (error) => {
+    if (castleContentLoaded) return
+    castleContentLoaded = true
+    console.error('Failed to load castle model:', error)
+    const fallback = new THREE.Mesh(
+      new THREE.PlaneGeometry(7, 7),
+      new THREE.MeshStandardMaterial({ color: 0xe0c34a })
+    )
+    fallback.rotation.x = -Math.PI / 2
+    fallback.position.set(0, 0.02, 0)
+    fallback.castShadow = true
+    fallback.receiveShadow = true
+    replaceCastleContent(fallback)
+    updateCastleColliderFromObject(fallback)
+    refreshAllSpawnerPathlines()
+  }
+)
 const mobs: MobEntity[] = []
 const towers: Tower[] = []
 let selectedTower: Tower | null = null
@@ -501,6 +577,8 @@ const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
         new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
       )
       mesh.position.copy(tileCenter)
+      mesh.castShadow = true
+      mesh.receiveShadow = true
       scene.add(mesh)
       structureStore.addWallCollider(tileCenter, tileHalf, mesh, WALL_HP)
     }
@@ -881,6 +959,8 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
     new THREE.MeshStandardMaterial({ color: typeConfig.color })
   )
   mesh.position.copy(snapped)
+  mesh.castShadow = true
+  mesh.receiveShadow = true
   scene.add(mesh)
 
   const rangeRing = new THREE.Mesh(
@@ -2202,8 +2282,17 @@ const disposeApp = () => {
   ground.geometry.dispose()
   groundMaterial.dispose()
   scene.remove(castle)
-  castle.geometry.dispose()
-  ;(castle.material as THREE.Material).dispose()
+  castle.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return
+    node.geometry.dispose()
+    if (Array.isArray(node.material)) {
+      for (const material of node.material) {
+        material.dispose()
+      }
+      return
+    }
+    node.material.dispose()
+  })
 
   composer.dispose()
   renderer.dispose()
