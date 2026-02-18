@@ -625,6 +625,8 @@ const mobInstanceMesh = new THREE.InstancedMesh(
 )
 mobInstanceMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
 mobInstanceMesh.frustumCulled = false
+mobInstanceMesh.castShadow = true
+mobInstanceMesh.receiveShadow = true
 scene.add(mobInstanceMesh)
 const mobLogicGeometry = new THREE.BoxGeometry(MOB_WIDTH, MOB_HEIGHT, MOB_WIDTH)
 const mobLogicMaterial = new THREE.MeshBasicMaterial({ visible: false })
@@ -892,11 +894,15 @@ const towerRangeMaterial = new THREE.MeshBasicMaterial({
 const raycaster = new THREE.Raycaster()
 const pointer = new THREE.Vector2()
 
-const makeCapsule = (color: number) =>
-  new THREE.Mesh(
+const makeCapsule = (color: number) => {
+  const mesh = new THREE.Mesh(
     new THREE.CapsuleGeometry(PLAYER_WIDTH * 0.5, PLAYER_HEIGHT - PLAYER_WIDTH, 4, 10),
     new THREE.MeshStandardMaterial({ color })
   )
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  return mesh
+}
 
 const player: PlayerEntity = {
   mesh: makeCapsule(0x62ff9a),
