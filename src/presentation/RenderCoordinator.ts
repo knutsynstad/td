@@ -6,6 +6,7 @@ type RenderMobInstancesOptions = {
   camera: THREE.Camera
   mobInstanceMesh: THREE.InstancedMesh
   mobInstanceDummy: THREE.Object3D
+  nowMs: number
   maxVisibleMobInstances: number
   mobInstanceCap: number
   mobInstanceRenderRadius: number
@@ -14,9 +15,13 @@ type RenderMobInstancesOptions = {
 }
 
 export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
+  const WALK_WIGGLE_HEIGHT = 0.052
+  const WALK_WIGGLE_ROLL = 0.14
+  const WALK_WIGGLE_FREQUENCY = 12
   const maxVisible = Math.min(opts.maxVisibleMobInstances, opts.mobInstanceCap)
   const camX = opts.camera.position.x
   const camZ = opts.camera.position.z
+  const time = opts.nowMs * 0.001
   let renderCount = 0
 
   for (const mob of opts.mobs) {
@@ -26,9 +31,18 @@ export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
     if (distSq > opts.mobInstanceRenderRadius * opts.mobInstanceRenderRadius) continue
     if (renderCount >= maxVisible) break
     opts.mobInstanceDummy.position.copy(mob.mesh.position)
-    opts.mobInstanceDummy.position.y = mob.baseY
+    const speedSq = mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z
+    const isWalking = speedSq > 0.05 * 0.05
+    const seed = mob.mesh.id * 0.6180339887498948
+    const phaseOffset = seed * Math.PI * 2
+    const frequency = WALK_WIGGLE_FREQUENCY * (0.88 + ((seed * 7.123) % 0.24))
+    const heightScale = 0.9 + ((seed * 3.731) % 0.2)
+    const rollScale = 0.88 + ((seed * 5.417) % 0.24)
+    const wiggle = isWalking ? Math.sin(time * frequency + phaseOffset) : 0
+    opts.mobInstanceDummy.position.y = mob.baseY + wiggle * WALK_WIGGLE_HEIGHT * heightScale
     opts.mobInstanceDummy.scale.setScalar(1)
-    opts.mobInstanceDummy.rotation.set(0, 0, 0)
+    const heading = isWalking ? Math.atan2(mob.velocity.x, mob.velocity.z) : 0
+    opts.mobInstanceDummy.rotation.set(0, heading, wiggle * WALK_WIGGLE_ROLL * rollScale)
     opts.mobInstanceDummy.updateMatrix()
     opts.mobInstanceMesh.setMatrixAt(renderCount, opts.mobInstanceDummy.matrix)
     opts.mobInstanceMesh.setColorAt(renderCount, mob.berserkMode ? opts.berserkMobColor : opts.normalMobColor)

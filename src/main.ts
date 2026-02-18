@@ -65,13 +65,18 @@ import {
   MAX_VISIBLE_MOB_INSTANCES,
   MOB_INSTANCE_CAP,
   MOB_INSTANCE_RENDER_RADIUS,
+  MOB_HEIGHT,
   MOB_SIEGE_ATTACK_COOLDOWN,
   MOB_SIEGE_DAMAGE,
   MOB_SIEGE_RANGE_BUFFER,
   MOB_SIEGE_UNREACHABLE_GRACE,
   MOB_SPEED,
+  MOB_WIDTH,
   NPC_SPEED,
+  PLAYER_COLLISION_RADIUS,
+  PLAYER_HEIGHT,
   PLAYER_SPEED,
+  PLAYER_WIDTH,
   SELECTION_RADIUS,
   SHOOT_COOLDOWN,
   SHOOT_DAMAGE,
@@ -614,14 +619,14 @@ const rangeCandidateScratch: Entity[] = []
 const spawnerRouteOverlay = new SpawnerPathOverlay(scene)
 
 const mobInstanceMesh = new THREE.InstancedMesh(
-  new THREE.BoxGeometry(0.8, 0.8, 0.8),
+  new THREE.BoxGeometry(MOB_WIDTH, MOB_HEIGHT, MOB_WIDTH),
   new THREE.MeshStandardMaterial({ color: 0xff7a7a }),
   MOB_INSTANCE_CAP
 )
 mobInstanceMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
 mobInstanceMesh.frustumCulled = false
 scene.add(mobInstanceMesh)
-const mobLogicGeometry = new THREE.BoxGeometry(0.8, 0.8, 0.8)
+const mobLogicGeometry = new THREE.BoxGeometry(MOB_WIDTH, MOB_HEIGHT, MOB_WIDTH)
 const mobLogicMaterial = new THREE.MeshBasicMaterial({ visible: false })
 const mobInstanceDummy = new THREE.Object3D()
 const normalMobColor = new THREE.Color(0xff7a7a)
@@ -684,7 +689,7 @@ const getSpawnCandidatePosition = (spawner: WaveSpawner) => {
   )
 }
 
-const canSpawnAt = (pos: THREE.Vector3, radius = 0.45) => {
+const canSpawnAt = (pos: THREE.Vector3, radius = MOB_WIDTH * 0.5) => {
   const minDist = radius * 3.2
   const minDistSq = minDist * minDist
   for (const mob of mobs) {
@@ -888,16 +893,19 @@ const raycaster = new THREE.Raycaster()
 const pointer = new THREE.Vector2()
 
 const makeCapsule = (color: number) =>
-  new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.6, 4, 10), new THREE.MeshStandardMaterial({ color }))
+  new THREE.Mesh(
+    new THREE.CapsuleGeometry(PLAYER_WIDTH * 0.5, PLAYER_HEIGHT - PLAYER_WIDTH, 4, 10),
+    new THREE.MeshStandardMaterial({ color })
+  )
 
 const player: PlayerEntity = {
   mesh: makeCapsule(0x62ff9a),
-  radius: 0.45,
+  radius: PLAYER_COLLISION_RADIUS,
   speed: PLAYER_SPEED,
   velocity: new THREE.Vector3(),
   target: new THREE.Vector3(0, 0, 0),
   kind: 'player',
-  baseY: 0.7,
+  baseY: PLAYER_HEIGHT * 0.5,
   username: 'u/PlayerOne'
 }
 player.mesh.position.set(4, player.baseY, 4)
@@ -908,12 +916,12 @@ const npcs: NpcEntity[] = []
 const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
   const npc: NpcEntity = {
     mesh: makeCapsule(color),
-    radius: 0.45,
+    radius: PLAYER_COLLISION_RADIUS,
     speed: NPC_SPEED,
     velocity: new THREE.Vector3(),
     target: pos.clone(),
     kind: 'npc',
-    baseY: 0.7,
+    baseY: PLAYER_HEIGHT * 0.5,
     username
   }
   npc.mesh.position.copy(pos).setY(npc.baseY)
@@ -1002,7 +1010,7 @@ const makeMob = (spawner: WaveSpawner) => {
   const pos = getSpawnCandidatePosition(spawner)
   if (!canSpawnAt(pos)) return false
   const mob = new THREE.Mesh(mobLogicGeometry, mobLogicMaterial)
-  mob.position.copy(pos).setY(0.4)
+  mob.position.copy(pos).setY(MOB_HEIGHT * 0.5)
   const lanePath = spawnerPathlineCache.get(spawner.id)
   const hasLane = lanePath?.state === 'reachable'
   const entryPoint = getSpawnerEntryPoint(spawner.position)
@@ -1012,14 +1020,14 @@ const makeMob = (spawner: WaveSpawner) => {
   const maxHp = 3
   mobs.push({
     mesh: mob,
-    radius: 0.45,
+    radius: MOB_WIDTH * 0.5,
     speed: MOB_SPEED,
     velocity: new THREE.Vector3(),
     target: new THREE.Vector3(0, 0, 0),
     kind: 'mob',
     hp: maxHp,
     maxHp: maxHp,
-    baseY: 0.4,
+    baseY: MOB_HEIGHT * 0.5,
     waypoints: laneWaypoints,
     waypointIndex: hasLane ? 0 : undefined,
     berserkMode: false,
@@ -1927,12 +1935,13 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 
 const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
 
-const updateMobInstanceRender = () => {
+const updateMobInstanceRender = (now: number) => {
   renderVisibleMobInstances({
     mobs,
     camera,
     mobInstanceMesh,
     mobInstanceDummy,
+    nowMs: now,
     maxVisibleMobInstances: MAX_VISIBLE_MOB_INSTANCES,
     mobInstanceCap: MOB_INSTANCE_CAP,
     mobInstanceRenderRadius: MOB_INSTANCE_RENDER_RADIUS,
@@ -2175,7 +2184,7 @@ const tick = (now: number, delta: number) => {
   camera.position.copy(player.mesh.position).add(cameraOffset)
   camera.lookAt(player.mesh.position)
   camera.updateMatrixWorld()
-  updateMobInstanceRender()
+  updateMobInstanceRender(now)
 
   updateHealthBars()
   updateUsernameLabels()
