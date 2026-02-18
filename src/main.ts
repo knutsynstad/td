@@ -64,7 +64,6 @@ import {
   GRID_SIZE,
   MAX_VISIBLE_MOB_INSTANCES,
   MOB_INSTANCE_CAP,
-  MOB_INSTANCE_RENDER_RADIUS,
   MOB_HEIGHT,
   MOB_SIEGE_ATTACK_COOLDOWN,
   MOB_SIEGE_DAMAGE,
@@ -207,6 +206,11 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.VSMShadowMap
 app.appendChild(renderer.domElement)
+
+const viewportFogEl = document.createElement('div')
+viewportFogEl.className = 'viewport-fog'
+app.appendChild(viewportFogEl)
+
 const composer = new EffectComposer(renderer)
 const renderPass = new RenderPass(scene, camera)
 composer.addPass(renderPass)
@@ -1208,6 +1212,15 @@ const worldToScreen = (worldPos: THREE.Vector3): { x: number, y: number } | null
   return { x, y }
 }
 
+const updateViewportFogCenter = () => {
+  const anchor = worldToScreen(player.mesh.position.clone().setY(player.baseY))
+  if (!anchor) return
+  const xPct = Math.max(0, Math.min(100, (anchor.x / window.innerWidth) * 100))
+  const yPct = Math.max(0, Math.min(100, (anchor.y / window.innerHeight) * 100))
+  viewportFogEl.style.setProperty('--fog-center-x', `${xPct}%`)
+  viewportFogEl.style.setProperty('--fog-center-y', `${yPct}%`)
+}
+
 const getEnergyCounterAnchor = () => {
   const rect = energyCountEl.getBoundingClientRect()
   return { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 }
@@ -1950,7 +1963,6 @@ const updateMobInstanceRender = (now: number) => {
     nowMs: now,
     maxVisibleMobInstances: MAX_VISIBLE_MOB_INSTANCES,
     mobInstanceCap: MOB_INSTANCE_CAP,
-    mobInstanceRenderRadius: MOB_INSTANCE_RENDER_RADIUS,
     normalMobColor,
     berserkMobColor
   })
@@ -2190,6 +2202,7 @@ const tick = (now: number, delta: number) => {
   camera.position.copy(player.mesh.position).add(cameraOffset)
   camera.lookAt(player.mesh.position)
   camera.updateMatrixWorld()
+  updateViewportFogCenter()
   updateMobInstanceRender(now)
 
   updateHealthBars()

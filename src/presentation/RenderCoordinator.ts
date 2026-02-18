@@ -9,7 +9,6 @@ type RenderMobInstancesOptions = {
   nowMs: number
   maxVisibleMobInstances: number
   mobInstanceCap: number
-  mobInstanceRenderRadius: number
   normalMobColor: THREE.Color
   berserkMobColor: THREE.Color
 }
@@ -19,16 +18,21 @@ export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
   const WALK_WIGGLE_ROLL = 0.14
   const WALK_WIGGLE_FREQUENCY = 12
   const maxVisible = Math.min(opts.maxVisibleMobInstances, opts.mobInstanceCap)
-  const camX = opts.camera.position.x
-  const camZ = opts.camera.position.z
+  const frustum = new THREE.Frustum()
+  const viewProjectionMatrix = new THREE.Matrix4().multiplyMatrices(
+    opts.camera.projectionMatrix,
+    opts.camera.matrixWorldInverse
+  )
+  frustum.setFromProjectionMatrix(viewProjectionMatrix)
+  const cullingSphere = new THREE.Sphere()
+  const cullingRadius = 0.95
   const time = opts.nowMs * 0.001
   let renderCount = 0
 
   for (const mob of opts.mobs) {
-    const dx = mob.mesh.position.x - camX
-    const dz = mob.mesh.position.z - camZ
-    const distSq = dx * dx + dz * dz
-    if (distSq > opts.mobInstanceRenderRadius * opts.mobInstanceRenderRadius) continue
+    cullingSphere.center.copy(mob.mesh.position)
+    cullingSphere.radius = cullingRadius
+    if (!frustum.intersectsSphere(cullingSphere)) continue
     if (renderCount >= maxVisible) break
     opts.mobInstanceDummy.position.copy(mob.mesh.position)
     const speedSq = mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z

@@ -31,6 +31,23 @@ body {
   height: 100vh;
 }
 
+.viewport-fog {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1100;
+  --fog-center-x: 50%;
+  --fog-center-y: 50%;
+  background: radial-gradient(
+    ellipse at var(--fog-center-x) var(--fog-center-y),
+    rgba(16, 21, 26, 0) 0%,
+    rgba(16, 21, 26, 0) 46%,
+    rgba(16, 21, 26, 0.1) 66%,
+    rgba(16, 21, 26, 0.24) 84%,
+    rgba(16, 21, 26, 0.4) 100%
+  );
+}
+
 canvas {
   display: block;
   width: 100%;
