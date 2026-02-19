@@ -7,7 +7,7 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   --hud-button-size: 84px;
-  --hud-build-gap: 8px;
+  --hud-build-gap: 12px;
   --hud-actions-gap: 12px;
   --hud-action-bar-width: calc(var(--hud-button-size) * 3 + var(--hud-build-gap) + var(--hud-actions-gap));
 }
