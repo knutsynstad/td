@@ -1123,7 +1123,18 @@ addMapWall(new THREE.Vector3(0, 0.5, 12), new THREE.Vector3(5, 0.5, 0.5))
 
 // Initialize spatial grid and lane path caches
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
-const castleGoal = new THREE.Vector3(0, 0, 0)
+const getCastleEntryGoals = () => {
+  const x = castleCollider.center.x
+  const z = castleCollider.center.z
+  const hx = castleCollider.halfSize.x
+  const hz = castleCollider.halfSize.z
+  return [
+    new THREE.Vector3(x + hx, 0, z),
+    new THREE.Vector3(x - hx, 0, z),
+    new THREE.Vector3(x, 0, z + hz),
+    new THREE.Vector3(x, 0, z - hz)
+  ]
+}
 const borderDoors = getAllBorderDoors(WORLD_BOUNDS)
 const waveAndSpawnSystem = createWaveAndSpawnSystem({
   borderDoors,
@@ -1294,23 +1305,60 @@ const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
 
 const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   const entry = getSpawnerEntryPoint(spawner.position)
-  const route = computeLanePathAStar({
-    start: entry,
-    goal: castleGoal,
-    colliders: staticColliders,
-    worldBounds: WORLD_BOUNDS,
-    resolution: GRID_SIZE,
-    maxVisited: 240_000
-  })
-  const displayPoints = trimPathToCastleBoundary(route.points)
-  const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
-  const routeState: LanePathResult['state'] = (
-    route.state === 'reachable' && corridor.isComplete
-      ? 'reachable'
-      : route.state === 'unstable'
-        ? 'unstable'
-        : 'blocked'
-  )
+  const goals = getCastleEntryGoals()
+  const pathLength = (points: THREE.Vector3[]) => {
+    let total = 0
+    for (let i = 1; i < points.length; i += 1) {
+      total += points[i - 1]!.distanceTo(points[i]!)
+    }
+    return total
+  }
+  const stateRank: Record<LanePathResult['state'], number> = {
+    reachable: 0,
+    unstable: 1,
+    blocked: 2
+  }
+  let best: {
+    route: LanePathResult
+    displayPoints: THREE.Vector3[]
+    corridor: { tiles: THREE.Vector3[], isComplete: boolean }
+    routeState: LanePathResult['state']
+    length: number
+  } | null = null
+  for (const goal of goals) {
+    const route = computeLanePathAStar({
+      start: entry,
+      goal,
+      colliders: staticColliders,
+      worldBounds: WORLD_BOUNDS,
+      resolution: GRID_SIZE,
+      maxVisited: 240_000
+    })
+    const displayPoints = trimPathToCastleBoundary(route.points)
+    const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
+    const routeState: LanePathResult['state'] = (
+      route.state === 'reachable' && corridor.isComplete
+        ? 'reachable'
+        : route.state === 'unstable'
+          ? 'unstable'
+          : 'blocked'
+    )
+    const length = pathLength(displayPoints)
+    if (!best) {
+      best = { route, displayPoints, corridor, routeState, length }
+      continue
+    }
+    const currentRank = stateRank[routeState]
+    const bestRank = stateRank[best.routeState]
+    if (currentRank < bestRank || (currentRank === bestRank && length < best.length)) {
+      best = { route, displayPoints, corridor, routeState, length }
+    }
+  }
+  if (!best) return
+  const route = best.route
+  const displayPoints = best.displayPoints
+  const corridor = best.corridor
+  const routeState = best.routeState
   spawner.routeState = routeState
   spawnerPathlineCache.set(spawner.id, { points: route.points, state: routeState })
   pathTilePositions.set(
