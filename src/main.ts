@@ -96,6 +96,7 @@ import { createGameState } from './game/state/GameState'
 import { createInputController } from './input/InputController'
 import { updateHud } from './presentation/HudPresenter'
 import { renderVisibleMobInstances } from './presentation/RenderCoordinator'
+import { createBallistaVisualRig, updateBallistaRigTracking, type BallistaVisualRig } from './presentation/ballistaRig'
 import { createWaveAndSpawnSystem } from './game/systems/WaveAndSpawnSystem'
 import {
   assertEnergyInBounds,
@@ -574,6 +575,7 @@ const gltfLoader = new GLTFLoader()
 let towerModelTemplate: THREE.Object3D | null = null
 let treeModelTemplate: THREE.Object3D | null = null
 let coinModelTemplate: THREE.Object3D | null = null
+const towerBallistaRigs = new Map<Tower, BallistaVisualRig>()
 
 const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) => {
   const model = source.clone(true)
@@ -590,6 +592,21 @@ const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) =
   const fittedCenter = new THREE.Vector3()
   fittedBounds.getCenter(fittedCenter)
   model.position.set(-fittedCenter.x, -fittedBounds.min.y, -fittedCenter.z)
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return
+    child.castShadow = true
+    child.receiveShadow = true
+  })
+  return model
+}
+
+const prepareStaticModelPreserveScale = (source: THREE.Object3D) => {
+  const model = source.clone(true)
+  const bounds = new THREE.Box3().setFromObject(model)
+  if (bounds.isEmpty()) return model
+  const center = new THREE.Vector3()
+  bounds.getCenter(center)
+  model.position.set(-center.x, -bounds.min.y, -center.z)
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return
     child.castShadow = true
@@ -619,13 +636,17 @@ const prepareCoinModel = (source: THREE.Object3D) => {
   return model
 }
 
-const applyTowerVisualToMesh = (mesh: THREE.Mesh) => {
+const applyTowerVisualToMesh = (mesh: THREE.Mesh, tower?: Tower) => {
   if (!towerModelTemplate) return
   if (mesh.children.some((child) => child.userData.isTowerVisual === true)) return
-  const towerVisual = towerModelTemplate.clone(true)
+  const rig = createBallistaVisualRig(towerModelTemplate)
+  const towerVisual = rig?.root ?? towerModelTemplate.clone(true)
   towerVisual.position.y -= TOWER_BUILD_SIZE.y * 0.5
   towerVisual.userData.isTowerVisual = true
   mesh.add(towerVisual)
+  if (tower && rig) {
+    towerBallistaRigs.set(tower, rig)
+  }
   const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
   hitboxMaterial.transparent = true
   hitboxMaterial.opacity = 0
@@ -664,9 +685,9 @@ const syncHudCoinModel = () => {
 gltfLoader.load(
   towerBallistaModelUrl,
   (gltf) => {
-    towerModelTemplate = prepareStaticModel(gltf.scene, TOWER_BUILD_SIZE)
+    towerModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
     for (const tower of towers) {
-      applyTowerVisualToMesh(tower.mesh)
+      applyTowerVisualToMesh(tower.mesh, tower)
     }
   },
   undefined,
@@ -1186,9 +1207,7 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
     })
   )
   mesh.position.copy(snapped)
-  if (towerModelTemplate) {
-    applyTowerVisualToMesh(mesh)
-  } else {
+  if (!towerModelTemplate) {
     mesh.castShadow = true
     mesh.receiveShadow = true
   }
@@ -1224,6 +1243,9 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
     rangeRing,
     typeId,
     level: typeConfig.level
+  }
+  if (towerModelTemplate) {
+    applyTowerVisualToMesh(mesh, tower)
   }
   towers.push(tower)
   return tower
@@ -1533,7 +1555,6 @@ const spawnEnergyTrail = (fromWorldPos: THREE.Vector3, reward: number) => {
   const sideA = (Math.random() - 0.5) * Math.min(190, Math.max(60, dist * 0.45))
   const sideB = (Math.random() - 0.5) * Math.min(70, Math.max(20, dist * 0.18))
   const progress1 = 0.22 + Math.random() * 0.16
-  const progress2 = 0.55 + Math.random() * 0.18
   const control1X = start.x + dx * progress1 + perpX * sideA
   const control1Y = start.y + dy * progress1 + perpY * sideA - baseArc * (0.9 + Math.random() * 0.45)
   const approachHeight = Math.min(180, Math.max(70, dist * (0.28 + Math.random() * 0.14)))
@@ -2122,6 +2143,7 @@ const resetGame = () => {
     }
   }
   towers.length = 0
+  towerBallistaRigs.clear()
   structureStore.wallMeshes.length = 0
   structureStore.structureStates.clear()
   structureStore.structureMeshToCollider.clear()
@@ -2411,6 +2433,10 @@ const tick = (now: number, delta: number) => {
     tower.laserVisibleTime = Math.max(tower.laserVisibleTime - delta, 0)
 
     const target = pickMobInRange(tower.mesh.position, tower.range)
+    const rig = towerBallistaRigs.get(tower)
+    if (rig) {
+      updateBallistaRigTracking(rig, tower.mesh.position, target ? target.mesh.position : null, delta)
+    }
     if (target) {
       const start = tower.mesh.position.clone().setY(tower.mesh.position.y + TOWER_HEIGHT * 0.5)
       const end = target.mesh.position.clone().setY(target.baseY + 0.3)
