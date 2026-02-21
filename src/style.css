@@ -335,22 +335,36 @@ canvas {
 .hud-energy {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: rgba(30, 37, 45, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #f9d978;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+  gap: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  color: #f0d066;
+  text-shadow: none;
 }
 
 .hud-energy__icon {
   font-size: 1.05rem;
 }
 
+.hud-energy__icon-view {
+  width: 60px;
+  height: 60px;
+  overflow: visible;
+}
+
+.hud-energy__coin-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
 .hud-energy__value {
-  font-size: 1.05rem;
-  font-weight: 700;
+  font-size: 2.1rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #dcae2b;
 }
 
 .hud-energy__value.pop {
@@ -371,11 +385,12 @@ canvas {
 
 .energy-trail-orb {
   position: absolute;
-  width: 9px;
-  height: 9px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #fff9be, #f7c74f 70%, #e39f1b 100%);
-  box-shadow: 0 0 10px rgba(247, 199, 79, 0.9);
+  background: radial-gradient(circle at 34% 30%, #f6d56a 0%, #dca22a 62%, #a56b0f 100%);
+  box-shadow: none;
+  border: 1px solid rgba(130, 84, 12, 0.9);
   transform: translate(-9999px, -9999px);
 }
 

@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 
-type CubeParticle = {
-  mesh: THREE.Mesh
+type ParticleInstance = {
+  root: THREE.Object3D
+  materials: THREE.Material[]
+  ownsGeometry: boolean
   velocity: THREE.Vector3
   angularVelocity: THREE.Vector3
   lifetime: number
@@ -30,18 +32,52 @@ type CubeEffectOptions = {
 export type ParticleSystem = {
   spawnCubeEffects: (pos: THREE.Vector3, options?: CubeEffectOptions) => void
   spawnMobDeathEffects: (pos: THREE.Vector3) => void
+  spawnCoinRewardEffects: (pos: THREE.Vector3) => void
+  setCoinParticleTemplate: (template: THREE.Object3D | null) => void
   updateParticles: (delta: number) => void
   dispose: () => void
 }
 
 export const createParticleSystem = (scene: THREE.Scene): ParticleSystem => {
-  const cubeParticles: CubeParticle[] = []
+  const particles: ParticleInstance[] = []
+  let coinParticleTemplate: THREE.Object3D | null = null
+
+  const collectMaterials = (root: THREE.Object3D): THREE.Material[] => {
+    const materials: THREE.Material[] = []
+    root.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      const source = child.material
+      if (Array.isArray(source)) {
+        const cloned = source.map((material) => {
+          const next = material.clone()
+          next.transparent = true
+          return next
+        })
+        child.material = cloned
+        materials.push(...cloned)
+        return
+      }
+      const cloned = source.clone()
+      cloned.transparent = true
+      child.material = cloned
+      materials.push(cloned)
+    })
+    return materials
+  }
+
+  const setObjectOpacity = (materials: THREE.Material[], opacity: number) => {
+    for (const material of materials) {
+      if ('opacity' in material) {
+        ;(material as THREE.Material & { opacity: number }).opacity = opacity
+      }
+    }
+  }
 
   const createCubeParticle = (
     pos: THREE.Vector3,
     velocity: THREE.Vector3,
     options: CubeParticleOptions = {}
-  ): CubeParticle => {
+  ): ParticleInstance => {
     const sizeMin = options.sizeMin ?? 0.15
     const sizeMax = options.sizeMax ?? 0.25
     const size = sizeMin + Math.random() * (sizeMax - sizeMin)
@@ -49,19 +85,54 @@ export const createParticleSystem = (scene: THREE.Scene): ParticleSystem => {
     const lifetimeMax = options.lifetimeMax ?? 1.5
     const maxLifetime = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin)
     const angularScale = options.angularVelocityScale ?? 10
-    const particle = new THREE.Mesh(
+    const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(size, size, size),
       new THREE.MeshStandardMaterial({ color: options.color ?? 0xff7a7a, transparent: true })
     )
-    particle.position.copy(pos)
-    scene.add(particle)
+    mesh.position.copy(pos)
+    scene.add(mesh)
+    const material = mesh.material as THREE.Material
     return {
-      mesh: particle,
+      root: mesh,
+      materials: [material],
+      ownsGeometry: true,
       velocity: velocity.clone(),
       angularVelocity: new THREE.Vector3(
         (Math.random() - 0.5) * angularScale,
         (Math.random() - 0.5) * angularScale,
         (Math.random() - 0.5) * angularScale
+      ),
+      lifetime: maxLifetime,
+      maxLifetime
+    }
+  }
+
+  const createModelParticle = (
+    pos: THREE.Vector3,
+    velocity: THREE.Vector3,
+    template: THREE.Object3D
+  ): ParticleInstance => {
+    const root = template.clone(true)
+    root.position.copy(pos)
+    const minScale = 0.22
+    const maxScale = 0.36
+    const scale = minScale + Math.random() * (maxScale - minScale)
+    root.scale.multiplyScalar(scale)
+    root.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI)
+    const materials = collectMaterials(root)
+    scene.add(root)
+    const lifetimeMin = 1.5
+    const lifetimeMax = 2.2
+    const maxLifetime = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin)
+    return {
+      root,
+      materials,
+      ownsGeometry: false,
+      velocity: velocity.clone(),
+      angularVelocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 12,
+        (Math.random() - 0.5) * 12,
+        (Math.random() - 0.5) * 12
       ),
       lifetime: maxLifetime,
       maxLifetime
@@ -84,7 +155,7 @@ export const createParticleSystem = (scene: THREE.Scene): ParticleSystem => {
         verticalMin + Math.random() * (verticalMax - verticalMin),
         Math.sin(angle) * speed
       )
-      cubeParticles.push(createCubeParticle(pos.clone(), velocity, options.particle))
+      particles.push(createCubeParticle(pos.clone(), velocity, options.particle))
     }
   }
 
@@ -106,41 +177,92 @@ export const createParticleSystem = (scene: THREE.Scene): ParticleSystem => {
     })
   }
 
+  const spawnCoinRewardEffects = (pos: THREE.Vector3) => {
+    if (coinParticleTemplate) {
+      const count = 3 + Math.floor(Math.random() * 2)
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2
+        const speed = 1.6 + Math.random() * 1.4
+        const velocity = new THREE.Vector3(
+          Math.cos(angle) * speed,
+          2.3 + Math.random() * 1.6,
+          Math.sin(angle) * speed
+        )
+        particles.push(createModelParticle(pos.clone(), velocity, coinParticleTemplate))
+      }
+      return
+    }
+    spawnCubeEffects(pos, {
+      countMin: 2,
+      countMax: 3,
+      speedMin: 1.2,
+      speedMax: 2.2,
+      verticalMin: 2.0,
+      verticalMax: 3.1,
+      particle: {
+        sizeMin: 0.12,
+        sizeMax: 0.2,
+        lifetimeMin: 0.9,
+        lifetimeMax: 1.4,
+        color: 0xf0d066,
+        angularVelocityScale: 11
+      }
+    })
+  }
+
   const updateParticles = (delta: number) => {
-    for (let i = cubeParticles.length - 1; i >= 0; i--) {
-      const particle = cubeParticles[i]!
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const particle = particles[i]!
       particle.lifetime -= delta
       particle.velocity.y -= 9.8 * delta
-      particle.mesh.position.add(particle.velocity.clone().multiplyScalar(delta))
+      particle.root.position.add(particle.velocity.clone().multiplyScalar(delta))
 
-      particle.mesh.rotation.x += particle.angularVelocity.x * delta
-      particle.mesh.rotation.y += particle.angularVelocity.y * delta
-      particle.mesh.rotation.z += particle.angularVelocity.z * delta
+      particle.root.rotation.x += particle.angularVelocity.x * delta
+      particle.root.rotation.y += particle.angularVelocity.y * delta
+      particle.root.rotation.z += particle.angularVelocity.z * delta
 
       const opacity = Math.max(0, particle.lifetime / particle.maxLifetime)
-      ;(particle.mesh.material as THREE.MeshStandardMaterial).opacity = opacity
+      setObjectOpacity(particle.materials, opacity)
 
-      if (particle.lifetime <= 0 || particle.mesh.position.y < -1) {
-        scene.remove(particle.mesh)
-        particle.mesh.geometry.dispose()
-        ;(particle.mesh.material as THREE.Material).dispose()
-        cubeParticles.splice(i, 1)
+      if (particle.lifetime <= 0 || particle.root.position.y < -1) {
+        scene.remove(particle.root)
+        if (particle.ownsGeometry) {
+          particle.root.traverse((child) => {
+            if (child instanceof THREE.Mesh) child.geometry.dispose()
+          })
+        }
+        for (const material of particle.materials) {
+          material.dispose()
+        }
+        particles.splice(i, 1)
       }
     }
   }
 
+  const setCoinParticleTemplate = (template: THREE.Object3D | null) => {
+    coinParticleTemplate = template
+  }
+
   const dispose = () => {
-    for (const particle of cubeParticles) {
-      scene.remove(particle.mesh)
-      particle.mesh.geometry.dispose()
-      ;(particle.mesh.material as THREE.Material).dispose()
+    for (const particle of particles) {
+      scene.remove(particle.root)
+      if (particle.ownsGeometry) {
+        particle.root.traverse((child) => {
+          if (child instanceof THREE.Mesh) child.geometry.dispose()
+        })
+      }
+      for (const material of particle.materials) {
+        material.dispose()
+      }
     }
-    cubeParticles.length = 0
+    particles.length = 0
   }
 
   return {
     spawnCubeEffects,
     spawnMobDeathEffects,
+    spawnCoinRewardEffects,
+    setCoinParticleTemplate,
     updateParticles,
     dispose
   }

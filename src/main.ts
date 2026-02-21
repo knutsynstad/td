@@ -6,6 +6,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import castleModelUrl from './assets/models/castle.glb?url'
+import coinModelUrl from './assets/models/coin.glb?url'
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
 import treeModelUrl from './assets/models/tree.glb?url'
 import { screenToWorldOnGround } from './utils/coords'
@@ -133,7 +134,9 @@ app.innerHTML = `
     </div>
     <div class="hud-corner hud-corner--top-right">
       <div class="hud-energy">
-        <span class="hud-energy__icon">${ENERGY_SYMBOL}</span>
+        <div class="hud-energy__icon-view">
+          <canvas id="coinHudCanvas" class="hud-energy__coin-canvas" aria-label="Coins"></canvas>
+        </div>
         <span id="energyCount" class="hud-energy__value">100</span>
       </div>
     </div>
@@ -180,8 +183,52 @@ const hudActionsEl = document.querySelector<HTMLDivElement>('.hud-actions')!
 const buildWallBtn = document.querySelector<HTMLButtonElement>('#buildWall')!
 const buildTowerBtn = document.querySelector<HTMLButtonElement>('#buildTower')!
 const shootButton = document.querySelector<HTMLButtonElement>('#shootButton')!
+const coinHudCanvasEl = document.querySelector<HTMLCanvasElement>('#coinHudCanvas')!
 const minimapCanvasEl = document.querySelector<HTMLCanvasElement>('#hudMinimap')!
 const minimapCtx = minimapCanvasEl.getContext('2d')
+
+const coinHudScene = new THREE.Scene()
+const coinHudCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 50)
+coinHudCamera.position.set(0, 0.8, 3)
+coinHudCamera.lookAt(0, 0, 0)
+const coinHudRenderer = new THREE.WebGLRenderer({
+  canvas: coinHudCanvasEl,
+  antialias: true,
+  alpha: true
+})
+coinHudRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+coinHudRenderer.setSize(36, 36, false)
+coinHudRenderer.outputColorSpace = THREE.SRGBColorSpace
+const coinHudAmbient = new THREE.AmbientLight(0xffffff, 1.05)
+coinHudScene.add(coinHudAmbient)
+const coinHudKey = new THREE.DirectionalLight(0xffffff, 1.15)
+coinHudKey.position.set(1.5, 2, 2)
+coinHudScene.add(coinHudKey)
+const coinHudRoot = new THREE.Group()
+coinHudScene.add(coinHudRoot)
+const coinTrailCanvasEl = document.createElement('canvas')
+coinTrailCanvasEl.style.position = 'fixed'
+coinTrailCanvasEl.style.inset = '0'
+coinTrailCanvasEl.style.width = '100%'
+coinTrailCanvasEl.style.height = '100%'
+coinTrailCanvasEl.style.pointerEvents = 'none'
+coinTrailCanvasEl.style.zIndex = '1800'
+app.appendChild(coinTrailCanvasEl)
+const coinTrailScene = new THREE.Scene()
+const coinTrailCamera = new THREE.OrthographicCamera(0, window.innerWidth, window.innerHeight, 0, -20, 20)
+const coinTrailAmbient = new THREE.AmbientLight(0xffffff, 1.1)
+coinTrailScene.add(coinTrailAmbient)
+const coinTrailKey = new THREE.DirectionalLight(0xffffff, 1.2)
+coinTrailKey.position.set(0.6, 0.8, 1.2)
+coinTrailScene.add(coinTrailKey)
+const coinTrailRenderer = new THREE.WebGLRenderer({
+  canvas: coinTrailCanvasEl,
+  antialias: true,
+  alpha: true
+})
+coinTrailRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+coinTrailRenderer.setSize(window.innerWidth, window.innerHeight, false)
+coinTrailRenderer.outputColorSpace = THREE.SRGBColorSpace
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x10151a)
@@ -526,6 +573,7 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
 const gltfLoader = new GLTFLoader()
 let towerModelTemplate: THREE.Object3D | null = null
 let treeModelTemplate: THREE.Object3D | null = null
+let coinModelTemplate: THREE.Object3D | null = null
 
 const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) => {
   const model = source.clone(true)
@@ -542,6 +590,27 @@ const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) =
   const fittedCenter = new THREE.Vector3()
   fittedBounds.getCenter(fittedCenter)
   model.position.set(-fittedCenter.x, -fittedBounds.min.y, -fittedCenter.z)
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return
+    child.castShadow = true
+    child.receiveShadow = true
+  })
+  return model
+}
+
+const prepareCoinModel = (source: THREE.Object3D) => {
+  const model = source.clone(true)
+  const initialBounds = new THREE.Box3().setFromObject(model)
+  if (initialBounds.isEmpty()) return model
+  const size = new THREE.Vector3()
+  const center = new THREE.Vector3()
+  initialBounds.getSize(size)
+  initialBounds.getCenter(center)
+  const largestAxis = Math.max(size.x, size.y, size.z, 0.001)
+  const targetAxis = 1.2
+  const uniformScale = targetAxis / largestAxis
+  model.scale.multiplyScalar(uniformScale)
+  model.position.set(-center.x * uniformScale, -center.y * uniformScale, -center.z * uniformScale)
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return
     child.castShadow = true
@@ -583,6 +652,15 @@ const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
   mesh.receiveShadow = false
 }
 
+const syncHudCoinModel = () => {
+  coinHudRoot.clear()
+  if (!coinModelTemplate) return
+  const hudCoin = coinModelTemplate.clone(true)
+  hudCoin.scale.multiplyScalar(0.85)
+  hudCoin.rotation.y = Math.PI / 7
+  coinHudRoot.add(hudCoin)
+}
+
 gltfLoader.load(
   towerBallistaModelUrl,
   (gltf) => {
@@ -609,6 +687,19 @@ gltfLoader.load(
   undefined,
   (error) => {
     console.error('Failed to load tree model:', error)
+  }
+)
+
+gltfLoader.load(
+  coinModelUrl,
+  (gltf) => {
+    coinModelTemplate = prepareCoinModel(gltf.scene)
+    syncHudCoinModel()
+    setCoinParticleTemplate(coinModelTemplate)
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load coin model:', error)
   }
 )
 
@@ -1186,14 +1277,26 @@ let wasKeyboardMoving = false
 const EVENT_BANNER_DURATION = 2.4
 
 type EnergyTrail = {
-  el: HTMLDivElement
+  mesh: THREE.Object3D
+  materials: THREE.Material[]
   startX: number
   startY: number
+  control1X: number
+  control1Y: number
+  control2X: number
+  control2Y: number
   endX: number
   endY: number
   elapsed: number
   duration: number
   reward: number
+  spinStartDeg: number
+  spinTotalDeg: number
+  pitchStartDeg: number
+  pitchTotalDeg: number
+  rollStartDeg: number
+  rollTotalDeg: number
+  baseScale: number
 }
 
 type FloatingDamageText = {
@@ -1218,6 +1321,7 @@ const getDeleteEnergyCost = (collider: DestructibleCollider): number => {
 const particleSystem = createParticleSystem(scene)
 const spawnCubeEffects = particleSystem.spawnCubeEffects
 const spawnMobDeathEffects = particleSystem.spawnMobDeathEffects
+const setCoinParticleTemplate = particleSystem.setCoinParticleTemplate
 const updateParticles = particleSystem.updateParticles
 
 // Health bars and username labels using HTML overlays
@@ -1241,16 +1345,6 @@ usernameContainer.style.pointerEvents = 'none'
 usernameContainer.style.zIndex = '1001'
 app.appendChild(usernameContainer)
 
-const energyTrailContainer = document.createElement('div')
-energyTrailContainer.style.position = 'fixed'
-energyTrailContainer.style.top = '0'
-energyTrailContainer.style.left = '0'
-energyTrailContainer.style.width = '100%'
-energyTrailContainer.style.height = '100%'
-energyTrailContainer.style.pointerEvents = 'none'
-energyTrailContainer.style.zIndex = '3500'
-app.appendChild(energyTrailContainer)
-
 const damageTextContainer = document.createElement('div')
 damageTextContainer.style.position = 'fixed'
 damageTextContainer.style.top = '0'
@@ -1265,6 +1359,31 @@ const activeEnergyTrails: EnergyTrail[] = []
 const activeDamageTexts: FloatingDamageText[] = []
 const CRIT_CHANCE = 1 / 8
 const CRIT_MULTIPLIER = 2
+
+const updateCoinHudView = (delta: number) => {
+  const rect = coinHudCanvasEl.getBoundingClientRect()
+  const width = Math.max(1, Math.round(rect.width))
+  const height = Math.max(1, Math.round(rect.height))
+  coinHudRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  coinHudRenderer.setSize(width, height, false)
+  coinHudCamera.aspect = width / height
+  coinHudCamera.updateProjectionMatrix()
+  if (coinHudRoot.children.length > 0) {
+    const spinSpeed = 1.75
+    coinHudRoot.rotation.y += delta * spinSpeed
+  }
+  coinHudRenderer.render(coinHudScene, coinHudCamera)
+}
+
+const syncCoinTrailViewport = () => {
+  coinTrailRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  coinTrailRenderer.setSize(window.innerWidth, window.innerHeight, false)
+  coinTrailCamera.left = 0
+  coinTrailCamera.right = window.innerWidth
+  coinTrailCamera.top = window.innerHeight
+  coinTrailCamera.bottom = 0
+  coinTrailCamera.updateProjectionMatrix()
+}
 
 const syncMinimapCanvasSize = () => {
   const rect = minimapCanvasEl.getBoundingClientRect()
@@ -1344,7 +1463,7 @@ const updateViewportFogCenter = () => {
 }
 
 const getEnergyCounterAnchor = () => {
-  const rect = energyCountEl.getBoundingClientRect()
+  const rect = coinHudCanvasEl.getBoundingClientRect()
   return { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 }
 }
 
@@ -1361,25 +1480,94 @@ const spendEnergy = (amount: number) => {
   return true
 }
 
+const createTrailCoinInstance = () => {
+  if (!coinModelTemplate) return null
+  const mesh = coinModelTemplate.clone(true)
+  const materials: THREE.Material[] = []
+  mesh.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return
+    const source = child.material
+    if (Array.isArray(source)) {
+      const cloned = source.map((material) => {
+        const next = material.clone()
+        next.transparent = true
+        next.depthWrite = false
+        next.depthTest = false
+        return next
+      })
+      child.material = cloned
+      materials.push(...cloned)
+      return
+    }
+    const cloned = source.clone()
+    cloned.transparent = true
+    cloned.depthWrite = false
+    cloned.depthTest = false
+    child.material = cloned
+    materials.push(cloned)
+  })
+  return { mesh, materials }
+}
+
 const spawnEnergyTrail = (fromWorldPos: THREE.Vector3, reward: number) => {
   const start = worldToScreen(fromWorldPos.clone().setY(fromWorldPos.y + 0.6))
   if (!start) {
     addEnergy(reward, true)
     return
   }
+  const trailCoin = createTrailCoinInstance()
+  if (!trailCoin) {
+    addEnergy(reward, true)
+    return
+  }
+  coinTrailScene.add(trailCoin.mesh)
   const end = getEnergyCounterAnchor()
-  const orb = document.createElement('div')
-  orb.className = 'energy-trail-orb'
-  energyTrailContainer.appendChild(orb)
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const dist = Math.hypot(dx, dy)
+  const dirX = dist > 0.001 ? dx / dist : 0
+  const dirY = dist > 0.001 ? dy / dist : -1
+  const perpX = -dirY
+  const perpY = dirX
+  const baseArc = Math.min(210, Math.max(80, dist * (0.34 + Math.random() * 0.16)))
+  const sideA = (Math.random() - 0.5) * Math.min(190, Math.max(60, dist * 0.45))
+  const sideB = (Math.random() - 0.5) * Math.min(70, Math.max(20, dist * 0.18))
+  const progress1 = 0.22 + Math.random() * 0.16
+  const progress2 = 0.55 + Math.random() * 0.18
+  const control1X = start.x + dx * progress1 + perpX * sideA
+  const control1Y = start.y + dy * progress1 + perpY * sideA - baseArc * (0.9 + Math.random() * 0.45)
+  const approachHeight = Math.min(180, Math.max(70, dist * (0.28 + Math.random() * 0.14)))
+  const control2X = end.x + sideB
+  const control2Y = end.y + approachHeight
+  const spinStartDeg = Math.random() * 360
+  const spinDirection = Math.random() < 0.5 ? -1 : 1
+  const spinTotalDeg = spinDirection * (360 + Math.random() * 540)
+  const pitchStartDeg = -16 + Math.random() * 32
+  const pitchTotalDeg = -30 + Math.random() * 60
+  const rollStartDeg = -14 + Math.random() * 28
+  const rollTotalDeg = -32 + Math.random() * 64
+  const baseScale = 15 + Math.random() * 8
   activeEnergyTrails.push({
-    el: orb,
+    mesh: trailCoin.mesh,
+    materials: trailCoin.materials,
     startX: start.x,
     startY: start.y,
+    control1X,
+    control1Y,
+    control2X,
+    control2Y,
     endX: end.x,
     endY: end.y,
     elapsed: 0,
-    duration: 0.48,
-    reward
+    duration: 0.44 + Math.random() * 0.16,
+    reward,
+    spinStartDeg,
+    spinTotalDeg,
+    pitchStartDeg,
+    pitchTotalDeg,
+    rollStartDeg,
+    rollTotalDeg,
+    baseScale
   })
 }
 
@@ -1388,14 +1576,39 @@ const updateEnergyTrails = (delta: number) => {
     const trail = activeEnergyTrails[i]!
     trail.elapsed += delta
     const t = Math.min(1, trail.elapsed / trail.duration)
-    const ease = 1 - Math.pow(1 - t, 3)
-    const x = trail.startX + (trail.endX - trail.startX) * ease
-    const y = trail.startY + (trail.endY - trail.startY) * ease
-    const lift = (1 - ease) * 22
-    trail.el.style.transform = `translate(${x}px, ${y - lift}px) scale(${1 - t * 0.25})`
-    trail.el.style.opacity = String(1 - t * 0.15)
+    const easeT = 1 - Math.pow(1 - t, 2)
+    const u = 1 - easeT
+    const x =
+      u * u * u * trail.startX +
+      3 * u * u * easeT * trail.control1X +
+      3 * u * easeT * easeT * trail.control2X +
+      easeT * easeT * easeT * trail.endX
+    const y =
+      u * u * u * trail.startY +
+      3 * u * u * easeT * trail.control1Y +
+      3 * u * easeT * easeT * trail.control2Y +
+      easeT * easeT * easeT * trail.endY
+    const rotation = trail.spinStartDeg + trail.spinTotalDeg * easeT
+    const pitch = trail.pitchStartDeg + trail.pitchTotalDeg * easeT
+    const roll = trail.rollStartDeg + trail.rollTotalDeg * easeT
+    const scale = trail.baseScale * (1 - t * 0.05)
+    trail.mesh.position.set(x, window.innerHeight - y, 0)
+    trail.mesh.rotation.set(
+      THREE.MathUtils.degToRad(pitch),
+      THREE.MathUtils.degToRad(rotation),
+      THREE.MathUtils.degToRad(roll)
+    )
+    trail.mesh.scale.setScalar(scale)
+    for (const material of trail.materials) {
+      if ('opacity' in material) {
+        ;(material as THREE.Material & { opacity: number }).opacity = 1
+      }
+    }
     if (t >= 1) {
-      trail.el.remove()
+      coinTrailScene.remove(trail.mesh)
+      for (const material of trail.materials) {
+        material.dispose()
+      }
       activeEnergyTrails.splice(i, 1)
       addEnergy(trail.reward, true)
     }
@@ -1510,7 +1723,7 @@ const canAffordBuildMode = (mode: BuildMode) => {
 
 const setBuildMode = (mode: BuildMode) => {
   if (mode !== 'off' && !canAffordBuildMode(mode)) {
-    triggerEventBanner('Not enough energy')
+    triggerEventBanner('Not enough coins')
     return
   }
   if (gameState.buildMode === mode) {
@@ -1578,7 +1791,7 @@ const selectionDialog = new SelectionDialog(
       if (colliders.length === 0) return
       const deleteCost = colliders.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
       if (!spendEnergy(deleteCost)) {
-        triggerEventBanner(`Need ${deleteCost} energy`)
+        triggerEventBanner(`Need ${deleteCost} coins`)
         return
       }
       for (const collider of colliders) {
@@ -1593,7 +1806,7 @@ const selectionDialog = new SelectionDialog(
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return
       const upgradeCost = getUpgradeEnergyCost(upgradeId)
       if (!spendEnergy(upgradeCost)) {
-        triggerEventBanner(`Need ${upgradeCost} energy`)
+        triggerEventBanner(`Need ${upgradeCost} coins`)
         return
       }
       applyTowerUpgrade(tower, upgradeId)
@@ -1917,7 +2130,10 @@ const resetGame = () => {
   staticColliders.push(castleCollider)
 
   for (const trail of activeEnergyTrails) {
-    trail.el.remove()
+    coinTrailScene.remove(trail.mesh)
+    for (const material of trail.materials) {
+      material.dispose()
+    }
   }
   activeEnergyTrails.length = 0
 
@@ -2063,6 +2279,7 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
+  syncCoinTrailViewport()
   syncMinimapCanvasSize()
 })
 
@@ -2443,7 +2660,9 @@ const tick = (now: number, delta: number) => {
   }
 
   drawMinimap()
+  updateCoinHudView(delta)
   composer.render()
+  coinTrailRenderer.render(coinTrailScene, coinTrailCamera)
 }
 
 const gameLoop = createGameLoop(tick)
@@ -2495,10 +2714,21 @@ const disposeApp = () => {
     node.material.dispose()
   })
 
+  coinHudRoot.clear()
+  coinHudRenderer.dispose()
+  for (const trail of activeEnergyTrails) {
+    coinTrailScene.remove(trail.mesh)
+    for (const material of trail.materials) {
+      material.dispose()
+    }
+  }
+  activeEnergyTrails.length = 0
+  coinTrailRenderer.dispose()
   composer.dispose()
   renderer.dispose()
 }
 
 window.addEventListener('beforeunload', disposeApp)
+syncCoinTrailViewport()
 syncMinimapCanvasSize()
 gameLoop.start()
