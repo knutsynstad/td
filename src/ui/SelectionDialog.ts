@@ -6,6 +6,8 @@ type SelectionDialogState = {
   selectedCount: number
   inRangeCount: number
   selectedTowerTypeId: TowerTypeId | null
+  selectedStructureLabel: string
+  showRepair: boolean
   buildingCoords: { x: number, z: number } | null
   buildingHealth: {
     hp: number
@@ -67,6 +69,8 @@ export class SelectionDialog {
       selectedCount,
       inRangeCount,
       selectedTowerTypeId,
+      selectedStructureLabel,
+      showRepair,
       buildingCoords,
       buildingHealth,
       upgradeOptions,
@@ -80,7 +84,7 @@ export class SelectionDialog {
       return
     }
     this.root.style.display = ''
-    const typeLabel = selectedTowerTypeId ? getTowerType(selectedTowerTypeId).label : 'Wall'
+    const typeLabel = selectedTowerTypeId ? getTowerType(selectedTowerTypeId).label : selectedStructureLabel
     const titleMarkup = buildingCoords
       ? `<span class="selection-dialog__title-main">${typeLabel}</span> <span class="selection-dialog__coords">${buildingCoords.x},${buildingCoords.z}</span>`
       : `<span class="selection-dialog__title-main">${typeLabel}</span>`
@@ -167,9 +171,11 @@ export class SelectionDialog {
         <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
           Delete
         </button>
-        <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-          Repair
-        </button>
+        ${showRepair
+          ? `<button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
+               Repair
+             </button>`
+          : ''}
       </div>
     `
 

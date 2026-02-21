@@ -6,6 +6,8 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import castleModelUrl from './assets/models/castle.glb?url'
+import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
+import treeModelUrl from './assets/models/tree.glb?url'
 import { screenToWorldOnGround } from './utils/coords'
 import { SelectionDialog } from './ui/SelectionDialog'
 import { StructureStore } from './game/structures'
@@ -33,11 +35,12 @@ import { computeDirtyBounds } from './pathfinding/obstacleDelta'
 import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
 import {
   canPlace as canPlaceAt,
+  getBuildSize as getBuildSizeForMode,
   getWallLinePlacement as computeWallLinePlacement,
   placeBuilding as placeBuildingAt,
   placeWallSegments as placeWallSegmentsAt,
   placeWallLine as placeWallSegment,
-  snapToGrid as snapGridValue,
+  snapCenterToBuildGrid,
   type BuildMode
 } from './placement/building'
 import {
@@ -108,6 +111,9 @@ const randomSource = createRandomSource(
   parsedSeed !== undefined && Number.isFinite(parsedSeed) ? parsedSeed : undefined
 )
 const random = () => randomSource.next()
+const TOWER_BUILD_SIZE = getBuildSizeForMode('tower')
+const TREE_BUILD_SIZE = new THREE.Vector3(1, 2, 1)
+const MAP_TREE_COUNT = 64
 app.innerHTML = `
   <div id="hud" class="hud">
     <div class="hud-corner hud-corner--top-left">
@@ -226,6 +232,18 @@ structureOutlinePass.edgeThickness = 1.5
 structureOutlinePass.pulsePeriod = 0
 structureOutlinePass.selectedObjects = []
 composer.addPass(structureOutlinePass)
+const treeOutlinePass = new OutlinePass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  scene,
+  camera
+)
+treeOutlinePass.visibleEdgeColor.set(0xffe066)
+treeOutlinePass.hiddenEdgeColor.set(0x6b5a1a)
+treeOutlinePass.edgeStrength = 4
+treeOutlinePass.edgeThickness = 1.5
+treeOutlinePass.pulsePeriod = 0
+treeOutlinePass.selectedObjects = []
+composer.addPass(treeOutlinePass)
 composer.addPass(new OutputPass())
 
 const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x2b2b2b, 1.15)
@@ -506,6 +524,94 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
 }
 
 const gltfLoader = new GLTFLoader()
+let towerModelTemplate: THREE.Object3D | null = null
+let treeModelTemplate: THREE.Object3D | null = null
+
+const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) => {
+  const model = source.clone(true)
+  const initialBounds = new THREE.Box3().setFromObject(model)
+  if (initialBounds.isEmpty()) return model
+  const initialSize = new THREE.Vector3()
+  initialBounds.getSize(initialSize)
+  const footprint = Math.max(initialSize.x, initialSize.z, 0.001)
+  const targetFootprint = targetSize.x * 0.9
+  const uniformScale = targetFootprint / footprint
+  model.scale.multiplyScalar(uniformScale)
+
+  const fittedBounds = new THREE.Box3().setFromObject(model)
+  const fittedCenter = new THREE.Vector3()
+  fittedBounds.getCenter(fittedCenter)
+  model.position.set(-fittedCenter.x, -fittedBounds.min.y, -fittedCenter.z)
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return
+    child.castShadow = true
+    child.receiveShadow = true
+  })
+  return model
+}
+
+const applyTowerVisualToMesh = (mesh: THREE.Mesh) => {
+  if (!towerModelTemplate) return
+  if (mesh.children.some((child) => child.userData.isTowerVisual === true)) return
+  const towerVisual = towerModelTemplate.clone(true)
+  towerVisual.position.y -= TOWER_BUILD_SIZE.y * 0.5
+  towerVisual.userData.isTowerVisual = true
+  mesh.add(towerVisual)
+  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
+  hitboxMaterial.transparent = true
+  hitboxMaterial.opacity = 0
+  hitboxMaterial.colorWrite = false
+  hitboxMaterial.depthWrite = false
+  mesh.castShadow = false
+  mesh.receiveShadow = false
+}
+
+const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
+  if (!treeModelTemplate) return
+  if (mesh.children.some((child) => child.userData.isTreeVisual === true)) return
+  const treeVisual = treeModelTemplate.clone(true)
+  treeVisual.position.y -= TREE_BUILD_SIZE.y * 0.5
+  treeVisual.userData.isTreeVisual = true
+  mesh.add(treeVisual)
+  mesh.userData.outlineTarget = treeVisual
+  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
+  hitboxMaterial.transparent = true
+  hitboxMaterial.opacity = 0
+  hitboxMaterial.colorWrite = false
+  hitboxMaterial.depthWrite = false
+  mesh.castShadow = false
+  mesh.receiveShadow = false
+}
+
+gltfLoader.load(
+  towerBallistaModelUrl,
+  (gltf) => {
+    towerModelTemplate = prepareStaticModel(gltf.scene, TOWER_BUILD_SIZE)
+    for (const tower of towers) {
+      applyTowerVisualToMesh(tower.mesh)
+    }
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load tower model:', error)
+  }
+)
+
+gltfLoader.load(
+  treeModelUrl,
+  (gltf) => {
+    treeModelTemplate = prepareStaticModel(gltf.scene, TREE_BUILD_SIZE)
+    for (const [collider, state] of structureStore.structureStates.entries()) {
+      if (collider.type !== 'tree') continue
+      applyTreeVisualToMesh(state.mesh)
+    }
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load tree model:', error)
+  }
+)
+
 gltfLoader.load(
   castleModelUrl,
   (gltf) => {
@@ -945,13 +1051,21 @@ const selection = createSelectionState()
 const selectedStructures = selection.selectedStructures
 let activePointerId: number | null = null
 const syncSelectedStructureOutline = () => {
-  const selectedObjects: THREE.Object3D[] = []
+  const structureSelectedObjects: THREE.Object3D[] = []
+  const treeSelectedObjects: THREE.Object3D[] = []
   for (const collider of selectedStructures) {
     const mesh = structureStore.structureStates.get(collider)?.mesh
     if (!mesh) continue
-    selectedObjects.push(mesh)
+    if (collider.type === 'tree') {
+      const outlineTarget = mesh.userData.outlineTarget as THREE.Object3D | undefined
+      const treeVisual = outlineTarget ?? mesh.children.find((child) => child.userData.isTreeVisual === true)
+      treeSelectedObjects.push(treeVisual ?? mesh)
+      continue
+    }
+    structureSelectedObjects.push(mesh)
   }
-  structureOutlinePass.selectedObjects = selectedObjects
+  structureOutlinePass.selectedObjects = structureSelectedObjects
+  treeOutlinePass.selectedObjects = treeSelectedObjects
 }
 
 const applyTowerUpgrade = (tower: Tower, upgradeId: TowerUpgradeId) => {
@@ -973,12 +1087,20 @@ const applyTowerUpgrade = (tower: Tower, upgradeId: TowerUpgradeId) => {
 const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: string): Tower => {
   const typeConfig = getTowerType(typeId)
   const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1, TOWER_HEIGHT, 1),
-    new THREE.MeshStandardMaterial({ color: typeConfig.color })
+    new THREE.BoxGeometry(TOWER_BUILD_SIZE.x, TOWER_BUILD_SIZE.y, TOWER_BUILD_SIZE.z),
+    new THREE.MeshStandardMaterial({
+      color: typeConfig.color,
+      transparent: true,
+      opacity: towerModelTemplate ? 0.01 : 1
+    })
   )
   mesh.position.copy(snapped)
-  mesh.castShadow = true
-  mesh.receiveShadow = true
+  if (towerModelTemplate) {
+    applyTowerVisualToMesh(mesh)
+  } else {
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+  }
   scene.add(mesh)
 
   const rangeRing = new THREE.Mesh(
@@ -1441,6 +1563,8 @@ const selectionDialog = new SelectionDialog(
     selectedCount: 0,
     inRangeCount: 0,
     selectedTowerTypeId: null,
+    selectedStructureLabel: 'Wall',
+    showRepair: true,
     buildingCoords: null,
     buildingHealth: null,
     upgradeOptions: [],
@@ -1478,6 +1602,7 @@ const selectionDialog = new SelectionDialog(
     onRepair: () => {
       const [collider] = selectedStructures.values()
       if (!collider) return
+      if (collider.type === 'tree') return
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return
       const state = structureStore.structureStates.get(collider)
       if (!state) return
@@ -1494,8 +1619,10 @@ const updateSelectionDialog = () => {
   const tower = getSingleSelectedTower()
   const [selectedCollider] = selectedStructures.values()
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
+  const isTreeSelected = selectedCollider?.type === 'tree'
   const deleteCost = inRange.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
   const selectedTowerTypeId = getSelectionTowerTypeId()
+  const selectedStructureLabel = isTreeSelected ? 'Tree' : 'Wall'
   const upgradeOptions = tower
     ? getTowerUpgradeOptions(tower).map(option => ({
         id: option.id,
@@ -1510,6 +1637,8 @@ const updateSelectionDialog = () => {
     selectedCount,
     inRangeCount: inRange.length,
     selectedTowerTypeId,
+    selectedStructureLabel,
+    showRepair: !isTreeSelected,
     buildingCoords: selectedCollider
       ? {
           x: Math.round(selectedCollider.center.x),
@@ -1517,6 +1646,7 @@ const updateSelectionDialog = () => {
         }
       : null,
     buildingHealth: selectedStructureState
+      && !isTreeSelected
       ? {
           hp: selectedStructureState.hp,
           maxHp: selectedStructureState.maxHp
@@ -1536,7 +1666,10 @@ const updateSelectionDialog = () => {
           speedLevel: tower.speedLevel
         }
       : null,
-    canRepair: selectedStructureState !== null && selectedStructureState.hp < selectedStructureState.maxHp && inRange.length > 0,
+    canRepair: !isTreeSelected
+      && selectedStructureState !== null
+      && selectedStructureState.hp < selectedStructureState.maxHp
+      && inRange.length > 0,
     canDelete: inRange.length > 0 && gameState.energy >= deleteCost
   })
 }
@@ -1654,13 +1787,46 @@ const placeWallSegments = (positions: THREE.Vector3[]) => {
 }
 
 const addMapTower = (center: THREE.Vector3) => {
-  const size = new THREE.Vector3(1, TOWER_HEIGHT, 1)
+  const size = getBuildSizeForMode('tower')
   const half = size.clone().multiplyScalar(0.5)
-  const snapped = new THREE.Vector3(snapGridValue(center.x), half.y, snapGridValue(center.z))
+  const snapped = snapCenterToBuildGrid(center, size)
   if (!canPlaceAt(snapped, half, staticColliders)) return
   const tower = createTowerAt(snapped, 'base', 'Map')
   const mesh = tower.mesh
   structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP)
+}
+
+const addMapTree = (center: THREE.Vector3) => {
+  const size = TREE_BUILD_SIZE
+  const half = size.clone().multiplyScalar(0.5)
+  const snapped = snapCenterToBuildGrid(center, size)
+  if (!canPlaceAt(snapped, half, staticColliders)) return false
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x, size.y, size.z),
+    new THREE.MeshStandardMaterial({ color: 0x4f8f46, transparent: true, opacity: treeModelTemplate ? 0.01 : 1 })
+  )
+  mesh.position.copy(snapped)
+  if (treeModelTemplate) {
+    applyTreeVisualToMesh(mesh)
+  } else {
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+  }
+  scene.add(mesh)
+  structureStore.addTreeCollider(snapped, half, mesh, WALL_HP)
+  return true
+}
+
+const scatterMapTrees = (count: number) => {
+  let placed = 0
+  let attempts = 0
+  const maxAttempts = count * 20
+  while (placed < count && attempts < maxAttempts) {
+    attempts += 1
+    const x = Math.round((random() * 2 - 1) * (WORLD_BOUNDS - 3))
+    const z = Math.round((random() * 2 - 1) * (WORLD_BOUNDS - 3))
+    if (addMapTree(new THREE.Vector3(x, 0, z))) placed += 1
+  }
 }
 
 const prebuiltTowers = [
@@ -1672,15 +1838,16 @@ const prebuiltTowers = [
   new THREE.Vector3(10, 0, 14),
   new THREE.Vector3(-10, 0, -14),
   new THREE.Vector3(10, 0, -14),
-  new THREE.Vector3(-4, 0, 4),
-  new THREE.Vector3(4, 0, -4),
-  new THREE.Vector3(4, 0, 4),
-  new THREE.Vector3(-4, 0, -4)
+  new THREE.Vector3(-6, 0, 6),
+  new THREE.Vector3(6, 0, -6),
+  new THREE.Vector3(6, 0, 6),
+  new THREE.Vector3(-6, 0, -6)
 ]
 
 for (const pos of prebuiltTowers) {
   addMapTower(pos)
 }
+scatterMapTrees(MAP_TREE_COUNT)
 
 // Initialize lane paths for active spawners once map is ready.
 refreshAllSpawnerPathlines()
@@ -1701,6 +1868,7 @@ const resetGame = () => {
   selectedTower = null
   selectedStructures.clear()
   structureOutlinePass.selectedObjects = []
+  treeOutlinePass.selectedObjects = []
   isDraggingWall = false
   wallDragStart = null
   wallDragEnd = null
@@ -1723,21 +1891,24 @@ const resetGame = () => {
   spawnContainerOverlay.clear()
   particleSystem.dispose()
 
-  for (const tower of towers) {
-    scene.remove(tower.mesh)
-    scene.remove(tower.rangeRing)
-    scene.remove(tower.laser)
-    tower.mesh.geometry.dispose()
-    ;(tower.mesh.material as THREE.Material).dispose()
-    tower.rangeRing.geometry.dispose()
+  for (const state of structureStore.structureStates.values()) {
+    scene.remove(state.mesh)
+    state.mesh.traverse((node) => {
+      if (!(node instanceof THREE.Mesh)) return
+      node.geometry.dispose()
+      if (Array.isArray(node.material)) {
+        for (const material of node.material) material.dispose()
+      } else {
+        node.material.dispose()
+      }
+    })
+    if (state.tower) {
+      scene.remove(state.tower.rangeRing)
+      scene.remove(state.tower.laser)
+      state.tower.rangeRing.geometry.dispose()
+    }
   }
   towers.length = 0
-
-  for (const wall of structureStore.wallMeshes) {
-    scene.remove(wall)
-    wall.geometry.dispose()
-    ;(wall.material as THREE.Material).dispose()
-  }
   structureStore.wallMeshes.length = 0
   structureStore.structureStates.clear()
   structureStore.structureMeshToCollider.clear()
@@ -1855,9 +2026,9 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     }
   } else {
     const isTower = gameState.buildMode === 'tower'
-    const size = isTower ? new THREE.Vector3(1, 2, 1) : new THREE.Vector3(1, 1, 1)
+    const size = getBuildSizeForMode(isTower ? 'tower' : 'wall')
     const half = size.clone().multiplyScalar(0.5)
-    const snapped = new THREE.Vector3(snapGridValue(point.x), half.y, snapGridValue(point.z))
+    const snapped = snapCenterToBuildGrid(point, size)
     const energyCost = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL
     const ok = canPlace(snapped, half, true) && gameState.energy >= energyCost
     buildPreview.scale.set(size.x, size.y, size.z)
@@ -2141,7 +2312,9 @@ const tick = (now: number, delta: number) => {
   shootButton.disabled = selected === null
   updateSelectionDialog()
   syncSelectedStructureOutline()
-  structureOutlinePass.edgeStrength = 3.8 + Math.sin(now * 0.01) * 0.5
+  const outlinePulse = 3.8 + Math.sin(now * 0.01) * 0.5
+  structureOutlinePass.edgeStrength = outlinePulse
+  treeOutlinePass.edgeStrength = outlinePulse
 
   for (const tower of towers) {
     tower.rangeRing.position.set(tower.mesh.position.x, 0.02, tower.mesh.position.z)

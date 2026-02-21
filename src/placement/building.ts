@@ -25,6 +25,26 @@ type PlaceContext = {
 
 export const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE
 
+const snapForFootprint = (value: number, sizeAxis: number) => {
+  const tileCount = Math.max(1, Math.round(sizeAxis / GRID_SIZE))
+  if (tileCount % 2 === 0) {
+    const halfGrid = GRID_SIZE * 0.5
+    return Math.round((value - halfGrid) / GRID_SIZE) * GRID_SIZE + halfGrid
+  }
+  return snapToGrid(value)
+}
+
+export const getBuildSize = (buildMode: Exclude<BuildMode, 'off'>) => (
+  buildMode === 'tower' ? new THREE.Vector3(2, TOWER_HEIGHT, 2) : new THREE.Vector3(1, 1, 1)
+)
+
+export const snapCenterToBuildGrid = (center: THREE.Vector3, size: THREE.Vector3) =>
+  new THREE.Vector3(
+    snapForFootprint(center.x, size.x),
+    size.y * 0.5,
+    snapForFootprint(center.z, size.z)
+  )
+
 export const withinBounds = (pos: THREE.Vector3) =>
   pos.x > -WORLD_BOUNDS && pos.x < WORLD_BOUNDS && pos.z > -WORLD_BOUNDS && pos.z < WORLD_BOUNDS
 
@@ -34,8 +54,16 @@ export const canPlace = (
   staticColliders: StaticCollider[],
   allowTouchingStructures = false
 ) => {
-  if (!withinBounds(center)) return false
-  if (center.length() < CASTLE_RADIUS + 2) return false
+  if (
+    center.x - halfSize.x <= -WORLD_BOUNDS ||
+    center.x + halfSize.x >= WORLD_BOUNDS ||
+    center.z - halfSize.z <= -WORLD_BOUNDS ||
+    center.z + halfSize.z >= WORLD_BOUNDS
+  ) {
+    return false
+  }
+  const minCastleDistance = CASTLE_RADIUS + 1.5 + Math.max(halfSize.x, halfSize.z)
+  if (center.length() < minCastleDistance) return false
   for (const collider of staticColliders) {
     if (collider.type === 'castle') continue
     if (aabbOverlap(center, halfSize, collider.center, collider.halfSize, allowTouchingStructures)) {
@@ -52,9 +80,9 @@ export const placeBuilding = (
   context: PlaceContext
 ) => {
   const isTower = buildMode === 'tower'
-  const size = isTower ? new THREE.Vector3(1, TOWER_HEIGHT, 1) : new THREE.Vector3(1, 1, 1)
+  const size = getBuildSize(isTower ? 'tower' : 'wall')
   const half = size.clone().multiplyScalar(0.5)
-  const snapped = new THREE.Vector3(snapToGrid(center.x), half.y, snapToGrid(center.z))
+  const snapped = snapCenterToBuildGrid(center, size)
   const requiredEnergy = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL
   if (!canPlace(snapped, half, context.staticColliders, true)) return { placed: false, energySpent: 0 }
   if (energy < requiredEnergy) return { placed: false, energySpent: 0 }

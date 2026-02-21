@@ -51,17 +51,28 @@ export class StructureStore {
     return collider
   }
 
+  addTreeCollider(center: THREE.Vector3, halfSize: THREE.Vector3, mesh: THREE.Mesh, hp: number): DestructibleCollider {
+    const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'tree' }
+    this.staticColliders.push(collider)
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp })
+    this.structureMeshToCollider.set(mesh, collider)
+    return collider
+  }
+
   removeStructureCollider(collider: DestructibleCollider) {
     const state = this.structureStates.get(collider)
     if (!state) return
 
     const disposeMesh = (mesh: THREE.Mesh) => {
-      mesh.geometry.dispose()
-      if (Array.isArray(mesh.material)) {
-        for (const material of mesh.material) material.dispose()
-      } else {
-        mesh.material.dispose()
-      }
+      mesh.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return
+        node.geometry.dispose()
+        if (Array.isArray(node.material)) {
+          for (const material of node.material) material.dispose()
+        } else {
+          node.material.dispose()
+        }
+      })
     }
 
     disposeMesh(state.mesh)
@@ -99,7 +110,8 @@ export class StructureStore {
 
   getDestructibleColliders(): DestructibleCollider[] {
     return this.staticColliders.filter(
-      (collider): collider is DestructibleCollider => collider.type === 'wall' || collider.type === 'tower'
+      (collider): collider is DestructibleCollider =>
+        collider.type === 'wall' || collider.type === 'tower' || collider.type === 'tree'
     )
   }
 }
