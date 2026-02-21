@@ -113,8 +113,9 @@ const randomSource = createRandomSource(
   parsedSeed !== undefined && Number.isFinite(parsedSeed) ? parsedSeed : undefined
 )
 const random = () => randomSource.next()
+const HITBOX_LAYER = 1
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower')
-const TREE_BUILD_SIZE = new THREE.Vector3(1, 2, 1)
+const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2)
 const MAP_TREE_COUNT = 64
 app.innerHTML = `
   <div id="hud" class="hud">
@@ -638,12 +639,17 @@ const prepareCoinModel = (source: THREE.Object3D) => {
 
 const applyTowerVisualToMesh = (mesh: THREE.Mesh, tower?: Tower) => {
   if (!towerModelTemplate) return
-  if (mesh.children.some((child) => child.userData.isTowerVisual === true)) return
+  if (mesh.userData.outlineTarget) return
   const rig = createBallistaVisualRig(towerModelTemplate)
   const towerVisual = rig?.root ?? towerModelTemplate.clone(true)
+  towerVisual.position.copy(mesh.position)
   towerVisual.position.y -= TOWER_BUILD_SIZE.y * 0.5
   towerVisual.userData.isTowerVisual = true
-  mesh.add(towerVisual)
+  scene.add(towerVisual)
+  mesh.userData.outlineTarget = towerVisual
+  mesh.userData.linkedVisual = towerVisual
+  // Keep collision/raycast hitboxes out of render + outline passes.
+  mesh.layers.set(HITBOX_LAYER)
   if (tower && rig) {
     towerBallistaRigs.set(tower, rig)
   }
@@ -658,12 +664,16 @@ const applyTowerVisualToMesh = (mesh: THREE.Mesh, tower?: Tower) => {
 
 const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
   if (!treeModelTemplate) return
-  if (mesh.children.some((child) => child.userData.isTreeVisual === true)) return
+  if (mesh.userData.outlineTarget) return
   const treeVisual = treeModelTemplate.clone(true)
+  treeVisual.position.copy(mesh.position)
   treeVisual.position.y -= TREE_BUILD_SIZE.y * 0.5
   treeVisual.userData.isTreeVisual = true
-  mesh.add(treeVisual)
+  scene.add(treeVisual)
   mesh.userData.outlineTarget = treeVisual
+  mesh.userData.linkedVisual = treeVisual
+  // Keep collision/raycast hitboxes out of render + outline passes.
+  mesh.layers.set(HITBOX_LAYER)
   const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
   hitboxMaterial.transparent = true
   hitboxMaterial.opacity = 0
@@ -699,7 +709,7 @@ gltfLoader.load(
 gltfLoader.load(
   treeModelUrl,
   (gltf) => {
-    treeModelTemplate = prepareStaticModel(gltf.scene, TREE_BUILD_SIZE)
+    treeModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
     for (const [collider, state] of structureStore.structureStates.entries()) {
       if (collider.type !== 'tree') continue
       applyTreeVisualToMesh(state.mesh)
@@ -1114,6 +1124,7 @@ const towerRangeMaterial = new THREE.MeshBasicMaterial({
 })
 
 const raycaster = new THREE.Raycaster()
+raycaster.layers.enable(HITBOX_LAYER)
 const pointer = new THREE.Vector2()
 
 const makeCapsule = (color: number) => {
@@ -1164,20 +1175,14 @@ const selectedStructures = selection.selectedStructures
 let activePointerId: number | null = null
 const syncSelectedStructureOutline = () => {
   const structureSelectedObjects: THREE.Object3D[] = []
-  const treeSelectedObjects: THREE.Object3D[] = []
   for (const collider of selectedStructures) {
     const mesh = structureStore.structureStates.get(collider)?.mesh
     if (!mesh) continue
-    if (collider.type === 'tree') {
-      const outlineTarget = mesh.userData.outlineTarget as THREE.Object3D | undefined
-      const treeVisual = outlineTarget ?? mesh.children.find((child) => child.userData.isTreeVisual === true)
-      treeSelectedObjects.push(treeVisual ?? mesh)
-      continue
-    }
-    structureSelectedObjects.push(mesh)
+    const outlineTarget = mesh.userData.outlineTarget as THREE.Object3D | undefined
+    structureSelectedObjects.push(outlineTarget ?? mesh)
   }
   structureOutlinePass.selectedObjects = structureSelectedObjects
-  treeOutlinePass.selectedObjects = treeSelectedObjects
+  treeOutlinePass.selectedObjects = []
 }
 
 const applyTowerUpgrade = (tower: Tower, upgradeId: TowerUpgradeId) => {
@@ -2126,6 +2131,19 @@ const resetGame = () => {
   particleSystem.dispose()
 
   for (const state of structureStore.structureStates.values()) {
+    const linkedVisual = state.mesh.userData.linkedVisual as THREE.Object3D | undefined
+    if (linkedVisual) {
+      scene.remove(linkedVisual)
+      linkedVisual.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return
+        node.geometry.dispose()
+        if (Array.isArray(node.material)) {
+          for (const material of node.material) material.dispose()
+        } else {
+          node.material.dispose()
+        }
+      })
+    }
     scene.remove(state.mesh)
     state.mesh.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return

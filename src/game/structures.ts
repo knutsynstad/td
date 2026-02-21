@@ -75,6 +75,22 @@ export class StructureStore {
       })
     }
 
+    const linkedVisual = state.mesh.userData.linkedVisual as THREE.Object3D | undefined
+    if (linkedVisual) {
+      linkedVisual.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return
+        node.geometry.dispose()
+        if (Array.isArray(node.material)) {
+          for (const material of node.material) material.dispose()
+        } else {
+          node.material.dispose()
+        }
+      })
+      this.scene.remove(linkedVisual)
+      delete state.mesh.userData.linkedVisual
+      delete state.mesh.userData.outlineTarget
+    }
+
     disposeMesh(state.mesh)
     this.scene.remove(state.mesh)
     this.structureMeshToCollider.delete(state.mesh)
