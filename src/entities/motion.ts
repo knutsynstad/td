@@ -173,9 +173,6 @@ export const createEntityMotionSystem = (context: MotionContext) => {
               waypoints[waypointIdx].z - entity.mesh.position.z
             )
             if (dir.length() > 0.1) dir.normalize()
-          } else {
-            dir = new THREE.Vector3(-entity.mesh.position.x, 0, -entity.mesh.position.z)
-            if (dir.length() > 0.1) dir.normalize()
           }
         }
 
@@ -187,12 +184,6 @@ export const createEntityMotionSystem = (context: MotionContext) => {
       if (entity.berserkMode) {
         const berserkDir = getMobBerserkDirection(entity)
         if (berserkDir) dir.copy(berserkDir)
-      }
-
-      if (!entity.berserkMode) {
-        dir = new THREE.Vector3(-entity.mesh.position.x, 0, -entity.mesh.position.z)
-        if (dir.length() > 0.1) dir.normalize()
-        applyAvoidance(entity, dir, 0.2)
       }
     } else {
       if (hasReachedBlockedTarget(entity)) {
