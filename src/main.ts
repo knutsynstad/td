@@ -9,6 +9,7 @@ import castleModelUrl from './assets/models/castle.glb?url'
 import coinModelUrl from './assets/models/coin.glb?url'
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
 import treeModelUrl from './assets/models/tree.glb?url'
+import wallModelUrl from './assets/models/wall.glb?url'
 import { screenToWorldOnGround } from './utils/coords'
 import { SelectionDialog } from './ui/SelectionDialog'
 import { StructureStore } from './game/structures'
@@ -576,6 +577,7 @@ const gltfLoader = new GLTFLoader()
 let towerModelTemplate: THREE.Object3D | null = null
 let treeModelTemplate: THREE.Object3D | null = null
 let coinModelTemplate: THREE.Object3D | null = null
+let wallModelTemplate: THREE.Object3D | null = null
 const towerBallistaRigs = new Map<Tower, BallistaVisualRig>()
 
 const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) => {
@@ -683,6 +685,27 @@ const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
   mesh.receiveShadow = false
 }
 
+const applyWallVisualToMesh = (mesh: THREE.Mesh) => {
+  if (!wallModelTemplate) return
+  if (mesh.userData.outlineTarget) return
+  const wallVisual = wallModelTemplate.clone(true)
+  wallVisual.position.copy(mesh.position)
+  wallVisual.position.y -= 0.5
+  wallVisual.userData.isWallVisual = true
+  scene.add(wallVisual)
+  mesh.userData.outlineTarget = wallVisual
+  mesh.userData.linkedVisual = wallVisual
+  // Keep collision/raycast hitboxes out of render + outline passes.
+  mesh.layers.set(HITBOX_LAYER)
+  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
+  hitboxMaterial.transparent = true
+  hitboxMaterial.opacity = 0
+  hitboxMaterial.colorWrite = false
+  hitboxMaterial.depthWrite = false
+  mesh.castShadow = false
+  mesh.receiveShadow = false
+}
+
 const syncHudCoinModel = () => {
   coinHudRoot.clear()
   if (!coinModelTemplate) return
@@ -718,6 +741,20 @@ gltfLoader.load(
   undefined,
   (error) => {
     console.error('Failed to load tree model:', error)
+  }
+)
+
+gltfLoader.load(
+  wallModelUrl,
+  (gltf) => {
+    wallModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
+    for (const wallMesh of structureStore.wallMeshes) {
+      applyWallVisualToMesh(wallMesh)
+    }
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load wall model:', error)
   }
 )
 
@@ -814,8 +851,12 @@ const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
         new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
       )
       mesh.position.copy(tileCenter)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
+      if (wallModelTemplate) {
+        applyWallVisualToMesh(mesh)
+      } else {
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+      }
       scene.add(mesh)
       structureStore.addWallCollider(tileCenter, tileHalf, mesh, WALL_HP)
     }
@@ -1993,6 +2034,11 @@ const placeBuilding = (center: THREE.Vector3) => {
     applyObstacleDelta
   })
   gameState.energy = Math.max(0, gameState.energy - result.energySpent)
+  if (result.placed && wallModelTemplate && gameState.buildMode === 'wall') {
+    for (const wallMesh of structureStore.wallMeshes) {
+      applyWallVisualToMesh(wallMesh)
+    }
+  }
   return result.placed
 }
 
@@ -2011,6 +2057,11 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     applyObstacleDelta
   })
   gameState.energy = Math.max(0, gameState.energy - placed * ENERGY_COST_WALL)
+  if (placed > 0 && wallModelTemplate) {
+    for (const wallMesh of structureStore.wallMeshes) {
+      applyWallVisualToMesh(wallMesh)
+    }
+  }
   return placed > 0
 }
 
@@ -2022,6 +2073,11 @@ const placeWallSegments = (positions: THREE.Vector3[]) => {
     applyObstacleDelta
   })
   gameState.energy = Math.max(0, gameState.energy - placed * ENERGY_COST_WALL)
+  if (placed > 0 && wallModelTemplate) {
+    for (const wallMesh of structureStore.wallMeshes) {
+      applyWallVisualToMesh(wallMesh)
+    }
+  }
   return placed > 0
 }
 
