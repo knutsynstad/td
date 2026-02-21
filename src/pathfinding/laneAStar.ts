@@ -98,11 +98,7 @@ const OFFSETS: Array<[number, number, number]> = [
   [1, 0, 1],
   [-1, 0, 1],
   [0, 1, 1],
-  [0, -1, 1],
-  [1, 1, Math.SQRT2],
-  [1, -1, Math.SQRT2],
-  [-1, 1, Math.SQRT2],
-  [-1, -1, Math.SQRT2]
+  [0, -1, 1]
 ]
 
 const MIN_CORRIDOR_INFLATION_RADIUS = 1.0

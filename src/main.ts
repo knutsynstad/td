@@ -7,6 +7,8 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import castleModelUrl from './assets/models/castle.glb?url'
 import coinModelUrl from './assets/models/coin.glb?url'
+import groundModelUrl from './assets/models/ground.glb?url'
+import pathModelUrl from './assets/models/path.glb?url'
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
 import treeModelUrl from './assets/models/tree.glb?url'
 import wallModelUrl from './assets/models/wall.glb?url'
@@ -33,7 +35,6 @@ import { createGameLoop } from './game/GameLoop'
 import { areWaveSpawnersDone } from './game/spawners'
 import { getAllBorderDoors } from './game/borderDoors'
 import { computeLanePathAStar, type LanePathResult } from './pathfinding/laneAStar'
-import { computeDirtyBounds } from './pathfinding/obstacleDelta'
 import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
 import {
   canPlace as canPlaceAt,
@@ -318,6 +319,96 @@ scene.add(dir)
 
 type GroundBounds = { minX: number, maxX: number, minZ: number, maxZ: number }
 
+type InstancedLayerOptions = {
+  castShadow?: boolean
+  receiveShadow?: boolean
+  yOffset?: number
+}
+
+type InstancedLayerEntry = {
+  mesh: THREE.InstancedMesh
+  baseMatrix: THREE.Matrix4
+}
+
+class InstancedModelLayer {
+  private readonly root = new THREE.Group()
+  private readonly entries: InstancedLayerEntry[] = []
+  private readonly transformScratch = new THREE.Matrix4()
+  private readonly instanceMatrixScratch = new THREE.Matrix4()
+  private readonly capacity: number
+  private readonly castShadow: boolean
+  private readonly receiveShadow: boolean
+  private readonly yOffset: number
+
+  constructor(scene: THREE.Scene, capacity: number, options: InstancedLayerOptions = {}) {
+    this.capacity = capacity
+    this.castShadow = options.castShadow ?? false
+    this.receiveShadow = options.receiveShadow ?? true
+    this.yOffset = options.yOffset ?? 0
+    scene.add(this.root)
+  }
+
+  setTemplate(source: THREE.Object3D | null) {
+    this.clearEntries()
+    if (!source) return
+    source.updateMatrixWorld(true)
+    source.traverse((node) => {
+      if (!(node instanceof THREE.Mesh)) return
+      const material = Array.isArray(node.material)
+        ? node.material.map((mat) => mat.clone())
+        : node.material.clone()
+      const instanced = new THREE.InstancedMesh(node.geometry, material, this.capacity)
+      instanced.count = 0
+      instanced.frustumCulled = false
+      instanced.castShadow = this.castShadow
+      instanced.receiveShadow = this.receiveShadow
+      instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      this.root.add(instanced)
+      this.entries.push({ mesh: instanced, baseMatrix: node.matrixWorld.clone() })
+    })
+  }
+
+  setPositions(positions: readonly THREE.Vector3[]) {
+    const count = Math.min(positions.length, this.capacity)
+    for (const entry of this.entries) {
+      entry.mesh.count = count
+      for (let i = 0; i < count; i += 1) {
+        const pos = positions[i]!
+        this.transformScratch.makeTranslation(pos.x, pos.y + this.yOffset, pos.z)
+        this.instanceMatrixScratch.multiplyMatrices(this.transformScratch, entry.baseMatrix)
+        entry.mesh.setMatrixAt(i, this.instanceMatrixScratch)
+      }
+      entry.mesh.instanceMatrix.needsUpdate = true
+    }
+  }
+
+  clear() {
+    for (const entry of this.entries) {
+      entry.mesh.count = 0
+      entry.mesh.instanceMatrix.needsUpdate = true
+    }
+  }
+
+  dispose() {
+    this.clearEntries()
+    this.root.removeFromParent()
+  }
+
+  private clearEntries() {
+    while (this.entries.length > 0) {
+      const entry = this.entries.pop()!
+      this.root.remove(entry.mesh)
+      if (Array.isArray(entry.mesh.material)) {
+        for (const material of entry.mesh.material) {
+          material.dispose()
+        }
+      } else {
+        entry.mesh.material.dispose()
+      }
+    }
+  }
+}
+
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 const getVisibleGroundBounds = (camera: THREE.OrthographicCamera): GroundBounds => {
   const corners = [
@@ -502,6 +593,123 @@ class SpawnContainerOverlay {
 const worldGrid = new WorldGrid()
 const worldBorder = new WorldBorder()
 const spawnContainerOverlay = new SpawnContainerOverlay()
+const groundTileLayer = new InstancedModelLayer(scene, 20_000, { receiveShadow: true, castShadow: false })
+const pathTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+const pathTilePositions = new Map<string, THREE.Vector3[]>()
+const tmpPathTileAccumulator: THREE.Vector3[] = []
+const pathTileKeys = new Set<string>()
+const buildPathTilesFromPoints = (
+  points: readonly THREE.Vector3[],
+  colliders: readonly StaticCollider[],
+  worldBounds: number
+) => {
+  if (points.length === 0) return { tiles: [] as THREE.Vector3[], isComplete: false }
+  const out: THREE.Vector3[] = []
+  const seen = new Set<string>()
+  let isComplete = true
+  const halfWidth = 1
+  const isBlockedCell = (x: number, z: number) => {
+    for (const collider of colliders) {
+      if (collider.type === 'castle') continue
+      if (
+        Math.abs(x - collider.center.x) <= collider.halfSize.x &&
+        Math.abs(z - collider.center.z) <= collider.halfSize.z
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+  const pushCell = (x: number, z: number) => {
+    const gx = Math.round(x)
+    const gz = Math.round(z)
+    if (Math.abs(gx) > worldBounds || Math.abs(gz) > worldBounds) {
+      isComplete = false
+      return
+    }
+    if (isBlockedCell(gx, gz)) {
+      isComplete = false
+      return
+    }
+    const key = `${gx},${gz}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(new THREE.Vector3(gx, 0, gz))
+  }
+
+  const snappedPoints = points.map((point) => new THREE.Vector3(Math.round(point.x), 0, Math.round(point.z)))
+  for (let i = 1; i < snappedPoints.length; i += 1) {
+    const a = snappedPoints[i - 1]!
+    const b = snappedPoints[i]!
+    const dx = b.x - a.x
+    const dz = b.z - a.z
+    if (dx !== 0 && dz !== 0) {
+      isComplete = false
+      continue
+    }
+    if (dx === 0 && dz === 0) {
+      for (let ox = -halfWidth; ox <= halfWidth; ox += 1) {
+        pushCell(a.x + ox, a.z)
+      }
+      continue
+    }
+    if (dz === 0) {
+      const stepX = Math.sign(dx)
+      for (let x = a.x; x !== b.x + stepX; x += stepX) {
+        for (let oz = -halfWidth; oz <= halfWidth; oz += 1) {
+          pushCell(x, a.z + oz)
+        }
+      }
+      continue
+    }
+    const stepZ = Math.sign(dz)
+    for (let z = a.z; z !== b.z + stepZ; z += stepZ) {
+      for (let ox = -halfWidth; ox <= halfWidth; ox += 1) {
+        pushCell(a.x + ox, z)
+      }
+    }
+  }
+
+  // Fill outside-corner caps so 90deg turns stay visually sharp.
+  for (let i = 1; i < snappedPoints.length - 1; i += 1) {
+    const prev = snappedPoints[i - 1]!
+    const curr = snappedPoints[i]!
+    const next = snappedPoints[i + 1]!
+    const inDx = Math.sign(curr.x - prev.x)
+    const inDz = Math.sign(curr.z - prev.z)
+    const outDx = Math.sign(next.x - curr.x)
+    const outDz = Math.sign(next.z - curr.z)
+    const isTurn = (inDx !== outDx || inDz !== outDz) && (inDx === 0 || inDz === 0) && (outDx === 0 || outDz === 0)
+    if (!isTurn) continue
+    for (let a = 1; a <= halfWidth; a += 1) {
+      for (let b = 1; b <= halfWidth; b += 1) {
+        pushCell(curr.x + inDx * a - outDx * b, curr.z + inDz * a - outDz * b)
+      }
+    }
+  }
+
+  return { tiles: out, isComplete }
+}
+const rebuildPathTileLayer = () => {
+  tmpPathTileAccumulator.length = 0
+  pathTileKeys.clear()
+  const uniqueKeys = new Set<string>()
+  for (const points of pathTilePositions.values()) {
+    for (const point of points) {
+      const key = `${point.x},${point.z}`
+      if (uniqueKeys.has(key)) continue
+      uniqueKeys.add(key)
+      pathTileKeys.add(key)
+      tmpPathTileAccumulator.push(new THREE.Vector3(point.x, 0, point.z))
+    }
+  }
+  pathTileLayer.setPositions(tmpPathTileAccumulator)
+  if (lastGroundBounds) {
+    const bounds = lastGroundBounds
+    lastGroundBounds = null
+    updateGroundFromBounds(bounds)
+  }
+}
 let lastGroundBounds: GroundBounds | null = null
 const updateGroundFromBounds = (bounds: GroundBounds) => {
   const clampedBounds: GroundBounds = {
@@ -528,12 +736,26 @@ const updateGroundFromBounds = (bounds: GroundBounds) => {
   const depth = clampedBounds.maxZ - clampedBounds.minZ
   ground.scale.set(width, depth, 1)
   ground.position.set((clampedBounds.minX + clampedBounds.maxX) * 0.5, 0, (clampedBounds.minZ + clampedBounds.maxZ) * 0.5)
+  const positions: THREE.Vector3[] = []
+  const minX = Math.ceil(clampedBounds.minX / GRID_SIZE) * GRID_SIZE
+  const maxX = Math.floor(clampedBounds.maxX / GRID_SIZE) * GRID_SIZE
+  const minZ = Math.ceil(clampedBounds.minZ / GRID_SIZE) * GRID_SIZE
+  const maxZ = Math.floor(clampedBounds.maxZ / GRID_SIZE) * GRID_SIZE
+  for (let x = minX; x <= maxX; x += GRID_SIZE) {
+    for (let z = minZ; z <= maxZ; z += GRID_SIZE) {
+      const key = `${x},${z}`
+      if (pathTileKeys.has(key)) continue
+      positions.push(new THREE.Vector3(x, 0, z))
+    }
+  }
+  groundTileLayer.setPositions(positions)
 }
 
 const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x52a384 })
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), groundMaterial)
 ground.rotation.x = -Math.PI / 2
 ground.position.y = 0
+ground.visible = false
 ground.receiveShadow = true
 scene.add(ground)
 
@@ -714,6 +936,35 @@ const syncHudCoinModel = () => {
   hudCoin.rotation.y = Math.PI / 7
   coinHudRoot.add(hudCoin)
 }
+
+gltfLoader.load(
+  groundModelUrl,
+  (gltf) => {
+    groundTileLayer.setTemplate(gltf.scene)
+    ground.visible = false
+    if (lastGroundBounds) {
+      const bounds = lastGroundBounds
+      lastGroundBounds = null
+      updateGroundFromBounds(bounds)
+    }
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load ground model:', error)
+  }
+)
+
+gltfLoader.load(
+  pathModelUrl,
+  (gltf) => {
+    pathTileLayer.setTemplate(gltf.scene)
+    rebuildPathTileLayer()
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load path model:', error)
+  }
+)
 
 gltfLoader.load(
   towerBallistaModelUrl,
@@ -1051,16 +1302,31 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
     resolution: GRID_SIZE,
     maxVisited: 240_000
   })
-  spawner.routeState = route.state
-  spawnerPathlineCache.set(spawner.id, route)
   const displayPoints = trimPathToCastleBoundary(route.points)
-  spawnerRouteOverlay.upsert(spawner.id, displayPoints, route.state)
+  const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
+  const routeState: LanePathResult['state'] = (
+    route.state === 'reachable' && corridor.isComplete
+      ? 'reachable'
+      : route.state === 'unstable'
+        ? 'unstable'
+        : 'blocked'
+  )
+  spawner.routeState = routeState
+  spawnerPathlineCache.set(spawner.id, { points: route.points, state: routeState })
+  pathTilePositions.set(
+    spawner.id,
+    routeState === 'reachable'
+      ? corridor.tiles
+      : []
+  )
+  rebuildPathTileLayer()
+  spawnerRouteOverlay.upsert(spawner.id, displayPoints, routeState)
   spawnContainerOverlay.upsert(spawner.id, getSpawnContainerCorners(spawner.position))
   for (const mob of mobs) {
     if (mob.spawnerId !== spawner.id) continue
-    mob.laneBlocked = route.state !== 'reachable'
-    mob.waypoints = route.state === 'reachable' ? route.points : undefined
-    mob.waypointIndex = route.state === 'reachable'
+    mob.laneBlocked = routeState !== 'reachable'
+    mob.waypoints = routeState === 'reachable' ? route.points : undefined
+    mob.waypointIndex = routeState === 'reachable'
       ? getForwardWaypointIndex(mob.mesh.position, route.points)
       : undefined
   }
@@ -1094,30 +1360,36 @@ const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] =
   if (added.length === 0 && removed.length === 0) return
   if (activeWaveSpawners.length === 0) return
 
-  const gridSize = Math.max(2, Math.ceil((WORLD_BOUNDS * 2) / GRID_SIZE) + 1)
-  const dirty = computeDirtyBounds(added, removed, WORLD_BOUNDS, GRID_SIZE, gridSize, 0.6)
-  if (!dirty) return
-
-  const dirtyMinX = -WORLD_BOUNDS + dirty.minX * GRID_SIZE - GRID_SIZE
-  const dirtyMaxX = -WORLD_BOUNDS + dirty.maxX * GRID_SIZE + GRID_SIZE
-  const dirtyMinZ = -WORLD_BOUNDS + dirty.minZ * GRID_SIZE - GRID_SIZE
-  const dirtyMaxZ = -WORLD_BOUNDS + dirty.maxZ * GRID_SIZE + GRID_SIZE
-
+  const deltas = [...added, ...removed].filter((collider) => collider.type !== 'castle')
+  if (deltas.length === 0) return
+  const colliderIntersectsTile = (collider: StaticCollider, tile: THREE.Vector3) => (
+    Math.abs(tile.x - collider.center.x) <= collider.halfSize.x &&
+    Math.abs(tile.z - collider.center.z) <= collider.halfSize.z
+  )
   for (const spawner of activeWaveSpawners) {
     const route = spawnerPathlineCache.get(spawner.id)
-    if (!route || route.points.length === 0) {
+    // Always refresh non-reachable routes; removals can reopen lanes.
+    if (!route || route.state !== 'reachable') {
       enqueueSpawnerPathRefresh(spawner.id)
       continue
     }
-
+    const corridorTiles = pathTilePositions.get(spawner.id) ?? []
+    if (corridorTiles.length === 0) {
+      enqueueSpawnerPathRefresh(spawner.id)
+      continue
+    }
     let affected = false
-    for (const point of route.points) {
-      if (point.x >= dirtyMinX && point.x <= dirtyMaxX && point.z >= dirtyMinZ && point.z <= dirtyMaxZ) {
+    for (const collider of deltas) {
+      for (const tile of corridorTiles) {
+        if (!colliderIntersectsTile(collider, tile)) continue
         affected = true
         break
       }
+      if (affected) break
     }
-    if (affected) enqueueSpawnerPathRefresh(spawner.id)
+    if (affected) {
+      enqueueSpawnerPathRefresh(spawner.id)
+    }
   }
 }
 
@@ -2180,6 +2452,8 @@ const resetGame = () => {
   spawnerById.clear()
   activeWaveSpawners.length = 0
   spawnerPathlineCache.clear()
+  pathTilePositions.clear()
+  rebuildPathTileLayer()
   pendingSpawnerPathRefresh.clear()
   pendingSpawnerPathOrder.length = 0
   spawnerRouteOverlay.clear()
@@ -2410,6 +2684,8 @@ const spawnWave = () => {
     clearWaveOverlays: () => {
       spawnerRouteOverlay.clear()
       spawnerPathlineCache.clear()
+      pathTilePositions.clear()
+      rebuildPathTileLayer()
       spawnContainerOverlay.clear()
       pendingSpawnerPathRefresh.clear()
       pendingSpawnerPathOrder.length = 0
@@ -2774,6 +3050,7 @@ const disposeApp = () => {
   particleSystem.dispose()
   spawnContainerOverlay.dispose()
   spawnerRouteOverlay.clear()
+  pathTileLayer.dispose()
   worldGrid.dispose()
   worldBorder.dispose()
 
@@ -2801,6 +3078,7 @@ const disposeApp = () => {
   scene.remove(ground)
   ground.geometry.dispose()
   groundMaterial.dispose()
+  groundTileLayer.dispose()
   scene.remove(castle)
   castle.traverse((node) => {
     if (!(node instanceof THREE.Mesh)) return
