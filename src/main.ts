@@ -1376,6 +1376,7 @@ const castleCollider: StaticCollider = {
   halfSize: new THREE.Vector3(3.5, 0.5, 3.5),
   type: 'castle'
 }
+const CASTLE_FRONT_DIRECTION = new THREE.Vector2(0, 1)
 const staticColliders: StaticCollider[] = [castleCollider]
 const castleBankSelectionCollider: DestructibleCollider = {
   center: castleCollider.center,
@@ -1386,6 +1387,7 @@ const castleBankPiles = new THREE.Group()
 scene.add(castleBankPiles)
 
 const updateCastleColliderFromObject = (object: THREE.Object3D) => {
+  object.updateMatrixWorld(true)
   const bounds = new THREE.Box3().setFromObject(object)
   if (bounds.isEmpty()) return
   const size = new THREE.Vector3()
@@ -1400,6 +1402,47 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
     0.5,
     Math.max(minHalfSize, size.z * 0.5 + collisionPadding)
   )
+
+  let facingMarker: THREE.Object3D | null = null
+  object.traverse((child) => {
+    if (facingMarker) return
+    const name = (child.name || '').toLowerCase()
+    if (name === 'facing' || name.startsWith('facing')) facingMarker = child
+  })
+  if (facingMarker) {
+    const facingQuat = new THREE.Quaternion()
+    facingMarker.getWorldQuaternion(facingQuat)
+    const forward = new THREE.Vector3(0, 1, 0).applyQuaternion(facingQuat)
+    forward.y = 0
+    let len = Math.hypot(forward.x, forward.z)
+
+    // Some exports use a different local forward axis.
+    if (len <= 1e-4) {
+      forward.set(0, 0, 1).applyQuaternion(facingQuat)
+      forward.y = 0
+      len = Math.hypot(forward.x, forward.z)
+    }
+    if (len <= 1e-4) {
+      forward.set(1, 0, 0).applyQuaternion(facingQuat)
+      forward.y = 0
+      len = Math.hypot(forward.x, forward.z)
+    }
+
+    // Fallback for non-rotated markers: use marker position offset from center.
+    if (len <= 1e-4) {
+      const facingWorld = new THREE.Vector3()
+      facingMarker.getWorldPosition(facingWorld)
+      forward.set(facingWorld.x - center.x, 0, facingWorld.z - center.z)
+      len = Math.hypot(forward.x, forward.z)
+    }
+
+    if (len > 1e-4) {
+      CASTLE_FRONT_DIRECTION.set(forward.x / len, forward.z / len)
+    }
+  }
+
+  invalidateCastleFlowField()
+  refreshAllSpawnerPathlines()
 }
 
 const gltfLoader = new GLTFLoader()
@@ -1802,11 +1845,13 @@ const getCastleEntryGoals = () => {
   const hx = castleCollider.halfSize.x
   const hz = castleCollider.halfSize.z
   const approachOffset = GRID_SIZE
+  const useX = Math.abs(CASTLE_FRONT_DIRECTION.x) >= Math.abs(CASTLE_FRONT_DIRECTION.y)
+  const dirX = useX ? Math.sign(CASTLE_FRONT_DIRECTION.x || 1) : 0
+  const dirZ = useX ? 0 : Math.sign(CASTLE_FRONT_DIRECTION.y || 1)
+  const goalX = x + dirX * (hx + approachOffset)
+  const goalZ = z + dirZ * (hz + approachOffset)
   return [
-    new THREE.Vector3(x + hx + approachOffset, 0, z),
-    new THREE.Vector3(x - hx - approachOffset, 0, z),
-    new THREE.Vector3(x, 0, z + hz + approachOffset),
-    new THREE.Vector3(x, 0, z - hz - approachOffset)
+    new THREE.Vector3(goalX, 0, goalZ)
   ]
 }
 const borderDoors = getAllBorderDoors(WORLD_BOUNDS)
