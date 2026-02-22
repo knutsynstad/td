@@ -90,6 +90,20 @@ export class StructureStore {
     return collider
   }
 
+  addBankCollider(
+    center: THREE.Vector3,
+    halfSize: THREE.Vector3,
+    mesh: THREE.Mesh,
+    hp: number,
+    metadata?: StructureMetadata
+  ): DestructibleCollider {
+    const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'bank' }
+    this.staticColliders.push(collider)
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp, ...metadata })
+    this.structureMeshToCollider.set(mesh, collider)
+    return collider
+  }
+
   removeStructureCollider(collider: DestructibleCollider) {
     const state = this.structureStates.get(collider)
     if (!state) return
@@ -158,7 +172,11 @@ export class StructureStore {
   getDestructibleColliders(): DestructibleCollider[] {
     return this.staticColliders.filter(
       (collider): collider is DestructibleCollider =>
-        collider.type === 'wall' || collider.type === 'tower' || collider.type === 'tree' || collider.type === 'rock'
+        collider.type === 'wall'
+        || collider.type === 'tower'
+        || collider.type === 'tree'
+        || collider.type === 'rock'
+        || collider.type === 'bank'
     )
   }
 }

@@ -128,6 +128,10 @@ const random = () => randomSource.next()
 const HITBOX_LAYER = 1
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower')
 const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2)
+const COIN_PILE_CYLINDER_MIN = 3
+const COIN_PILE_CYLINDER_MAX = 96
+const COIN_PILE_MAX_RADIUS = 2.1
+const COIN_PILE_CLUSTER_MAX_PER_CORNER = 5
 const SHOW_WORLD_GRID = false
 const SHOW_FLOW_FIELD_DEBUG = false
 app.innerHTML = `
@@ -1011,6 +1015,13 @@ const castleCollider: StaticCollider = {
   type: 'castle'
 }
 const staticColliders: StaticCollider[] = [castleCollider]
+const castleBankSelectionCollider: DestructibleCollider = {
+  center: castleCollider.center,
+  halfSize: castleCollider.halfSize,
+  type: 'bank'
+}
+const castleBankPiles = new THREE.Group()
+scene.add(castleBankPiles)
 
 const updateCastleColliderFromObject = (object: THREE.Object3D) => {
   const bounds = new THREE.Box3().setFromObject(object)
@@ -1354,6 +1365,7 @@ gltfLoader.load(
     })
     replaceCastleContent(model)
     updateCastleColliderFromObject(model)
+    updateCastleBankPilesVisual()
     placeCastleGuardTowers()
     refreshAllSpawnerPathlines()
   },
@@ -1372,6 +1384,7 @@ gltfLoader.load(
     fallback.receiveShadow = true
     replaceCastleContent(fallback)
     updateCastleColliderFromObject(fallback)
+    updateCastleBankPilesVisual()
     placeCastleGuardTowers()
     refreshAllSpawnerPathlines()
   }
@@ -1770,6 +1783,13 @@ let activePointerId: number | null = null
 const syncSelectedStructureOutline = () => {
   const structureSelectedObjects: THREE.Object3D[] = []
   for (const collider of selectedStructures) {
+    if (collider.type === 'bank') {
+      structureSelectedObjects.push(castle)
+      if (castleBankPiles.children.length > 0) {
+        structureSelectedObjects.push(castleBankPiles)
+      }
+      continue
+    }
     const mesh = structureStore.structureStates.get(collider)?.mesh
     if (!mesh) continue
     const outlineTarget = mesh.userData.outlineTarget as THREE.Object3D | undefined
@@ -1947,6 +1967,7 @@ const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
 }
 
 const getDeleteEnergyCost = (collider: DestructibleCollider): number => {
+  if (collider.type === 'bank') return 0
   return collider.type === 'tower' ? ENERGY_COST_DELETE_TOWER : ENERGY_COST_DELETE_WALL
 }
 
@@ -2150,6 +2171,149 @@ const addEnergy = (amount: number, withPop = false) => {
 const spendEnergy = (amount: number) => {
   if (gameState.energy < amount) return false
   gameState.energy = Math.max(0, gameState.energy - amount)
+  return true
+}
+
+const getSelectedBankInRange = () => {
+  const [collider] = selectedStructures.values()
+  if (!collider || collider.type !== 'bank') return null
+  if (!isColliderInRange(collider, SELECTION_RADIUS)) return null
+  return collider
+}
+
+const disposeObjectMeshes = (object: THREE.Object3D) => {
+  object.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return
+    node.geometry.dispose()
+    if (Array.isArray(node.material)) {
+      for (const material of node.material) material.dispose()
+      return
+    }
+    node.material.dispose()
+  })
+}
+
+const getCoinPileCylinderCount = (bankEnergy: number) => {
+  const safeBank = Math.max(0, bankEnergy)
+  const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)))
+  return Math.min(COIN_PILE_CYLINDER_MAX, COIN_PILE_CYLINDER_MIN + growthLevel)
+}
+
+const getCoinPileClusterCountPerCorner = (bankEnergy: number) => {
+  const safeBank = Math.max(0, bankEnergy)
+  const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)))
+  return Math.min(COIN_PILE_CLUSTER_MAX_PER_CORNER, 1 + Math.floor(growthLevel / 4))
+}
+
+const getCoinPileHeightScale = (bankEnergy: number) => {
+  const safeBank = Math.max(1, bankEnergy)
+  return Math.min(2.6, 1 + Math.log10(safeBank) * 0.28)
+}
+
+const buildCoinPileVisual = (
+  bankEnergy: number,
+  densityScale = 1,
+  spreadScale = 1,
+  phaseOffset = 0,
+  heightScale = 1
+) => {
+  const group = new THREE.Group()
+  const safeBank = Math.max(0, bankEnergy)
+  const baseCount = getCoinPileCylinderCount(safeBank)
+  const cylinderCount = Math.max(1, Math.floor(baseCount * densityScale))
+  const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)))
+  for (let i = 0; i < cylinderCount; i += 1) {
+    const t = (i + 0.5) / cylinderCount
+    const radiusFromCenter = Math.sqrt(t) * COIN_PILE_MAX_RADIUS * spreadScale
+    const angle = (i + phaseOffset) * 2.399963229728653
+    const height = Math.min(5.5, (0.35 + (growthLevel * 0.06) + ((i % 5) * 0.08)) * heightScale)
+    const topRadius = 0.12 + ((i * 17) % 5) * 0.012
+    const bottomRadius = topRadius + 0.05
+    const cylinder = new THREE.Mesh(
+      new THREE.CylinderGeometry(topRadius, bottomRadius, height, 10),
+      new THREE.MeshStandardMaterial({
+        color: i % 3 === 0 ? 0xf4d35e : i % 3 === 1 ? 0xe8c547 : 0xffda66,
+        metalness: 0.3,
+        roughness: 0.35
+      })
+    )
+    cylinder.position.set(
+      Math.cos(angle) * radiusFromCenter,
+      height * 0.5,
+      Math.sin(angle) * radiusFromCenter
+    )
+    cylinder.castShadow = true
+    cylinder.receiveShadow = true
+    group.add(cylinder)
+  }
+  return group
+}
+
+const updateCastleBankPilesVisual = () => {
+  for (const child of Array.from(castleBankPiles.children)) {
+    castleBankPiles.remove(child)
+    disposeObjectMeshes(child)
+  }
+  if (gameState.bankEnergy <= 0) return
+  const cx = castleCollider.center.x
+  const cz = castleCollider.center.z
+  const offsetX = castleCollider.halfSize.x + 0.28
+  const offsetZ = castleCollider.halfSize.z + 0.28
+  const corners = [
+    new THREE.Vector3(cx + offsetX, 0, cz + offsetZ),
+    new THREE.Vector3(cx + offsetX, 0, cz - offsetZ),
+    new THREE.Vector3(cx - offsetX, 0, cz + offsetZ),
+    new THREE.Vector3(cx - offsetX, 0, cz - offsetZ)
+  ]
+  const safeBank = Math.max(0, gameState.bankEnergy)
+  const clustersPerCorner = getCoinPileClusterCountPerCorner(safeBank)
+  const totalClusters = Math.max(1, corners.length * clustersPerCorner)
+  const perClusterEnergy = safeBank / totalClusters
+  const heightScale = getCoinPileHeightScale(safeBank)
+  for (let i = 0; i < corners.length; i += 1) {
+    const corner = corners[i]!
+    for (let clusterIdx = 0; clusterIdx < clustersPerCorner; clusterIdx += 1) {
+      const pile = buildCoinPileVisual(perClusterEnergy, 0.78, 0.34, i * 29 + clusterIdx * 7, heightScale)
+      if (clusterIdx === 0) {
+        pile.position.copy(corner)
+      } else {
+        const ringLayer = Math.floor((clusterIdx - 1) / 6)
+        const ringIndex = (clusterIdx - 1) % 6
+        const ringRadius = 0.22 + ringLayer * 0.16
+        const angle = ((Math.PI * 2 * ringIndex) / 6) + i * 0.31
+        pile.position.set(
+          corner.x + Math.cos(angle) * ringRadius,
+          0,
+          corner.z + Math.sin(angle) * ringRadius
+        )
+      }
+      castleBankPiles.add(pile)
+    }
+  }
+}
+
+const depositToBank = (requestedAmount: number) => {
+  const transfer = Math.min(Math.max(0, Math.floor(requestedAmount)), Math.max(0, Math.floor(gameState.energy)))
+  if (transfer <= 0) return false
+  gameState.bankEnergy += transfer
+  gameState.energy = Math.max(0, gameState.energy - transfer)
+  updateCastleBankPilesVisual()
+  triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`)
+  return true
+}
+
+const withdrawFromBank = (requestedAmount: number) => {
+  const missing = Math.max(0, ENERGY_CAP - gameState.energy)
+  const transfer = Math.min(
+    Math.max(0, Math.floor(requestedAmount)),
+    Math.max(0, Math.floor(gameState.bankEnergy)),
+    missing
+  )
+  if (transfer <= 0) return false
+  gameState.bankEnergy = Math.max(0, gameState.bankEnergy - transfer)
+  addEnergy(transfer, true)
+  updateCastleBankPilesVisual()
+  triggerEventBanner(`Withdrew ${Math.floor(transfer)} coins`)
   return true
 }
 
@@ -2447,8 +2611,14 @@ const selectionDialog = new SelectionDialog(
   {
     selectedCount: 0,
     inRangeCount: 0,
+    isBankSelected: false,
     selectedTowerTypeId: null,
     selectedStructureLabel: 'Wall',
+    bankTotal: null,
+    canBankAdd1: false,
+    canBankAdd10: false,
+    canBankRemove1: false,
+    canBankRemove10: false,
     showRepair: true,
     buildingCoords: null,
     buildingHealth: null,
@@ -2463,6 +2633,7 @@ const selectionDialog = new SelectionDialog(
     onDelete: () => {
       const colliders = getSelectedInRange()
       if (colliders.length === 0) return
+      if (colliders.some(collider => collider.type === 'bank')) return
       const deleteCost = colliders.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
       if (!spendEnergy(deleteCost)) {
         triggerEventBanner(`Need ${deleteCost} coins`)
@@ -2494,7 +2665,7 @@ const selectionDialog = new SelectionDialog(
     onRepair: () => {
       const [collider] = selectedStructures.values()
       if (!collider) return
-      if (collider.type === 'tree' || collider.type === 'rock') return
+      if (collider.type === 'tree' || collider.type === 'rock' || collider.type === 'bank') return
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return
       const state = structureStore.structureStates.get(collider)
       if (!state) return
@@ -2508,6 +2679,22 @@ const selectionDialog = new SelectionDialog(
       state.lastDecayTickMs = Date.now()
       state.graceUntilMs = Date.now() + DECAY_GRACE_MS
       triggerEventBanner('Repaired')
+    },
+    onBankAdd1: () => {
+      if (!getSelectedBankInRange()) return
+      depositToBank(1)
+    },
+    onBankAdd10: () => {
+      if (!getSelectedBankInRange()) return
+      depositToBank(10)
+    },
+    onBankRemove1: () => {
+      if (!getSelectedBankInRange()) return
+      withdrawFromBank(1)
+    },
+    onBankRemove10: () => {
+      if (!getSelectedBankInRange()) return
+      withdrawFromBank(10)
     }
   }
 )
@@ -2520,16 +2707,25 @@ const updateSelectionDialog = () => {
   const [selectedCollider] = selectedStructures.values()
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
   const selectedType = selectedCollider?.type
+  const isBankSelected = selectedType === 'bank'
+  const maxDepositable = Math.max(0, Math.floor(gameState.energy))
+  const maxWithdrawable = Math.max(0, Math.min(Math.floor(gameState.bankEnergy), Math.floor(ENERGY_CAP - gameState.energy)))
+  const canDeposit = isBankSelected && inRange.length > 0 && maxDepositable > 0
+  const canWithdraw = isBankSelected && inRange.length > 0 && maxWithdrawable > 0
   const isNatureSelected = selectedType === 'tree' || selectedType === 'rock'
   const selectedIsPlayerBuilt = selectedStructureState?.playerBuilt === true
-  const deleteCost = inRange.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
+  const deleteCost = inRange
+    .filter(collider => collider.type !== 'bank')
+    .reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
   const selectedTowerTypeId = getSelectionTowerTypeId()
   const selectedStructureLabel = selectedType === 'tree'
     ? 'Tree'
     : selectedType === 'rock'
       ? 'Rock'
+      : selectedType === 'bank'
+        ? 'Castle'
       : 'Wall'
-  const upgradeOptions = tower
+  const upgradeOptions = !isBankSelected && tower
     ? getTowerUpgradeOptions(tower).map(option => ({
         id: option.id,
         label: option.label,
@@ -2548,8 +2744,14 @@ const updateSelectionDialog = () => {
   selectionDialog.update({
     selectedCount,
     inRangeCount: inRange.length,
+    isBankSelected,
     selectedTowerTypeId,
     selectedStructureLabel,
+    bankTotal: isBankSelected ? gameState.bankEnergy : null,
+    canBankAdd1: canDeposit,
+    canBankAdd10: canDeposit,
+    canBankRemove1: canWithdraw,
+    canBankRemove10: canWithdraw,
     showRepair: !isNatureSelected,
     buildingCoords: selectedCollider
       ? {
@@ -2559,6 +2761,7 @@ const updateSelectionDialog = () => {
       : null,
     buildingHealth: selectedStructureState
       && !isNatureSelected
+      && !isBankSelected
       ? {
           hp: selectedStructureState.hp,
           maxHp: selectedStructureState.maxHp
@@ -2579,13 +2782,14 @@ const updateSelectionDialog = () => {
         }
       : null,
     canRepair: !isNatureSelected
+      && !isBankSelected
       && selectedStructureState !== null
       && selectedStructureState.hp < selectedStructureState.maxHp
       && selectedIsPlayerBuilt
       && inRange.length > 0
       && repairCost !== null
       && gameState.energy >= repairCost,
-    canDelete: inRange.length > 0 && gameState.energy >= deleteCost,
+    canDelete: !isBankSelected && inRange.length > 0 && gameState.energy >= deleteCost,
     repairCost,
     repairStatus
   })
@@ -2649,13 +2853,31 @@ const getGroundPoint = (event: PointerEvent) => {
 
 const getStructureHit = (event: PointerEvent): DestructibleCollider | null => {
   const meshes = Array.from(structureStore.structureMeshToCollider.keys())
-  if (meshes.length === 0) return null
   updatePointer(event)
   raycaster.setFromCamera(pointer, camera)
-  const hits = raycaster.intersectObjects(meshes, false)
-  if (hits.length === 0) return null
-  const mesh = hits[0]!.object as THREE.Mesh
-  return structureStore.structureMeshToCollider.get(mesh) ?? null
+  let closestStructureHit: { collider: DestructibleCollider, distance: number } | null = null
+  if (meshes.length > 0) {
+    const hits = raycaster.intersectObjects(meshes, false)
+    if (hits.length > 0) {
+      const mesh = hits[0]!.object as THREE.Mesh
+      const collider = structureStore.structureMeshToCollider.get(mesh) ?? null
+      if (collider) {
+        closestStructureHit = { collider, distance: hits[0]!.distance }
+      }
+    }
+  }
+  const castleHits = raycaster.intersectObject(castle, true)
+  const pileHits = raycaster.intersectObject(castleBankPiles, true)
+  const closestBankDistance = Math.min(
+    castleHits[0]?.distance ?? Number.POSITIVE_INFINITY,
+    pileHits[0]?.distance ?? Number.POSITIVE_INFINITY
+  )
+  if (closestBankDistance < Number.POSITIVE_INFINITY) {
+    if (!closestStructureHit || closestBankDistance <= closestStructureHit.distance) {
+      return castleBankSelectionCollider
+    }
+  }
+  return closestStructureHit?.collider ?? null
 }
 
 const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingStructures = false) => {
@@ -2857,6 +3079,7 @@ const resetGame = () => {
   gameState.nextWaveAt = 0
   gameState.prevMobsCount = 0
   gameState.energy = ENERGY_CAP
+  gameState.bankEnergy = 0
   gameState.energyPopTimer = 0
   gameState.eventBannerTimer = 0
   eventBannerEl.classList.remove('show')
@@ -2905,6 +3128,7 @@ const resetGame = () => {
   treeRegrowQueue.length = 0
   growingTrees.length = 0
   populateSeededWorld()
+  updateCastleBankPilesVisual()
   for (const tower of Array.from(towerBallistaRigs.keys())) {
     if (towers.includes(tower)) continue
     towerBallistaRigs.delete(tower)
@@ -3517,6 +3741,9 @@ const tick = (now: number, delta: number) => {
   gameState.prevMobsCount = mobs.length
   if (import.meta.env.DEV) {
     assertEnergyInBounds(gameState.energy, ENERGY_CAP)
+    if (gameState.bankEnergy < 0) {
+      throw new Error(`Bank invariant violated: bankEnergy=${gameState.bankEnergy}`)
+    }
     assertSpawnerCounts(activeWaveSpawners)
     assertStructureStoreConsistency(structureStore, staticColliders)
     assertMobSpawnerReferences(mobs, new Set(spawnerById.keys()))

@@ -5,8 +5,14 @@ import { ENERGY_SYMBOL } from '../game/constants'
 type SelectionDialogState = {
   selectedCount: number
   inRangeCount: number
+  isBankSelected: boolean
   selectedTowerTypeId: TowerTypeId | null
   selectedStructureLabel: string
+  bankTotal: number | null
+  canBankAdd1: boolean
+  canBankAdd10: boolean
+  canBankRemove1: boolean
+  canBankRemove10: boolean
   showRepair: boolean
   buildingCoords: { x: number, z: number } | null
   buildingHealth: {
@@ -41,6 +47,10 @@ type SelectionDialogActions = {
   onUpgrade: (upgradeId: TowerUpgradeId) => void
   onRepair: () => void
   onDelete: () => void
+  onBankAdd1: () => void
+  onBankAdd10: () => void
+  onBankRemove1: () => void
+  onBankRemove10: () => void
 }
 
 export class SelectionDialog {
@@ -70,8 +80,14 @@ export class SelectionDialog {
     const {
       selectedCount,
       inRangeCount,
+      isBankSelected,
       selectedTowerTypeId,
       selectedStructureLabel,
+      bankTotal,
+      canBankAdd1,
+      canBankAdd10,
+      canBankRemove1,
+      canBankRemove10,
       showRepair,
       buildingCoords,
       buildingHealth,
@@ -99,6 +115,12 @@ export class SelectionDialog {
       return String(rounded)
     }
     const summaryItems: Array<{ label: string, value: string }> = []
+    if (isBankSelected && bankTotal !== null) {
+      summaryItems.push({
+        label: 'Coin Balance',
+        value: `${Math.floor(bankTotal)}`
+      })
+    }
     if (buildingHealth) {
       summaryItems.push({
         label: 'Health',
@@ -119,7 +141,7 @@ export class SelectionDialog {
           `).join('')}
         </div>`
       : ''
-    const statsMarkup = towerDetails
+    const statsMarkup = !isBankSelected && towerDetails
       ? `<div class="selection-dialog__group selection-dialog__group--stats">
           <div class="selection-dialog__stats">
             ${(() => {
@@ -159,7 +181,7 @@ export class SelectionDialog {
           </div>
         </div>`
       : ''
-    const noUpgradesLeftMarkup = towerDetails && upgradeOptions.length === 0
+    const noUpgradesLeftMarkup = !isBankSelected && towerDetails && upgradeOptions.length === 0
       ? '<div class="selection-dialog__hint">All stats maxed</div>'
       : ''
     const statusMarkup = noUpgradesLeftMarkup
@@ -170,10 +192,18 @@ export class SelectionDialog {
       : repairStatus === 'needs_repair'
         ? 'Needs Repair'
         : 'Healthy'
-    const repairInfoMarkup = showRepair
+    const repairInfoMarkup = !isBankSelected && showRepair
       ? `<div class="selection-dialog__meta selection-dialog__repair-meta">
           <span class="selection-dialog__repair-status selection-dialog__repair-status--${repairStatus ?? 'healthy'}">${repairStatusLabel}</span>
           ${repairCost !== null ? `<span class="selection-dialog__repair-cost">Repair ${ENERGY_SYMBOL}${repairCost}</span>` : ''}
+        </div>`
+      : ''
+    const bankActionsMarkup = isBankSelected
+      ? `<div class="selection-dialog__bank-adjust-grid">
+          <button class="selection-dialog__bank-adjust-btn" data-bank-remove-10 ${canBankRemove10 ? '' : 'disabled'}>-10</button>
+          <button class="selection-dialog__bank-adjust-btn" data-bank-remove-1 ${canBankRemove1 ? '' : 'disabled'}>-1</button>
+          <button class="selection-dialog__bank-adjust-btn" data-bank-add-1 ${canBankAdd1 ? '' : 'disabled'}>+1</button>
+          <button class="selection-dialog__bank-adjust-btn" data-bank-add-10 ${canBankAdd10 ? '' : 'disabled'}>+10</button>
         </div>`
       : ''
 
@@ -183,16 +213,18 @@ export class SelectionDialog {
       ${repairInfoMarkup}
       ${statsMarkup}
       ${statusMarkup}
-      <div class="selection-dialog__action-bar">
-        <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
-          Delete
-        </button>
-        ${showRepair
-          ? `<button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-               ${repairCost !== null ? `Repair ${ENERGY_SYMBOL}${repairCost}` : 'Repair'}
-             </button>`
-          : ''}
-      </div>
+      ${isBankSelected
+        ? bankActionsMarkup
+        : `<div class="selection-dialog__action-bar">
+             <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
+               Delete
+             </button>
+             ${showRepair
+               ? `<button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
+                    ${repairCost !== null ? `Repair ${ENERGY_SYMBOL}${repairCost}` : 'Repair'}
+                  </button>`
+               : ''}
+           </div>`}
     `
 
     for (const btn of Array.from(this.root.querySelectorAll<HTMLButtonElement>('button[data-upgrade]'))) {
@@ -203,5 +235,13 @@ export class SelectionDialog {
     repairBtn?.addEventListener('click', () => this.actions.onRepair())
     const deleteBtn = this.root.querySelector<HTMLButtonElement>('button[data-delete]')
     deleteBtn?.addEventListener('click', () => this.actions.onDelete())
+    const bankAdd1Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-add-1]')
+    bankAdd1Btn?.addEventListener('click', () => this.actions.onBankAdd1())
+    const bankAdd10Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-add-10]')
+    bankAdd10Btn?.addEventListener('click', () => this.actions.onBankAdd10())
+    const bankRemove1Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-remove-1]')
+    bankRemove1Btn?.addEventListener('click', () => this.actions.onBankRemove1())
+    const bankRemove10Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-remove-10]')
+    bankRemove10Btn?.addEventListener('click', () => this.actions.onBankRemove10())
   }
 }

@@ -210,6 +210,37 @@ canvas {
   margin-top: 2px;
 }
 
+.selection-dialog__action-bar--bank .selection-dialog__action[data-bank-deposit] {
+  background: rgba(33, 138, 76, 0.9);
+}
+
+.selection-dialog__action-bar--bank .selection-dialog__action[data-bank-withdraw] {
+  background: rgba(45, 112, 176, 0.9);
+}
+
+.selection-dialog__bank-adjust-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.selection-dialog__bank-adjust-btn {
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(70, 84, 104, 0.9);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.selection-dialog__bank-adjust-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .selection-dialog__stat-row {
   display: flex;
   align-items: center;
