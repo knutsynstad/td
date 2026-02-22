@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { computeLanePathAStar } from '../../src/pathfinding/laneAStar'
+import { buildCastleFlowField, tracePathFromSpawner } from '../../src/pathfinding/corridorFlowField'
 import { createEntityMotionSystem } from '../../src/entities/motion'
 import { StructureStore } from '../../src/game/structures'
 import { SpatialGrid } from '../../src/utils/SpatialGrid'
@@ -92,6 +93,32 @@ describe('performance baseline', () => {
     const elapsed = performance.now() - start
     console.info(`[perf] pathfinding_ms=${elapsed.toFixed(2)} state=${result.state} points=${result.points.length}`)
     expect(result.points.length).toBeGreaterThan(1)
+    expect(elapsed).toBeLessThan(1200)
+  })
+
+  it('flow field rebuild + trace stays within practical budget', () => {
+    const colliders: StaticCollider[] = [
+      { center: new THREE.Vector3(5, 0, 5), halfSize: new THREE.Vector3(3, 1, 3), type: 'wall' },
+      { center: new THREE.Vector3(-8, 0, -4), halfSize: new THREE.Vector3(2, 1, 8), type: 'wall' },
+      { center: new THREE.Vector3(12, 0, -10), halfSize: new THREE.Vector3(6, 1, 2), type: 'wall' }
+    ]
+    const buildStart = performance.now()
+    const field = buildCastleFlowField({
+      goals: [
+        new THREE.Vector3(0, 0, 4),
+        new THREE.Vector3(0, 0, -4),
+        new THREE.Vector3(4, 0, 0),
+        new THREE.Vector3(-4, 0, 0)
+      ],
+      colliders,
+      worldBounds: WORLD_BOUNDS,
+      resolution: GRID_SIZE,
+      corridorHalfWidthCells: 1
+    })
+    const route = tracePathFromSpawner(field, { start: new THREE.Vector3(60, 0, 60) })
+    const elapsed = performance.now() - buildStart
+    console.info(`[perf] flow_field_ms=${elapsed.toFixed(2)} state=${route.state} points=${route.points.length}`)
+    expect(route.points.length).toBeGreaterThan(1)
     expect(elapsed).toBeLessThan(1200)
   })
 

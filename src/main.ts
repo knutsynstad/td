@@ -37,7 +37,8 @@ import { createEntityMotionSystem } from './entities/motion'
 import { createGameLoop } from './game/GameLoop'
 import { areWaveSpawnersDone } from './game/spawners'
 import { getAllBorderDoors } from './game/borderDoors'
-import { computeLanePathAStar, type LanePathResult } from './pathfinding/laneAStar'
+import type { LanePathResult } from './pathfinding/laneAStar'
+import { buildCastleFlowField, tracePathFromSpawner, type CorridorFlowField } from './pathfinding/corridorFlowField'
 import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
 import {
   canPlace as canPlaceAt,
@@ -1208,6 +1209,7 @@ gltfLoader.load(
     })
     replaceCastleContent(model)
     updateCastleColliderFromObject(model)
+    placeCastleGuardTowers()
     refreshAllSpawnerPathlines()
   },
   undefined,
@@ -1225,6 +1227,7 @@ gltfLoader.load(
     fallback.receiveShadow = true
     replaceCastleContent(fallback)
     updateCastleColliderFromObject(fallback)
+    placeCastleGuardTowers()
     refreshAllSpawnerPathlines()
   }
 )
@@ -1244,59 +1247,6 @@ const structureStore = new StructureStore(
 const markPersistentMapFeature = (mesh: THREE.Mesh) => {
   mesh.userData.persistOnReset = true
 }
-
-// Add basic walls on the map
-const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
-  const halfGrid = GRID_SIZE * 0.5
-  const sizeXTiles = Math.round((halfSize.x * 2) / GRID_SIZE)
-  const sizeZTiles = Math.round((halfSize.z * 2) / GRID_SIZE)
-  const snapValue = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE
-  const snapAxis = (value: number, sizeTiles: number) => {
-    if (sizeTiles % 2 === 0) {
-      return Math.round((value - halfGrid) / GRID_SIZE) * GRID_SIZE + halfGrid
-    }
-    return snapValue(value)
-  }
-  const snappedCenter = new THREE.Vector3(
-    snapAxis(center.x, sizeXTiles),
-    center.y,
-    snapAxis(center.z, sizeZTiles)
-  )
-  const startX = snappedCenter.x - (sizeXTiles - 1) * halfGrid
-  const startZ = snappedCenter.z - (sizeZTiles - 1) * halfGrid
-  const tileHalf = new THREE.Vector3(GRID_SIZE * 0.5, halfSize.y, GRID_SIZE * 0.5)
-
-  for (let x = 0; x < sizeXTiles; x += 1) {
-    for (let z = 0; z < sizeZTiles; z += 1) {
-      const tileCenter = new THREE.Vector3(
-        startX + x * GRID_SIZE,
-        snappedCenter.y,
-        startZ + z * GRID_SIZE
-      )
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(GRID_SIZE, halfSize.y * 2, GRID_SIZE),
-        new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
-      )
-      mesh.position.copy(tileCenter)
-      markPersistentMapFeature(mesh)
-      if (wallModelTemplate) {
-        applyWallVisualToMesh(mesh)
-      } else {
-        mesh.castShadow = true
-        mesh.receiveShadow = true
-      }
-      scene.add(mesh)
-      structureStore.addWallCollider(tileCenter, tileHalf, mesh, WALL_HP)
-    }
-  }
-}
-
-// Add some basic walls for mobs to navigate around
-addMapWall(new THREE.Vector3(8, 0.5, 8), new THREE.Vector3(0.5, 0.5, 4))
-addMapWall(new THREE.Vector3(-8, 0.5, -8), new THREE.Vector3(4, 0.5, 0.5))
-addMapWall(new THREE.Vector3(10, 0.5, -5), new THREE.Vector3(3, 0.5, 0.5))
-addMapWall(new THREE.Vector3(-10, 0.5, 5), new THREE.Vector3(0.5, 0.5, 3))
-addMapWall(new THREE.Vector3(0, 0.5, 12), new THREE.Vector3(5, 0.5, 0.5))
 
 // Initialize spatial grid and lane path caches
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
@@ -1324,6 +1274,8 @@ const waveAndSpawnSystem = createWaveAndSpawnSystem({
 const activeWaveSpawners: WaveSpawner[] = []
 const spawnerById = new Map<string, WaveSpawner>()
 const spawnerPathlineCache = new Map<string, LanePathResult>()
+let castleFlowField: CorridorFlowField | null = null
+let isCastleFlowFieldDirty = true
 const pendingSpawnerPathRefresh = new Set<string>()
 const pendingSpawnerPathOrder: string[] = []
 const PATHLINE_REFRESH_BUDGET_PER_FRAME = 2
@@ -1492,62 +1444,31 @@ const extendPathToCastleCenter = (points: THREE.Vector3[]) => {
   return extended
 }
 
-const refreshSpawnerPathline = (spawner: WaveSpawner) => {
-  const entry = getSpawnerEntryPoint(spawner.position)
-  const goals = getCastleEntryGoals()
-  const pathLength = (points: THREE.Vector3[]) => {
-    let total = 0
-    for (let i = 1; i < points.length; i += 1) {
-      total += points[i - 1]!.distanceTo(points[i]!)
-    }
-    return total
-  }
-  const stateRank: Record<LanePathResult['state'], number> = {
-    reachable: 0,
-    unstable: 1,
-    blocked: 2
-  }
-  let best: {
-    route: LanePathResult
-    displayPoints: THREE.Vector3[]
-    corridor: { tiles: THREE.Vector3[], isComplete: boolean }
-    routeState: LanePathResult['state']
-    length: number
-  } | null = null
-  for (const goal of goals) {
-    const route = computeLanePathAStar({
-      start: entry,
-      goal,
+const invalidateCastleFlowField = () => {
+  isCastleFlowFieldDirty = true
+}
+
+const getCastleFlowField = () => {
+  if (!castleFlowField || isCastleFlowFieldDirty) {
+    castleFlowField = buildCastleFlowField({
+      goals: getCastleEntryGoals(),
       colliders: staticColliders,
       worldBounds: WORLD_BOUNDS,
       resolution: GRID_SIZE,
-      maxVisited: 240_000
+      corridorHalfWidthCells: 1
     })
-    const displayPoints = extendPathToCastleCenter(trimPathToCastleBoundary(route.points))
-    const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
-    const routeState: LanePathResult['state'] = (
-      route.state === 'reachable' && corridor.isComplete
-        ? 'reachable'
-        : route.state === 'unstable'
-          ? 'unstable'
-          : 'blocked'
-    )
-    const length = pathLength(displayPoints)
-    if (!best) {
-      best = { route, displayPoints, corridor, routeState, length }
-      continue
-    }
-    const currentRank = stateRank[routeState]
-    const bestRank = stateRank[best.routeState]
-    if (currentRank < bestRank || (currentRank === bestRank && length < best.length)) {
-      best = { route, displayPoints, corridor, routeState, length }
-    }
+    isCastleFlowFieldDirty = false
   }
-  if (!best) return
-  const route = best.route
-  const displayPoints = best.displayPoints
-  const corridor = best.corridor
-  const routeState = best.routeState
+  return castleFlowField
+}
+
+const refreshSpawnerPathline = (spawner: WaveSpawner) => {
+  const entry = getSpawnerEntryPoint(spawner.position)
+  const flow = getCastleFlowField()
+  const route = tracePathFromSpawner(flow, { start: entry })
+  const displayPoints = extendPathToCastleCenter(trimPathToCastleBoundary(route.points))
+  const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
+  const routeState: LanePathResult['state'] = route.state
   spawner.routeState = routeState
   spawnerPathlineCache.set(spawner.id, { points: route.points, state: routeState })
   pathTilePositions.set(
@@ -1599,34 +1520,9 @@ const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] =
 
   const deltas = [...added, ...removed].filter((collider) => collider.type !== 'castle')
   if (deltas.length === 0) return
-  const colliderIntersectsTile = (collider: StaticCollider, tile: THREE.Vector3) => (
-    Math.abs(tile.x - collider.center.x) <= collider.halfSize.x &&
-    Math.abs(tile.z - collider.center.z) <= collider.halfSize.z
-  )
+  invalidateCastleFlowField()
   for (const spawner of activeWaveSpawners) {
-    const route = spawnerPathlineCache.get(spawner.id)
-    // Always refresh non-reachable routes; removals can reopen lanes.
-    if (!route || route.state !== 'reachable') {
-      enqueueSpawnerPathRefresh(spawner.id)
-      continue
-    }
-    const corridorTiles = pathTilePositions.get(spawner.id) ?? []
-    if (corridorTiles.length === 0) {
-      enqueueSpawnerPathRefresh(spawner.id)
-      continue
-    }
-    let affected = false
-    for (const collider of deltas) {
-      for (const tile of corridorTiles) {
-        if (!colliderIntersectsTile(collider, tile)) continue
-        affected = true
-        break
-      }
-      if (affected) break
-    }
-    if (affected) {
-      enqueueSpawnerPathRefresh(spawner.id)
-    }
+    enqueueSpawnerPathRefresh(spawner.id)
   }
 }
 
@@ -2606,6 +2502,33 @@ const addMapTower = (center: THREE.Vector3) => {
   structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP)
 }
 
+let castleGuardTowersPlaced = false
+const placeCastleGuardTowers = () => {
+  if (castleGuardTowersPlaced) return
+  const centerX = castleCollider.center.x
+  const centerZ = castleCollider.center.z
+  const outwardOffset = 6
+  const sideOffset = 4
+  const xOffset = castleCollider.halfSize.x + outwardOffset
+  const zOffset = castleCollider.halfSize.z + outwardOffset
+
+  const positions = [
+    new THREE.Vector3(centerX - sideOffset, 0, centerZ + zOffset),
+    new THREE.Vector3(centerX + sideOffset, 0, centerZ + zOffset),
+    new THREE.Vector3(centerX - sideOffset, 0, centerZ - zOffset),
+    new THREE.Vector3(centerX + sideOffset, 0, centerZ - zOffset),
+    new THREE.Vector3(centerX + xOffset, 0, centerZ - sideOffset),
+    new THREE.Vector3(centerX + xOffset, 0, centerZ + sideOffset),
+    new THREE.Vector3(centerX - xOffset, 0, centerZ - sideOffset),
+    new THREE.Vector3(centerX - xOffset, 0, centerZ + sideOffset)
+  ]
+
+  for (const position of positions) {
+    addMapTower(position)
+  }
+  castleGuardTowersPlaced = true
+}
+
 const addMapTree = (center: THREE.Vector3) => {
   const size = TREE_BUILD_SIZE
   const half = size.clone().multiplyScalar(0.5)
@@ -2675,24 +2598,6 @@ const populateSeededWorld = () => {
   }
 }
 
-const prebuiltTowers = [
-  new THREE.Vector3(-14, 0, 10),
-  new THREE.Vector3(14, 0, 10),
-  new THREE.Vector3(-14, 0, -10),
-  new THREE.Vector3(14, 0, -10),
-  new THREE.Vector3(-10, 0, 14),
-  new THREE.Vector3(10, 0, 14),
-  new THREE.Vector3(-10, 0, -14),
-  new THREE.Vector3(10, 0, -14),
-  new THREE.Vector3(-6, 0, 6),
-  new THREE.Vector3(6, 0, -6),
-  new THREE.Vector3(6, 0, 6),
-  new THREE.Vector3(-6, 0, -6)
-]
-
-for (const pos of prebuiltTowers) {
-  addMapTower(pos)
-}
 populateSeededWorld()
 
 // Initialize lane paths for active spawners once map is ready.
