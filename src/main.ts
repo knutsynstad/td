@@ -2865,6 +2865,7 @@ const updateUsernameLabels = () => {
     label.style.top = `${screenPos.y}px`
     label.style.transform = 'translate(-50%, -100%)'
     label.style.color = '#fff'
+    label.style.fontFamily = 'inherit'
     label.style.fontSize = '12px'
     label.style.fontWeight = '600'
     label.style.textShadow = '0 1px 3px rgba(0,0,0,0.8)'
