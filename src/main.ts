@@ -6,6 +6,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import castleModelUrl from './assets/models/castle.glb?url'
+import castleIconUrl from './assets/icons/castle.svg?url'
 import coinModelUrl from './assets/models/coin.glb?url'
 import groundModelUrl from './assets/models/ground.glb?url'
 import mobModelUrl from './assets/models/mob.glb?url'
@@ -193,8 +194,18 @@ app.innerHTML = `
       </div>
     </div>
     <div class="hud-corner hud-corner--bottom-left">
-      <div class="hud-minimap-wrap">
-        <canvas id="hudMinimap" class="hud-minimap" aria-label="Mob minimap"></canvas>
+      <div class="hud-minimap-wrap" id="hudMinimapWrap">
+        <div class="hud-minimap-tape-section hud-minimap-tape-section--top" aria-hidden="true"></div>
+        <button
+          id="hudMinimapToggle"
+          class="hud-minimap-toggle"
+          type="button"
+          aria-label="Expand minimap"
+          aria-expanded="false"
+        >
+          <canvas id="hudMinimap" class="hud-minimap" aria-label="Mob minimap"></canvas>
+        </button>
+        <div class="hud-minimap-tape-section hud-minimap-tape-section--bottom" aria-hidden="true"></div>
       </div>
     </div>
   </div>
@@ -213,12 +224,18 @@ const nextWavePrimaryEl = nextWaveRowEl.querySelector<HTMLDivElement>('.hud-stat
 const nextWaveSecondaryEl = nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__secondary')!
 const eventBannerEl = document.querySelector<HTMLDivElement>('#eventBanner')!
 const hudActionsEl = document.querySelector<HTMLDivElement>('.hud-actions')!
+const hudStatusStackEl = document.querySelector<HTMLDivElement>('.hud-status-stack')!
+const hudEnergyEl = document.querySelector<HTMLDivElement>('.hud-energy')!
 const buildWallBtn = document.querySelector<HTMLButtonElement>('#buildWall')!
 const buildTowerBtn = document.querySelector<HTMLButtonElement>('#buildTower')!
 const shootButton = document.querySelector<HTMLButtonElement>('#shootButton')!
+const minimapWrapEl = document.querySelector<HTMLDivElement>('#hudMinimapWrap')!
+const minimapToggleBtn = document.querySelector<HTMLButtonElement>('#hudMinimapToggle')!
 const coinHudCanvasEl = document.querySelector<HTMLCanvasElement>('#coinHudCanvas')!
 const minimapCanvasEl = document.querySelector<HTMLCanvasElement>('#hudMinimap')!
 const minimapCtx = minimapCanvasEl.getContext('2d')
+const minimapCastleIcon = new Image()
+minimapCastleIcon.src = castleIconUrl
 
 const coinHudScene = new THREE.Scene()
 const coinHudCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 50)
@@ -2281,7 +2298,8 @@ const syncCoinTrailViewport = () => {
 
 const syncMinimapCanvasSize = () => {
   const rect = minimapCanvasEl.getBoundingClientRect()
-  const pixelRatio = Math.max(1, Math.min(window.devicePixelRatio, 2))
+  const pixelRatioCap = isMinimapExpanded || minimapEmbellishAlpha > 0.02 ? 3.5 : 2
+  const pixelRatio = Math.max(1, Math.min(window.devicePixelRatio, pixelRatioCap))
   const width = Math.max(1, Math.round(rect.width * pixelRatio))
   const height = Math.max(1, Math.round(rect.height * pixelRatio))
   if (minimapCanvasEl.width !== width || minimapCanvasEl.height !== height) {
@@ -2295,9 +2313,11 @@ const drawMinimap = () => {
   const width = minimapCanvasEl.width
   const height = minimapCanvasEl.height
   if (width <= 0 || height <= 0) return
+  const minDimension = Math.min(width, height)
+  const markerScale = Math.max(1, minDimension / 84)
 
   minimapCtx.clearRect(0, 0, width, height)
-  minimapCtx.fillStyle = 'rgba(22, 28, 35, 0.92)'
+  minimapCtx.fillStyle = 'rgba(224, 202, 156, 0.96)'
   minimapCtx.fillRect(0, 0, width, height)
 
   // Keep minimap orientation aligned with the camera view.
@@ -2321,20 +2341,37 @@ const drawMinimap = () => {
   }
 
   const center = worldToMap(0, 0)
-  minimapCtx.fillStyle = '#f0d066'
-  minimapCtx.fillRect(center.x - 1.5, center.y - 1.5, 3, 3)
+  const castleIconSize = Math.max(10, 10 * markerScale)
+  if (minimapCastleIcon.complete && minimapCastleIcon.naturalWidth > 0) {
+    minimapCtx.drawImage(
+      minimapCastleIcon,
+      center.x - castleIconSize * 0.5,
+      center.y - castleIconSize * 0.5,
+      castleIconSize,
+      castleIconSize
+    )
+  } else {
+    // Fallback marker before the icon asset has loaded.
+    minimapCtx.fillStyle = '#f0d066'
+    minimapCtx.fillRect(
+      center.x - castleIconSize * 0.35,
+      center.y - castleIconSize * 0.35,
+      castleIconSize * 0.7,
+      castleIconSize * 0.7
+    )
+  }
 
   const playerPoint = worldToMap(player.mesh.position.x, player.mesh.position.z)
   minimapCtx.fillStyle = '#62ff9a'
   minimapCtx.beginPath()
-  minimapCtx.arc(playerPoint.x, playerPoint.y, 2.6, 0, Math.PI * 2)
+  minimapCtx.arc(playerPoint.x, playerPoint.y, Math.max(2.6, 2.6 * markerScale), 0, Math.PI * 2)
   minimapCtx.fill()
 
   minimapCtx.fillStyle = '#ff6a6a'
   for (const mob of mobs) {
     const point = worldToMap(mob.mesh.position.x, mob.mesh.position.z)
     minimapCtx.beginPath()
-    minimapCtx.arc(point.x, point.y, 1.8, 0, Math.PI * 2)
+    minimapCtx.arc(point.x, point.y, Math.max(1.8, 1.8 * markerScale), 0, Math.PI * 2)
     minimapCtx.fill()
   }
 
@@ -2346,7 +2383,7 @@ const drawMinimap = () => {
     const point = worldToMap(collider.center.x, collider.center.z)
     minimapCtx.fillStyle = hpRatio <= REPAIR_CRITICAL_HP_RATIO ? '#ff6a6a' : '#ffcf73'
     minimapCtx.beginPath()
-    minimapCtx.arc(point.x, point.y, 1.4, 0, Math.PI * 2)
+    minimapCtx.arc(point.x, point.y, Math.max(1.4, 1.4 * markerScale), 0, Math.PI * 2)
     minimapCtx.fill()
   }
 }
@@ -2914,6 +2951,39 @@ const setBuildMode = (mode: BuildMode) => {
   wallDragValidPositions = []
 }
 
+let isMinimapExpanded = false
+let minimapEmbellishAlpha = 0
+let minimapEmbellishTargetAlpha = 0
+const MINIMAP_EMBELLISH_FADE_SPEED = 11
+
+const setMinimapExpanded = (expanded: boolean) => {
+  if (isMinimapExpanded === expanded) return
+  isMinimapExpanded = expanded
+  minimapEmbellishTargetAlpha = expanded ? 1 : 0
+  minimapWrapEl.classList.toggle('is-expanded', expanded)
+  hudStatusStackEl.style.display = expanded ? 'none' : ''
+  hudEnergyEl.style.display = expanded ? 'none' : ''
+  hudActionsEl.style.display = expanded ? 'none' : ''
+  minimapToggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+  minimapToggleBtn.setAttribute('aria-label', expanded ? 'Minimap expanded' : 'Expand minimap')
+  // Wait for the CSS size transition frame so the canvas can resize to the new bounds.
+  window.requestAnimationFrame(() => {
+    syncMinimapCanvasSize()
+  })
+  window.setTimeout(() => {
+    syncMinimapCanvasSize()
+  }, 260)
+}
+
+const updateMinimapEmbellishAlpha = (delta: number) => {
+  const blend = Math.min(1, delta * MINIMAP_EMBELLISH_FADE_SPEED)
+  minimapEmbellishAlpha += (minimapEmbellishTargetAlpha - minimapEmbellishAlpha) * blend
+  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlpha) <= 0.002) {
+    minimapEmbellishAlpha = minimapEmbellishTargetAlpha
+  }
+  minimapWrapEl.style.setProperty('--hud-minimap-embellish-alpha', minimapEmbellishAlpha.toFixed(3))
+}
+
 const setSelectedStructures = (colliders: DestructibleCollider[]) => {
   setSelectedStructuresState(selection, colliders, structureStore)
   selectedTower = selection.selectedTower
@@ -3035,7 +3105,11 @@ const selectionDialog = new SelectionDialog(
 const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size
   const inRange = getSelectedInRange()
-  hudActionsEl.style.display = selectedCount > 0 && inRange.length > 0 ? 'none' : ''
+  hudActionsEl.style.display = isMinimapExpanded
+    ? 'none'
+    : selectedCount > 0 && inRange.length > 0
+      ? 'none'
+      : ''
   const tower = getSingleSelectedTower()
   const [selectedCollider] = selectedStructures.values()
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
@@ -3130,6 +3204,18 @@ const updateSelectionDialog = () => {
 
 buildWallBtn.addEventListener('click', () => setBuildMode('wall'))
 buildTowerBtn.addEventListener('click', () => setBuildMode('tower'))
+minimapToggleBtn.addEventListener('click', () => {
+  if (isMinimapExpanded) return
+  setMinimapExpanded(true)
+})
+minimapWrapEl.addEventListener('transitionend', (event) => {
+  if (event.propertyName !== 'width' && event.propertyName !== 'height') return
+  syncMinimapCanvasSize()
+})
+window.addEventListener('pointerdown', (event) => {
+  if (!isMinimapExpanded) return
+  setMinimapExpanded(false)
+})
 
 shootButton.addEventListener('pointerdown', () => {
   gameState.isShooting = true
@@ -3944,6 +4030,10 @@ const processCastleCaptures = (now: number) => {
 }
 
 const tick = (now: number, delta: number) => {
+  updateMinimapEmbellishAlpha(delta)
+  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlpha) > 0.001) {
+    syncMinimapCanvasSize()
+  }
   gameState.energy = Math.min(ENERGY_CAP, gameState.energy + ENERGY_REGEN_RATE * delta)
   if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
     setBuildMode('off')
