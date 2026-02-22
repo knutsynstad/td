@@ -86,13 +86,7 @@ const simplifyCollinear = (points: THREE.Vector3[], epsilon = 0.01) => {
   return out
 }
 
-const octile = (dx: number, dz: number) => {
-  const adx = Math.abs(dx)
-  const adz = Math.abs(dz)
-  const dmin = Math.min(adx, adz)
-  const dmax = Math.max(adx, adz)
-  return (dmax - dmin) + dmin * Math.SQRT2
-}
+const manhattan = (dx: number, dz: number) => Math.abs(dx) + Math.abs(dz)
 
 const OFFSETS: Array<[number, number, number]> = [
   [1, 0, 1],
@@ -102,9 +96,6 @@ const OFFSETS: Array<[number, number, number]> = [
 ]
 
 const MIN_CORRIDOR_INFLATION_RADIUS = 1.0
-const TURN_BIAS_PENALTY = 0.001
-const GOAL_ALIGNMENT_BIAS_PENALTY = 0.0006
-
 export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
   const maxVisited = opts.maxVisited ?? 200_000
   const res = opts.resolution
@@ -191,20 +182,20 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
   gScore[startIdx] = 0
   turnScore[startIdx] = 0
   hopScore[startIdx] = 0
-  heapPush(heap, { idx: startIdx, f: octile(goalX - startX, goalZ - startZ), turns: 0, hops: 0 })
+  heapPush(heap, { idx: startIdx, f: manhattan(goalX - startX, goalZ - startZ), turns: 0, hops: 0 })
   open[startIdx] = 1
 
   let visited = 0
   let found = false
   let bestIdx = startIdx
-  let bestHeuristic = octile(goalX - startX, goalZ - startZ)
+  let bestHeuristic = manhattan(goalX - startX, goalZ - startZ)
   while (heap.length > 0) {
     const current = heapPop(heap)
     if (closed[current.idx] === 1) continue
     closed[current.idx] = 1
     visited += 1
     const [cx, cz] = fromIdx(current.idx)
-    const h = octile(goalX - cx, goalZ - cz)
+    const h = manhattan(goalX - cx, goalZ - cz)
     if (h < bestHeuristic) {
       bestHeuristic = h
       bestIdx = current.idx
@@ -221,11 +212,6 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
     const currentTurns = turnScore[current.idx]!
     const currentHops = hopScore[current.idx]!
     const currentDir = dirToNode[current.idx]!
-    const goalDirX = goalX - cx
-    const goalDirZ = goalZ - cz
-    const goalDirLen = Math.hypot(goalDirX, goalDirZ)
-    const goalNormX = goalDirLen > 1e-6 ? goalDirX / goalDirLen : 0
-    const goalNormZ = goalDirLen > 1e-6 ? goalDirZ / goalDirLen : 0
     for (let offsetIdx = 0; offsetIdx < OFFSETS.length; offsetIdx += 1) {
       const [dx, dz, stepCost] = OFFSETS[offsetIdx]!
       const nx = cx + dx
@@ -238,13 +224,7 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
         const sideB = toIdx(cx, cz + dz)
         if (blocked[sideA] === 1 || blocked[sideB] === 1) continue
       }
-      const stepLen = Math.hypot(dx, dz)
-      const stepNormX = dx / stepLen
-      const stepNormZ = dz / stepLen
-      const alignment = goalDirLen > 1e-6 ? Math.max(0, stepNormX * goalNormX + stepNormZ * goalNormZ) : 1
-      const turnBias = currentDir >= 0 && currentDir !== offsetIdx ? TURN_BIAS_PENALTY : 0
-      const alignmentBias = (1 - alignment) * GOAL_ALIGNMENT_BIAS_PENALTY
-      const tentative = currentG + stepCost + turnBias + alignmentBias
+      const tentative = currentG + stepCost
       const extraTurn = currentDir >= 0 && currentDir !== offsetIdx ? 1 : 0
       const nextTurns = currentTurns + extraTurn
       const nextHops = currentHops + 1
@@ -258,7 +238,7 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
         turnScore[nIdx] = nextTurns
         hopScore[nIdx] = nextHops
         dirToNode[nIdx] = offsetIdx
-        const f = tentative + octile(goalX - nx, goalZ - nz)
+        const f = tentative + manhattan(goalX - nx, goalZ - nz)
         heapPush(heap, { idx: nIdx, f, turns: nextTurns, hops: nextHops })
         open[nIdx] = 1
       }
