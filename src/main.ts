@@ -81,7 +81,6 @@ import {
   ENERGY_COST_WALL,
   ENERGY_PER_PLAYER_KILL,
   ENERGY_REGEN_RATE,
-  ENERGY_SYMBOL,
   GRID_SIZE,
   MAX_VISIBLE_MOB_INSTANCES,
   MOB_INSTANCE_CAP,
@@ -118,6 +117,7 @@ import { createGameState } from './game/state/GameState'
 import { createInputController } from './input/InputController'
 import { updateHud } from './presentation/HudPresenter'
 import { renderVisibleMobInstances } from './presentation/RenderCoordinator'
+import { buildCoinCostMarkup } from './ui/coinCost'
 import {
   createBallistaVisualRig,
   getBallistaArrowLaunchTransform,
@@ -182,11 +182,11 @@ app.innerHTML = `
         <div class="build-buttons">
           <button id="buildWall" class="hud-button build-button">
             <span class="button-label">Wall</span>
-            <span id="wallCount" class="hud-badge">${ENERGY_SYMBOL}${ENERGY_COST_WALL}</span>
+            <span id="wallCount" class="hud-badge">${buildCoinCostMarkup(ENERGY_COST_WALL, 'Coin cost')}</span>
           </button>
           <button id="buildTower" class="hud-button build-button">
             <span class="button-label">Tower</span>
-            <span id="towerCount" class="hud-badge">${ENERGY_SYMBOL}${ENERGY_COST_TOWER}</span>
+            <span id="towerCount" class="hud-badge">${buildCoinCostMarkup(ENERGY_COST_TOWER, 'Coin cost')}</span>
           </button>
         </div>
         <button id="shootButton" class="shoot-button">Shoot</button>
@@ -4181,7 +4181,6 @@ const tick = (now: number, delta: number) => {
       shootCooldown: gameState.shootCooldown
     },
     {
-      energySymbol: ENERGY_SYMBOL,
       energyCostWall: ENERGY_COST_WALL,
       energyCostTower: ENERGY_COST_TOWER,
       shootCooldownMax: SHOOT_COOLDOWN

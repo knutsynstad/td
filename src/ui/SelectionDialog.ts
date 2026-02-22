@@ -1,6 +1,6 @@
 import { getTowerType, getTowerUpgrade } from '../game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from '../game/TowerTypes'
-import { ENERGY_SYMBOL } from '../game/constants'
+import { buildCoinCostMarkup } from './coinCost'
 
 type SelectionDialogState = {
   selectedCount: number
@@ -155,7 +155,7 @@ export class SelectionDialog {
                 const controlsMarkup = (() => {
                   if (!upgrade) return ''
                   const disabled = upgradesDisabled || !upgrade.canAfford
-                  const buttonLabel = `Upgrade ${ENERGY_SYMBOL}${upgrade.cost}`
+                  const buttonLabel = `Upgrade ${buildCoinCostMarkup(upgrade.cost, 'Coin cost')}`
                   return `<button class="selection-dialog__stat-upgrade" data-upgrade="${upgradeId}" ${disabled ? 'disabled' : ''}>${buttonLabel}</button>`
                 })()
                 return `
@@ -195,7 +195,7 @@ export class SelectionDialog {
     const repairInfoMarkup = !isBankSelected && showRepair
       ? `<div class="selection-dialog__meta selection-dialog__repair-meta">
           <span class="selection-dialog__repair-status selection-dialog__repair-status--${repairStatus ?? 'healthy'}">${repairStatusLabel}</span>
-          ${repairCost !== null ? `<span class="selection-dialog__repair-cost">Repair ${ENERGY_SYMBOL}${repairCost}</span>` : ''}
+          ${repairCost !== null ? `<span class="selection-dialog__repair-cost">Repair ${buildCoinCostMarkup(repairCost, 'Coin cost')}</span>` : ''}
         </div>`
       : ''
     const bankActionsMarkup = isBankSelected
@@ -221,7 +221,7 @@ export class SelectionDialog {
              </button>
              ${showRepair
                ? `<button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-                    ${repairCost !== null ? `Repair ${ENERGY_SYMBOL}${repairCost}` : 'Repair'}
+                    ${repairCost !== null ? `Repair ${buildCoinCostMarkup(repairCost, 'Coin cost')}` : 'Repair'}
                   </button>`
                : ''}
            </div>`}

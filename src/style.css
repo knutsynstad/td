@@ -126,6 +126,25 @@ canvas {
   opacity: 0.92;
 }
 
+.coin-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  line-height: 1;
+}
+
+.coin-cost__icon {
+  width: 1.05em;
+  height: 1.05em;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.coin-cost__value {
+  display: inline-block;
+  line-height: 1;
+}
+
 .selection-dialog__section-title {
   font-size: 0.75rem;
   font-weight: 700;
@@ -323,6 +342,15 @@ canvas {
   text-align: center;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.selection-dialog__stat-upgrade .coin-cost {
+  gap: 0.24em;
+}
+
+.selection-dialog__stat-upgrade .coin-cost__icon {
+  width: 0.9em;
+  height: 0.9em;
 }
 
 .selection-dialog__stat-upgrade:hover:not(:disabled) {
@@ -727,9 +755,19 @@ canvas {
   font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   box-shadow: none;
   z-index: 1;
+}
+
+.hud-badge .coin-cost {
+  gap: 0.2em;
+}
+
+.hud-badge .coin-cost__icon {
+  width: 0.95em;
+  height: 0.95em;
 }
 
 .hud-button:hover {
