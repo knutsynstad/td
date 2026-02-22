@@ -128,10 +128,10 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
   const toWorld = (x: number, z: number) =>
     new THREE.Vector3(minWX + x * res, 0, minWZ + z * res)
   const blocked = new Uint8Array(cellCount)
-  // Enforce approximately 3-tile traffic corridors by expanding obstacle footprints.
-  const inflate = Math.max(res * 0.4, MIN_CORRIDOR_INFLATION_RADIUS)
   for (const collider of opts.colliders) {
-    if (collider.type === 'castle') continue
+    const inflate = collider.type === 'castle'
+      ? 0
+      : Math.max(res * 0.4, MIN_CORRIDOR_INFLATION_RADIUS)
     const minX = collider.center.x - collider.halfSize.x - inflate
     const maxX = collider.center.x + collider.halfSize.x + inflate
     const minZ = collider.center.z - collider.halfSize.z - inflate

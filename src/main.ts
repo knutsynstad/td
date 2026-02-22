@@ -1128,11 +1128,12 @@ const getCastleEntryGoals = () => {
   const z = castleCollider.center.z
   const hx = castleCollider.halfSize.x
   const hz = castleCollider.halfSize.z
+  const approachOffset = GRID_SIZE
   return [
-    new THREE.Vector3(x + hx, 0, z),
-    new THREE.Vector3(x - hx, 0, z),
-    new THREE.Vector3(x, 0, z + hz),
-    new THREE.Vector3(x, 0, z - hz)
+    new THREE.Vector3(x + hx + approachOffset, 0, z),
+    new THREE.Vector3(x - hx - approachOffset, 0, z),
+    new THREE.Vector3(x, 0, z + hz + approachOffset),
+    new THREE.Vector3(x, 0, z - hz - approachOffset)
   ]
 }
 const borderDoors = getAllBorderDoors(WORLD_BOUNDS)
@@ -1303,6 +1304,17 @@ const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
   return points.map((point) => point.clone())
 }
 
+const extendPathToCastleCenter = (points: THREE.Vector3[]) => {
+  const extended = points.map((point) => point.clone())
+  if (extended.length === 0) return extended
+  const center = new THREE.Vector3(castleCollider.center.x, 0, castleCollider.center.z)
+  const last = extended[extended.length - 1]!
+  if (last.distanceToSquared(center) > 1e-6) {
+    extended.push(center)
+  }
+  return extended
+}
+
 const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   const entry = getSpawnerEntryPoint(spawner.position)
   const goals = getCastleEntryGoals()
@@ -1334,7 +1346,7 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
       resolution: GRID_SIZE,
       maxVisited: 240_000
     })
-    const displayPoints = trimPathToCastleBoundary(route.points)
+    const displayPoints = extendPathToCastleCenter(trimPathToCastleBoundary(route.points))
     const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
     const routeState: LanePathResult['state'] = (
       route.state === 'reachable' && corridor.isComplete

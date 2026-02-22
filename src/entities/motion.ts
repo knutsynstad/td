@@ -173,6 +173,16 @@ export const createEntityMotionSystem = (context: MotionContext) => {
               waypoints[waypointIdx].z - entity.mesh.position.z
             )
             if (dir.length() > 0.1) dir.normalize()
+          } else {
+            const lastWaypoint = waypoints[waypoints.length - 1]
+            if (lastWaypoint) {
+              dir = new THREE.Vector3(
+                lastWaypoint.x - entity.mesh.position.x,
+                0,
+                lastWaypoint.z - entity.mesh.position.z
+              )
+              if (dir.length() > 0.1) dir.normalize()
+            }
           }
         }
 
