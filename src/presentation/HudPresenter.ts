@@ -51,11 +51,9 @@ export const updateHud = (
     elements.energyCountEl.classList.remove('pop')
   }
 
-  const nextWaveIn =
-    state.waveComplete && state.nextWaveAt !== 0
-      ? Math.max(0, Math.ceil((state.nextWaveAt - state.now) / 1000))
-      : 0
-  const showNextWave = state.waveComplete && state.nextWaveAt !== 0
+  const isPreWaveCountdown = state.wave === 0 && state.nextWaveAt !== 0
+  const showNextWave = state.nextWaveAt !== 0 && (state.waveComplete || isPreWaveCountdown)
+  const nextWaveIn = showNextWave ? Math.max(0, Math.ceil((state.nextWaveAt - state.now) / 1000)) : 0
   elements.waveEl.textContent = String(showNextWave ? state.wave + 1 : state.wave)
   elements.nextWaveRowEl.style.display = showNextWave ? '' : 'none'
   elements.mobsRowEl.style.display = showNextWave ? 'none' : ''

@@ -606,11 +606,17 @@ canvas {
 }
 
 .event-banner.show {
-  animation: banner-pop 2.4s ease-out forwards;
+  animation: banner-pop var(--banner-duration, 2.4s) ease-out forwards;
 }
 
 .event-banner__single {
   font-size: clamp(1.6rem, 4vw, 4rem);
+}
+
+.event-banner__subhead {
+  font-size: clamp(0.95rem, 2vw, 1.4rem);
+  font-weight: 600;
+  opacity: 0.92;
 }
 
 .final-countdown {

@@ -2028,6 +2028,7 @@ const keyboardRight = new THREE.Vector3()
 const keyboardMoveDir = new THREE.Vector3()
 let wasKeyboardMoving = false
 const EVENT_BANNER_DURATION = 2.4
+const CASTLE_FALL_BANNER_DURATION = 4.8
 
 type EnergyTrail = {
   mesh: THREE.Object3D
@@ -3405,13 +3406,19 @@ populateSeededWorld()
 // Initialize lane paths for active spawners once map is ready.
 refreshAllSpawnerPathlines()
 
-const resetGame = () => {
+const CASTLE_FALL_RESTART_DELAY_MS = 30000
+const CASTLE_FALL_TAX_RATE = 0.2
+
+const resetGame = (restartAt: number) => {
+  const bankBeforeTax = Math.max(0, Math.floor(gameState.bankEnergy))
+  const deathTax = Math.floor(bankBeforeTax * CASTLE_FALL_TAX_RATE)
+
   gameState.lives = 1
   gameState.wave = 0
-  gameState.nextWaveAt = 0
+  gameState.nextWaveAt = restartAt
   gameState.prevMobsCount = 0
   gameState.energy = ENERGY_CAP
-  gameState.bankEnergy = 0
+  gameState.bankEnergy = Math.max(0, bankBeforeTax - deathTax)
   gameState.energyPopTimer = 0
   gameState.eventBannerTimer = 0
   eventBannerEl.classList.remove('show')
@@ -3480,6 +3487,8 @@ const resetGame = () => {
   activeEnergyTrails.length = 0
 
   refreshAllSpawnerPathlines()
+
+  return deathTax
 }
 
 const setMoveTarget = (pos: THREE.Vector3) => {
@@ -3636,7 +3645,7 @@ const updateNpcTargets = () => {
   motionSystem.updateNpcTargets()
 }
 
-const triggerEventBanner = (text: string) => {
+const triggerEventBanner = (text: string, duration = EVENT_BANNER_DURATION) => {
   eventBannerEl.textContent = ''
   const line = document.createElement('div')
   line.className = 'event-banner__single'
@@ -3644,10 +3653,44 @@ const triggerEventBanner = (text: string) => {
   eventBannerEl.appendChild(line)
   eventBannerEl.classList.remove('stack')
   eventBannerEl.classList.add('single')
+  eventBannerEl.style.setProperty('--banner-duration', `${duration}s`)
   eventBannerEl.classList.remove('show')
   void eventBannerEl.offsetWidth
   eventBannerEl.classList.add('show')
-  gameState.eventBannerTimer = EVENT_BANNER_DURATION
+  gameState.eventBannerTimer = duration
+}
+
+const triggerEventBannerWithSubhead = (
+  heading: string,
+  subhead: string,
+  secondarySubhead?: string,
+  duration = EVENT_BANNER_DURATION
+) => {
+  eventBannerEl.textContent = ''
+
+  const headingLine = document.createElement('div')
+  headingLine.className = 'event-banner__single'
+  headingLine.textContent = heading
+
+  const subheadLine = document.createElement('div')
+  subheadLine.className = 'event-banner__subhead'
+  subheadLine.textContent = subhead
+
+  eventBannerEl.appendChild(headingLine)
+  eventBannerEl.appendChild(subheadLine)
+  if (secondarySubhead) {
+    const secondarySubheadLine = document.createElement('div')
+    secondarySubheadLine.className = 'event-banner__subhead'
+    secondarySubheadLine.textContent = secondarySubhead
+    eventBannerEl.appendChild(secondarySubheadLine)
+  }
+  eventBannerEl.classList.remove('single')
+  eventBannerEl.classList.add('stack')
+  eventBannerEl.style.setProperty('--banner-duration', `${duration}s`)
+  eventBannerEl.classList.remove('show')
+  void eventBannerEl.offsetWidth
+  eventBannerEl.classList.add('show')
+  gameState.eventBannerTimer = duration
 }
 
 const spawnWave = () => {
@@ -4013,7 +4056,13 @@ const tick = (now: number, delta: number) => {
       }
       mobs.splice(i, 1)
       if (gameState.lives === 0) {
-        resetGame()
+        const deathTax = resetGame(now + CASTLE_FALL_RESTART_DELAY_MS)
+        triggerEventBannerWithSubhead(
+          'Our castle has fallen',
+          `Mobs looted ${deathTax} gold`,
+          undefined,
+          CASTLE_FALL_BANNER_DURATION
+        )
         break
       }
     } else if ((mob.hp ?? 0) <= 0) {
@@ -4043,7 +4092,8 @@ const tick = (now: number, delta: number) => {
     gameState.nextWaveAt = 0
     spawnWave()
   }
-  if (gameState.wave === 0) {
+  if (gameState.wave === 0 && (gameState.nextWaveAt === 0 || now >= gameState.nextWaveAt)) {
+    gameState.nextWaveAt = 0
     spawnWave()
   }
 
