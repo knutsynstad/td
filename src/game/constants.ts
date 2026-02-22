@@ -12,6 +12,7 @@ export const MOB_HEIGHT = 1.3
 export const NPC_SPEED = 4
 export const SHOOT_COOLDOWN = 0.5
 export const SHOOT_DAMAGE = 5
+export const PLAYER_SHOOT_RANGE = 12
 export const TOWER_HEIGHT = 2
 export const BALLISTA_ARROW_SPEED = 17
 export const BALLISTA_ARROW_GRAVITY = 36

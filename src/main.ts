@@ -93,6 +93,7 @@ import {
   MOB_SPEED,
   MOB_WIDTH,
   NPC_SPEED,
+  PLAYER_SHOOT_RANGE,
   PLAYER_COLLISION_RADIUS,
   PLAYER_HEIGHT,
   PLAYER_SPEED,
@@ -149,6 +150,7 @@ const COIN_PILE_MAX_RADIUS = 2.1
 const COIN_PILE_CLUSTER_MAX_PER_CORNER = 5
 const SHOW_WORLD_GRID = false
 const SHOW_FLOW_FIELD_DEBUG = false
+const SHOW_PLAYER_SHOOT_RANGE = false
 app.innerHTML = `
   <div id="hud" class="hud">
     <div class="hud-corner hud-corner--top-left">
@@ -1426,6 +1428,17 @@ gltfLoader.load(
 const mobs: MobEntity[] = []
 const towers: Tower[] = []
 const activeArrowProjectiles: ArrowProjectile[] = []
+type PlayerArrowProjectile = {
+  mesh: THREE.Object3D
+  position: THREE.Vector3
+  velocity: THREE.Vector3
+  gravity: THREE.Vector3
+  gravityDelay: number
+  radius: number
+  ttl: number
+  damage: number
+}
+const activePlayerArrowProjectiles: PlayerArrowProjectile[] = []
 let selectedTower: Tower | null = null
 const structureStore = new StructureStore(
   scene,
@@ -1852,19 +1865,20 @@ selectionArrowGroup.visible = false
 const selectionArrow = selectionArrowGroup
 scene.add(selectionArrow)
 
-const laserMaterial = new THREE.MeshBasicMaterial({ color: 0xff3b3b })
-const laserGeometry = new THREE.CylinderGeometry(0.075, 0.075, 1, 8)
-const laser = new THREE.Mesh(laserGeometry, laserMaterial)
-laser.visible = false
-laser.rotation.order = 'YXZ'
-scene.add(laser)
-
 const towerRangeMaterial = new THREE.MeshBasicMaterial({
   color: 0x7ad1ff,
   transparent: true,
   opacity: 0.3,
   side: THREE.DoubleSide
 })
+const playerShootRangeRing = new THREE.Mesh(
+  new THREE.RingGeometry(PLAYER_SHOOT_RANGE - 0.12, PLAYER_SHOOT_RANGE, 64),
+  towerRangeMaterial
+)
+playerShootRangeRing.rotation.x = -Math.PI / 2
+playerShootRangeRing.position.set(0, 0.02, 0)
+playerShootRangeRing.visible = SHOW_PLAYER_SHOOT_RANGE
+scene.add(playerShootRangeRing)
 
 const raycaster = new THREE.Raycaster()
 raycaster.layers.enable(HITBOX_LAYER)
@@ -2705,6 +2719,8 @@ const towerLaunchPosScratch = new THREE.Vector3()
 const towerLaunchQuatScratch = new THREE.Quaternion()
 const towerTargetPosScratch = new THREE.Vector3()
 const towerAimPointScratch = new THREE.Vector3()
+const playerLaunchPosScratch = new THREE.Vector3()
+const playerTargetPosScratch = new THREE.Vector3()
 const projectilePrevPosScratch = new THREE.Vector3()
 const projectileStepScratch = new THREE.Vector3()
 const projectileClosestPointScratch = new THREE.Vector3()
@@ -3212,7 +3228,7 @@ minimapWrapEl.addEventListener('transitionend', (event) => {
   if (event.propertyName !== 'width' && event.propertyName !== 'height') return
   syncMinimapCanvasSize()
 })
-window.addEventListener('pointerdown', (event) => {
+window.addEventListener('pointerdown', () => {
   if (!isMinimapExpanded) return
   setMinimapExpanded(false)
 })
@@ -3563,6 +3579,10 @@ const resetGame = (restartAt: number) => {
     scene.remove(projectile.mesh)
   }
   activeArrowProjectiles.length = 0
+  for (const projectile of activePlayerArrowProjectiles) {
+    scene.remove(projectile.mesh)
+  }
+  activePlayerArrowProjectiles.length = 0
 
   for (const trail of activeEnergyTrails) {
     coinTrailScene.remove(trail.mesh)
@@ -3816,7 +3836,7 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
   return best
 }
 
-const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
+const pickSelectedMob = () => pickMobInRange(player.mesh.position, PLAYER_SHOOT_RANGE)
 
 const getTowerLaunchTransform = (
   tower: Tower,
@@ -3920,6 +3940,83 @@ const updateTowerArrowProjectiles = (delta: number) => {
     }
     scene.remove(projectile.mesh)
     activeArrowProjectiles.splice(i, 1)
+  }
+}
+
+const spawnPlayerArrowProjectile = (launchPos: THREE.Vector3, launchVelocity: THREE.Vector3) => {
+  if (!arrowModelTemplate) return
+  const mesh = arrowModelTemplate.clone(true)
+  orientArrowToVelocity(mesh, launchVelocity)
+  placeArrowMeshAtFacing(mesh, launchPos)
+  scene.add(mesh)
+  activePlayerArrowProjectiles.push({
+    mesh,
+    position: launchPos.clone(),
+    velocity: launchVelocity.clone(),
+    gravity: towerArrowGravity,
+    gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
+    radius: BALLISTA_ARROW_RADIUS,
+    ttl: BALLISTA_ARROW_MAX_LIFETIME,
+    damage: SHOOT_DAMAGE
+  })
+}
+
+const updatePlayerArrowProjectiles = (delta: number) => {
+  for (let i = activePlayerArrowProjectiles.length - 1; i >= 0; i -= 1) {
+    const projectile = activePlayerArrowProjectiles[i]!
+    projectile.ttl -= delta
+    if (projectile.ttl <= 0) {
+      scene.remove(projectile.mesh)
+      activePlayerArrowProjectiles.splice(i, 1)
+      continue
+    }
+
+    projectilePrevPosScratch.copy(projectile.position)
+    let gravityDt = delta
+    if (projectile.gravityDelay > 0) {
+      const delayStep = Math.min(projectile.gravityDelay, delta)
+      projectile.gravityDelay -= delayStep
+      gravityDt = delta - delayStep
+    }
+    if (gravityDt > 0) {
+      projectile.velocity.addScaledVector(projectile.gravity, gravityDt)
+    }
+    projectile.position.addScaledVector(projectile.velocity, delta)
+    orientArrowToVelocity(projectile.mesh, projectile.velocity)
+    placeArrowMeshAtFacing(projectile.mesh, projectile.position)
+
+    projectileStepScratch.copy(projectile.position).sub(projectilePrevPosScratch)
+    const segmentLenSq = projectileStepScratch.lengthSq()
+    let hitMob: MobEntity | null = null
+    let bestT = Number.POSITIVE_INFINITY
+
+    for (const mob of mobs) {
+      if ((mob.hp ?? 0) <= 0) continue
+      projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3)
+      const combinedRadius = mob.radius + projectile.radius
+      let t = 0
+      if (segmentLenSq > 1e-8) {
+        projectileDeltaScratch.copy(projectileMobCenterScratch).sub(projectilePrevPosScratch)
+        t = THREE.MathUtils.clamp(projectileDeltaScratch.dot(projectileStepScratch) / segmentLenSq, 0, 1)
+      }
+      projectileClosestPointScratch.copy(projectilePrevPosScratch).addScaledVector(projectileStepScratch, t)
+      if (projectileClosestPointScratch.distanceToSquared(projectileMobCenterScratch) > combinedRadius * combinedRadius) continue
+      if (t < bestT) {
+        bestT = t
+        hitMob = mob
+        projectileHitPointScratch.copy(projectileClosestPointScratch)
+      }
+    }
+
+    if (!hitMob) continue
+    projectile.position.copy(projectileHitPointScratch)
+    placeArrowMeshAtFacing(projectile.mesh, projectile.position)
+    const attack = rollAttackDamage(projectile.damage)
+    hitMob.hp = (hitMob.hp ?? 0) - attack.damage
+    hitMob.lastHitBy = 'player'
+    spawnFloatingDamageText(hitMob, attack.damage, 'player', attack.isCrit)
+    scene.remove(projectile.mesh)
+    activePlayerArrowProjectiles.splice(i, 1)
   }
 }
 
@@ -4149,6 +4246,7 @@ const tick = (now: number, delta: number) => {
     }
   }
   updateTowerArrowProjectiles(delta)
+  updatePlayerArrowProjectiles(delta)
 
   // Only check collisions between entities in nearby cells
   const processed = new Set<Entity>()
@@ -4238,6 +4336,8 @@ const tick = (now: number, delta: number) => {
     const collider = structureStore.structureMeshToCollider.get(tower.mesh)
     tower.rangeRing.visible = selectedTower === tower || (collider !== undefined && selectedStructures.has(collider))
   }
+  playerShootRangeRing.position.set(player.mesh.position.x, 0.02, player.mesh.position.z)
+  playerShootRangeRing.visible = SHOW_PLAYER_SHOOT_RANGE
 
   const arrowDir = new THREE.Vector3(
     player.target.x - player.mesh.position.x,
@@ -4255,39 +4355,40 @@ const tick = (now: number, delta: number) => {
     arrow.visible = false
   }
 
-  // Update laser visibility timer
-  if (gameState.laserVisibleTime > 0) {
-    gameState.laserVisibleTime -= delta
-  }
-  
   if (gameState.isShooting && selected) {
-    const start = player.mesh.position.clone()
-    const end = selected.mesh.position.clone()
-    const direction = new THREE.Vector3().subVectors(end, start)
-    const length = direction.length()
-    
-    // Always update laser position/rotation when shooting, but only show when timer is active
-    laser.position.copy(start).add(end).multiplyScalar(0.5)
-    laser.scale.set(1, length, 1)
-    laser.lookAt(end)
-    laser.rotateX(Math.PI / 2)
-    
     gameState.shootCooldown -= delta
-    if (gameState.shootCooldown <= 0) {
-      const attack = rollAttackDamage(SHOOT_DAMAGE)
-      selected.hp = (selected.hp ?? 0) - attack.damage
-      selected.lastHitBy = 'player'
-      spawnFloatingDamageText(selected, attack.damage, 'player', attack.isCrit)
+    if (gameState.shootCooldown <= 0 && arrowModelTemplate) {
+      playerLaunchPosScratch.copy(player.mesh.position).setY(player.baseY + 0.35)
+      playerTargetPosScratch.copy(selected.mesh.position).setY(selected.baseY + 0.3)
+      const closeRangeDirectAim = playerLaunchPosScratch.distanceTo(playerTargetPosScratch) <= BALLISTA_ARROW_DIRECT_AIM_DISTANCE
+      const intercept = closeRangeDirectAim
+        ? null
+        : solveBallisticIntercept(
+          playerLaunchPosScratch,
+          playerTargetPosScratch,
+          selected.velocity,
+          BALLISTA_ARROW_SPEED,
+          towerArrowGravity,
+          BALLISTA_ARROW_GRAVITY_DELAY,
+          BALLISTA_ARROW_MAX_LIFETIME
+        )
+      const launchVelocity = closeRangeDirectAim
+        ? playerTargetPosScratch.clone().sub(playerLaunchPosScratch).normalize().multiplyScalar(BALLISTA_ARROW_SPEED)
+        : intercept?.velocity
+          ?? computeFallbackBallisticVelocity(
+            playerLaunchPosScratch,
+            playerTargetPosScratch,
+            towerArrowGravity,
+            BALLISTA_ARROW_GRAVITY_DELAY,
+            BALLISTA_ARROW_SPEED,
+            BALLISTA_ARROW_MAX_LIFETIME
+          )
+      spawnPlayerArrowProjectile(playerLaunchPosScratch, launchVelocity)
       gameState.shootCooldown = SHOOT_COOLDOWN
-      // Show laser for 0.1 seconds when shot fires
-      gameState.laserVisibleTime = 0.1
     }
   } else {
     gameState.shootCooldown = Math.max(gameState.shootCooldown - delta, 0)
   }
-  
-  // Only show laser when visibility timer is active
-  laser.visible = gameState.laserVisibleTime > 0 && selected !== null
 
   dir.target.position.copy(player.mesh.position)
   dir.position.copy(player.mesh.position).add(dirShadowFollowOffset)
@@ -4390,9 +4491,6 @@ const disposeApp = () => {
   worldGrid?.dispose()
   worldBorder.dispose()
 
-  scene.remove(laser)
-  laser.geometry.dispose()
-  ;(laser.material as THREE.Material).dispose()
   shaftGeometry.dispose()
   shaftMaterial.dispose()
   headGeometry.dispose()
@@ -4416,6 +4514,12 @@ const disposeApp = () => {
     scene.remove(projectile.mesh)
   }
   activeArrowProjectiles.length = 0
+  for (const projectile of activePlayerArrowProjectiles) {
+    scene.remove(projectile.mesh)
+  }
+  activePlayerArrowProjectiles.length = 0
+  scene.remove(playerShootRangeRing)
+  playerShootRangeRing.geometry.dispose()
   towerRangeMaterial.dispose()
 
   scene.remove(ground)

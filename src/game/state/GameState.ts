@@ -4,7 +4,6 @@ export type GameState = {
   buildMode: BuildMode
   isShooting: boolean
   shootCooldown: number
-  laserVisibleTime: number
   wave: number
   lives: number
   nextWaveAt: number
@@ -19,7 +18,6 @@ export const createGameState = (energyCap: number): GameState => ({
   buildMode: 'off',
   isShooting: false,
   shootCooldown: 0,
-  laserVisibleTime: 0,
   wave: 0,
   lives: 1,
   nextWaveAt: 0,
