@@ -83,9 +83,8 @@ export const buildCastleFlowField = (opts: CorridorFlowFieldOptions): CorridorFl
   const passable = new Uint8Array(cellCount)
   passable.fill(1)
   const corridorHalfWidth = Math.max(0, opts.corridorHalfWidthCells ?? 1)
-  void corridorHalfWidth
-  // Ultra-tight debug mode: do not inflate blockers beyond their collider bounds.
-  const clearanceInflation = 0
+  // Inflate blockers by corridor half-width so paths keep required clearance.
+  const clearanceInflation = corridorHalfWidth * res
 
   for (const collider of opts.colliders) {
     if (collider.type === 'castle') continue
