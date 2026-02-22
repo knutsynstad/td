@@ -4,6 +4,7 @@ export type BallistaVisualRig = {
   root: THREE.Group
   yawGroup: THREE.Group
   cradlePitchGroup: THREE.Group
+  arrowAnchor: THREE.Object3D
   yawPivotLocal: THREE.Vector3
   baseForwardYaw: number
 }
@@ -11,6 +12,8 @@ export type BallistaVisualRig = {
 const YAW_TURN_SPEED_RAD_PER_SEC = Math.PI * 2
 const PITCH_TURN_SPEED_RAD_PER_SEC = Math.PI * 1.5
 const IDLE_PITCH_RAD = THREE.MathUtils.degToRad(30)
+const MAX_TRACK_PITCH_RAD = THREE.MathUtils.degToRad(65)
+const AIM_LOCK_TOLERANCE_RAD = THREE.MathUtils.degToRad(4)
 
 const setShadows = (object: THREE.Object3D) => {
   object.traverse((child) => {
@@ -26,12 +29,26 @@ const getRequiredPart = (template: THREE.Object3D, name: string) => {
   return part.clone(true)
 }
 
+const getObjectByNameCaseInsensitive = (template: THREE.Object3D, name: string) => {
+  const direct = template.getObjectByName(name)
+  if (direct) return direct
+  const lowered = name.toLowerCase()
+  let match: THREE.Object3D | null = null
+  template.traverse((child) => {
+    if (match) return
+    if ((child.name || '').toLowerCase() !== lowered) return
+    match = child
+  })
+  return match
+}
+
 export const createBallistaVisualRig = (template: THREE.Object3D): BallistaVisualRig | null => {
   const base = getRequiredPart(template, 'Base')
   const harness = getRequiredPart(template, 'Harness')
   const cradle = getRequiredPart(template, 'Cradle')
-  const facing = template.getObjectByName('Facing')
-  if (!base || !harness || !cradle || !facing) return null
+  const arrow = getRequiredPart(template, 'Arrow')
+  const facing = getObjectByNameCaseInsensitive(template, 'Facing')
+  if (!base || !harness || !cradle || !arrow || !facing) return null
 
   const root = new THREE.Group()
   root.name = 'BallistaRigRoot'
@@ -57,6 +74,7 @@ export const createBallistaVisualRig = (template: THREE.Object3D): BallistaVisua
   cradlePitchGroup.add(cradleOffsetGroup)
   harnessOffsetGroup.add(harness)
   cradleOffsetGroup.add(cradle)
+  cradleOffsetGroup.add(arrow)
 
   // Facing empty is authored as an arrow; exported forward is local +Y.
   const facingForwardLocal = new THREE.Vector3(0, 1, 0).applyQuaternion(facing.quaternion)
@@ -64,7 +82,14 @@ export const createBallistaVisualRig = (template: THREE.Object3D): BallistaVisua
 
   setShadows(root)
 
-  return { root, yawGroup, cradlePitchGroup, yawPivotLocal, baseForwardYaw }
+  return {
+    root,
+    yawGroup,
+    cradlePitchGroup,
+    arrowAnchor: arrow,
+    yawPivotLocal,
+    baseForwardYaw
+  }
 }
 
 export const updateBallistaRigTracking = (
@@ -74,10 +99,14 @@ export const updateBallistaRigTracking = (
   deltaSeconds: number
 ) => {
   const dt = Math.max(deltaSeconds, 0)
+  let yawError = 0
+  let desiredPitch = IDLE_PITCH_RAD
   if (targetPos) {
     const pivotWorldX = sourcePos.x + rig.yawPivotLocal.x
+    const pivotWorldY = sourcePos.y + rig.yawPivotLocal.y
     const pivotWorldZ = sourcePos.z + rig.yawPivotLocal.z
     const dx = targetPos.x - pivotWorldX
+    const dy = targetPos.y - pivotWorldY
     const dz = targetPos.z - pivotWorldZ
     const horizontalLenSq = dx * dx + dz * dz
     if (horizontalLenSq > 1e-6) {
@@ -90,12 +119,38 @@ export const updateBallistaRigTracking = (
       const maxYawStep = YAW_TURN_SPEED_RAD_PER_SEC * dt
       const clampedYawStep = THREE.MathUtils.clamp(yawDelta, -maxYawStep, maxYawStep)
       rig.yawGroup.rotation.y += clampedYawStep
+      yawError = Math.abs(yawDelta - clampedYawStep)
+      desiredPitch = THREE.MathUtils.clamp(
+        Math.atan2(dy, Math.sqrt(horizontalLenSq)),
+        -MAX_TRACK_PITCH_RAD,
+        MAX_TRACK_PITCH_RAD
+      )
     }
   }
 
-  const targetPitch = targetPos ? 0 : IDLE_PITCH_RAD
-  const pitchDelta = targetPitch - rig.cradlePitchGroup.rotation.z
+  const pitchDelta = desiredPitch - rig.cradlePitchGroup.rotation.z
   const maxPitchStep = PITCH_TURN_SPEED_RAD_PER_SEC * dt
   const clampedPitchStep = THREE.MathUtils.clamp(pitchDelta, -maxPitchStep, maxPitchStep)
   rig.cradlePitchGroup.rotation.z += clampedPitchStep
+  const pitchError = Math.abs(pitchDelta - clampedPitchStep)
+  return {
+    aimAligned: targetPos !== null && yawError <= AIM_LOCK_TOLERANCE_RAD && pitchError <= AIM_LOCK_TOLERANCE_RAD
+  }
+}
+
+export const getBallistaArrowLaunchPosition = (
+  rig: BallistaVisualRig,
+  out: THREE.Vector3
+) => {
+  rig.arrowAnchor.getWorldPosition(out)
+  return out
+}
+
+export const getBallistaArrowLaunchTransform = (
+  rig: BallistaVisualRig,
+  outPosition: THREE.Vector3,
+  outQuaternion: THREE.Quaternion
+) => {
+  rig.arrowAnchor.getWorldPosition(outPosition)
+  rig.arrowAnchor.getWorldQuaternion(outQuaternion)
 }

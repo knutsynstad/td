@@ -90,11 +90,21 @@ export type Tower = {
   builtBy: string
   shootCooldown: number
   shootCadence: number
-  laserVisibleTime: number
-  laser: THREE.Mesh
   rangeRing: THREE.Mesh
   typeId: string
   level: number
+}
+
+export type ArrowProjectile = {
+  mesh: THREE.Object3D
+  position: THREE.Vector3
+  velocity: THREE.Vector3
+  gravity: THREE.Vector3
+  gravityDelay: number
+  radius: number
+  ttl: number
+  damage: number
+  sourceTower: Tower
 }
 
 export type StructureState = {

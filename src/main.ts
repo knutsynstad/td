@@ -9,6 +9,7 @@ import castleModelUrl from './assets/models/castle.glb?url'
 import coinModelUrl from './assets/models/coin.glb?url'
 import groundModelUrl from './assets/models/ground.glb?url'
 import mobModelUrl from './assets/models/mob.glb?url'
+import arrowModelUrl from './assets/models/arrow.glb?url'
 import pathCornerInnerModelUrl from './assets/models/path-corner-inner.glb?url'
 import pathCornerOuterModelUrl from './assets/models/path-corner-outer.glb?url'
 import pathEdgeModelUrl from './assets/models/path-edge.glb?url'
@@ -22,6 +23,7 @@ import { StructureStore } from './game/structures'
 import { getTowerType, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
 import type { TowerTypeId, TowerUpgradeId } from './game/TowerTypes'
 import type {
+  ArrowProjectile,
   DestructibleCollider,
   Entity,
   MobEntity,
@@ -63,6 +65,12 @@ import {
 import {
   DECAY_GRACE_MS,
   DECAY_HP_PER_HOUR,
+  BALLISTA_ARROW_GRAVITY,
+  BALLISTA_ARROW_DIRECT_AIM_DISTANCE,
+  BALLISTA_ARROW_GRAVITY_DELAY,
+  BALLISTA_ARROW_MAX_LIFETIME,
+  BALLISTA_ARROW_RADIUS,
+  BALLISTA_ARROW_SPEED,
   ENERGY_CAP,
   ENERGY_COST_DELETE_TOWER,
   ENERGY_COST_DELETE_WALL,
@@ -110,7 +118,12 @@ import { createGameState } from './game/state/GameState'
 import { createInputController } from './input/InputController'
 import { updateHud } from './presentation/HudPresenter'
 import { renderVisibleMobInstances } from './presentation/RenderCoordinator'
-import { createBallistaVisualRig, updateBallistaRigTracking, type BallistaVisualRig } from './presentation/ballistaRig'
+import {
+  createBallistaVisualRig,
+  getBallistaArrowLaunchTransform,
+  updateBallistaRigTracking,
+  type BallistaVisualRig
+} from './presentation/ballistaRig'
 import { createWaveAndSpawnSystem } from './game/systems/WaveAndSpawnSystem'
 import {
   assertEnergyInBounds,
@@ -1043,33 +1056,13 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
 
 const gltfLoader = new GLTFLoader()
 let towerModelTemplate: THREE.Object3D | null = null
+let arrowModelTemplate: THREE.Object3D | null = null
 let treeModelTemplate: THREE.Object3D | null = null
 let coinModelTemplate: THREE.Object3D | null = null
 let wallModelTemplate: THREE.Object3D | null = null
+const arrowFacingAnchorLocalPos = new THREE.Vector3()
+const arrowFacingForwardLocal = new THREE.Vector3(0, 1, 0)
 const towerBallistaRigs = new Map<Tower, BallistaVisualRig>()
-
-const prepareStaticModel = (source: THREE.Object3D, targetSize: THREE.Vector3) => {
-  const model = source.clone(true)
-  const initialBounds = new THREE.Box3().setFromObject(model)
-  if (initialBounds.isEmpty()) return model
-  const initialSize = new THREE.Vector3()
-  initialBounds.getSize(initialSize)
-  const footprint = Math.max(initialSize.x, initialSize.z, 0.001)
-  const targetFootprint = targetSize.x * 0.9
-  const uniformScale = targetFootprint / footprint
-  model.scale.multiplyScalar(uniformScale)
-
-  const fittedBounds = new THREE.Box3().setFromObject(model)
-  const fittedCenter = new THREE.Vector3()
-  fittedBounds.getCenter(fittedCenter)
-  model.position.set(-fittedCenter.x, -fittedBounds.min.y, -fittedCenter.z)
-  model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return
-    child.castShadow = true
-    child.receiveShadow = true
-  })
-  return model
-}
 
 const prepareStaticModelPreserveScale = (source: THREE.Object3D) => {
   const model = source.clone(true)
@@ -1311,6 +1304,18 @@ gltfLoader.load(
 )
 
 gltfLoader.load(
+  arrowModelUrl,
+  (gltf) => {
+    arrowModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
+    updateArrowFacingFromTemplate(arrowModelTemplate)
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load arrow model:', error)
+  }
+)
+
+gltfLoader.load(
   treeModelUrl,
   (gltf) => {
     treeModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
@@ -1403,6 +1408,7 @@ gltfLoader.load(
 )
 const mobs: MobEntity[] = []
 const towers: Tower[] = []
+const activeArrowProjectiles: ArrowProjectile[] = []
 let selectedTower: Tower | null = null
 const structureStore = new StructureStore(
   scene,
@@ -1410,6 +1416,12 @@ const structureStore = new StructureStore(
   towers,
   (tower) => {
     if (selectedTower === tower) selectedTower = null
+    for (let i = activeArrowProjectiles.length - 1; i >= 0; i -= 1) {
+      const projectile = activeArrowProjectiles[i]!
+      if (projectile.sourceTower !== tower) continue
+      scene.remove(projectile.mesh)
+      activeArrowProjectiles.splice(i, 1)
+    }
   },
   (added, removed = []) => applyObstacleDelta(added, removed)
 )
@@ -1480,6 +1492,60 @@ const computeFacingYawFromTemplate = (source: THREE.Object3D) => {
   if (mobFacingDirectionScratch.lengthSq() < 1e-9) return 0
   mobFacingDirectionScratch.normalize()
   return Math.atan2(mobFacingDirectionScratch.x, mobFacingDirectionScratch.z)
+}
+
+const getObjectByNameCaseInsensitive = (source: THREE.Object3D, targetName: string) => {
+  const direct = source.getObjectByName(targetName)
+  if (direct) return direct
+  const lowered = targetName.toLowerCase()
+  let match: THREE.Object3D | null = null
+  source.traverse((child) => {
+    if (match) return
+    if ((child.name || '').toLowerCase() !== lowered) return
+    match = child
+  })
+  return match
+}
+
+const findFacingMarker = (source: THREE.Object3D) => {
+  const exact = getObjectByNameCaseInsensitive(source, 'Facing')
+  if (exact) return exact
+  let prefixMatch: THREE.Object3D | null = null
+  source.traverse((child) => {
+    if (prefixMatch) return
+    const name = (child.name || '').toLowerCase()
+    if (!name.startsWith('facing')) return
+    prefixMatch = child
+  })
+  return prefixMatch
+}
+
+const updateArrowFacingFromTemplate = (source: THREE.Object3D) => {
+  source.updateMatrixWorld(true)
+  const facing = findFacingMarker(source)
+  if (!facing) {
+    arrowFacingAnchorLocalPos.set(0, 0, 0)
+    arrowFacingForwardLocal.set(0, 1, 0)
+    return
+  }
+  const sourceInverse = new THREE.Matrix4().copy(source.matrixWorld).invert()
+  const facingLocalMatrix = new THREE.Matrix4().multiplyMatrices(sourceInverse, facing.matrixWorld)
+  const facingLocalQuaternion = new THREE.Quaternion()
+  const facingLocalScale = new THREE.Vector3()
+  facingLocalMatrix.decompose(
+    arrowFacingAnchorLocalPos,
+    facingLocalQuaternion,
+    facingLocalScale
+  )
+  const directionFromPosition = arrowFacingAnchorLocalPos.clone()
+  const directionFromRotation = new THREE.Vector3(0, 1, 0).applyQuaternion(facingLocalQuaternion)
+  if (directionFromPosition.lengthSq() > 1e-9) {
+    arrowFacingForwardLocal.copy(directionFromPosition).normalize()
+  } else if (directionFromRotation.lengthSq() > 1e-9) {
+    arrowFacingForwardLocal.copy(directionFromRotation).normalize()
+  } else {
+    arrowFacingForwardLocal.set(0, 1, 0)
+  }
 }
 
 const applyMobVisualTemplate = (source: THREE.Object3D) => {
@@ -1776,8 +1842,6 @@ laser.visible = false
 laser.rotation.order = 'YXZ'
 scene.add(laser)
 
-const towerLaserMaterial = new THREE.MeshBasicMaterial({ color: 0x7ad1ff })
-const towerLaserGeometry = new THREE.CylinderGeometry(0.06, 0.06, 1, 8)
 const towerRangeMaterial = new THREE.MeshBasicMaterial({
   color: 0x7ad1ff,
   transparent: true,
@@ -1896,11 +1960,6 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
   rangeRing.visible = false
   scene.add(rangeRing)
 
-  const towerLaser = new THREE.Mesh(towerLaserGeometry, towerLaserMaterial)
-  towerLaser.visible = false
-  towerLaser.rotation.order = 'YXZ'
-  scene.add(towerLaser)
-
   const tower: Tower = {
     mesh,
     range: typeConfig.range,
@@ -1912,8 +1971,6 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
     builtBy,
     shootCooldown: 0,
     shootCadence: typeConfig.shootCadence,
-    laserVisibleTime: 0,
-    laser: towerLaser,
     rangeRing,
     typeId,
     level: typeConfig.level
@@ -2605,6 +2662,126 @@ const updateEnergyTrails = (delta: number) => {
   }
 }
 
+const towerArrowGravity = new THREE.Vector3(0, -BALLISTA_ARROW_GRAVITY, 0)
+const towerLaunchPosScratch = new THREE.Vector3()
+const towerLaunchQuatScratch = new THREE.Quaternion()
+const towerTargetPosScratch = new THREE.Vector3()
+const towerAimPointScratch = new THREE.Vector3()
+const projectilePrevPosScratch = new THREE.Vector3()
+const projectileStepScratch = new THREE.Vector3()
+const projectileClosestPointScratch = new THREE.Vector3()
+const projectileDeltaScratch = new THREE.Vector3()
+const projectileMobCenterScratch = new THREE.Vector3()
+const projectileHitPointScratch = new THREE.Vector3()
+const arrowFacingDirectionScratch = new THREE.Vector3()
+const arrowOrientSourceAxisScratch = new THREE.Vector3()
+const arrowDesiredFacingQuaternionScratch = new THREE.Quaternion()
+const arrowOffsetWorldScratch = new THREE.Vector3()
+
+const orientArrowToVelocity = (object: THREE.Object3D, velocity: THREE.Vector3) => {
+  if (velocity.lengthSq() < 1e-8) return
+  arrowFacingDirectionScratch.copy(velocity).normalize()
+  // Runtime logs show authored Facing +Y is opposite travel; invert basis once here.
+  arrowOrientSourceAxisScratch.copy(arrowFacingForwardLocal).multiplyScalar(-1)
+  arrowDesiredFacingQuaternionScratch.setFromUnitVectors(
+    arrowOrientSourceAxisScratch,
+    arrowFacingDirectionScratch
+  )
+  object.quaternion.copy(arrowDesiredFacingQuaternionScratch)
+}
+
+const placeArrowMeshAtFacing = (object: THREE.Object3D, facingPosition: THREE.Vector3) => {
+  arrowOffsetWorldScratch.copy(arrowFacingAnchorLocalPos).applyQuaternion(object.quaternion)
+  object.position.copy(facingPosition).sub(arrowOffsetWorldScratch)
+}
+
+const solveBallisticIntercept = (
+  start: THREE.Vector3,
+  targetPos: THREE.Vector3,
+  targetVelocity: THREE.Vector3,
+  speed: number,
+  gravity: THREE.Vector3,
+  gravityDelay: number,
+  maxTime: number
+) => {
+  const gravityDisplacementAt = (time: number) => {
+    const activeGravityTime = Math.max(0, time - gravityDelay)
+    return 0.5 * activeGravityTime * activeGravityTime
+  }
+  const evaluate = (time: number) => {
+    towerAimPointScratch.copy(targetPos)
+      .addScaledVector(targetVelocity, time)
+      .sub(start)
+      .addScaledVector(gravity, -gravityDisplacementAt(time))
+    return towerAimPointScratch.lengthSq() - speed * speed * time * time
+  }
+
+  const minTime = 0.06
+  const step = 0.04
+  let prevTime = minTime
+  let prevValue = evaluate(prevTime)
+  if (Math.abs(prevValue) < 1e-3) {
+    const hitTime = prevTime
+    const interceptPoint = targetPos.clone().addScaledVector(targetVelocity, hitTime)
+    const velocity = interceptPoint.clone()
+      .sub(start)
+      .addScaledVector(gravity, -gravityDisplacementAt(hitTime))
+      .divideScalar(hitTime)
+    return { hitTime, interceptPoint, velocity }
+  }
+
+  for (let t = minTime + step; t <= maxTime; t += step) {
+    const value = evaluate(t)
+    if (prevValue === 0 || value === 0 || prevValue * value < 0) {
+      let lo = prevTime
+      let hi = t
+      let loValue = prevValue
+      for (let i = 0; i < 16; i += 1) {
+        const mid = (lo + hi) * 0.5
+        const midValue = evaluate(mid)
+        if (Math.abs(midValue) < 1e-4) {
+          lo = mid
+          hi = mid
+          break
+        }
+        if (loValue * midValue <= 0) {
+          hi = mid
+        } else {
+          lo = mid
+          loValue = midValue
+        }
+      }
+      const hitTime = (lo + hi) * 0.5
+      const interceptPoint = targetPos.clone().addScaledVector(targetVelocity, hitTime)
+      const velocity = interceptPoint.clone()
+        .sub(start)
+        .addScaledVector(gravity, -gravityDisplacementAt(hitTime))
+        .divideScalar(hitTime)
+      return { hitTime, interceptPoint, velocity }
+    }
+    prevTime = t
+    prevValue = value
+  }
+  return null
+}
+
+const computeFallbackBallisticVelocity = (
+  start: THREE.Vector3,
+  targetPos: THREE.Vector3,
+  gravity: THREE.Vector3,
+  gravityDelay: number,
+  speed: number,
+  maxTime: number
+) => {
+  const travelTime = THREE.MathUtils.clamp(start.distanceTo(targetPos) / Math.max(speed, 0.001), 0.08, maxTime)
+  const activeGravityTime = Math.max(0, travelTime - gravityDelay)
+  const gravityDisplacement = 0.5 * activeGravityTime * activeGravityTime
+  return targetPos.clone()
+    .sub(start)
+    .addScaledVector(gravity, -gravityDisplacement)
+    .divideScalar(travelTime)
+}
+
 const rollAttackDamage = (baseDamage: number) => {
   const isCrit = Math.random() < CRIT_CHANCE
   return {
@@ -3288,6 +3465,10 @@ const resetGame = () => {
     if (towers.includes(tower)) continue
     towerBallistaRigs.delete(tower)
   }
+  for (const projectile of activeArrowProjectiles) {
+    scene.remove(projectile.mesh)
+  }
+  activeArrowProjectiles.length = 0
 
   for (const trail of activeEnergyTrails) {
     coinTrailScene.remove(trail.mesh)
@@ -3507,6 +3688,111 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 
 const pickSelectedMob = () => pickMobInRange(player.mesh.position, SELECTION_RADIUS)
 
+const getTowerLaunchTransform = (
+  tower: Tower,
+  rig: BallistaVisualRig | undefined,
+  outPosition: THREE.Vector3,
+  outQuaternion: THREE.Quaternion
+) => {
+  if (rig) {
+    rig.root.updateMatrixWorld(true)
+    getBallistaArrowLaunchTransform(rig, outPosition, outQuaternion)
+    return
+  }
+  outPosition.copy(tower.mesh.position)
+  outPosition.y += TOWER_HEIGHT * 0.5
+  outQuaternion.identity()
+}
+
+const spawnTowerArrowProjectile = (
+  tower: Tower,
+  launchPos: THREE.Vector3,
+  launchQuaternion: THREE.Quaternion,
+  launchVelocity: THREE.Vector3
+) => {
+  if (!arrowModelTemplate) return
+  const mesh = arrowModelTemplate.clone(true)
+  mesh.quaternion.copy(launchQuaternion)
+  orientArrowToVelocity(mesh, launchVelocity)
+  placeArrowMeshAtFacing(mesh, launchPos)
+  scene.add(mesh)
+  activeArrowProjectiles.push({
+    mesh,
+    position: launchPos.clone(),
+    velocity: launchVelocity.clone(),
+    gravity: towerArrowGravity,
+    gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
+    radius: BALLISTA_ARROW_RADIUS,
+    ttl: BALLISTA_ARROW_MAX_LIFETIME,
+    damage: tower.damage,
+    sourceTower: tower
+  })
+}
+
+const updateTowerArrowProjectiles = (delta: number) => {
+  for (let i = activeArrowProjectiles.length - 1; i >= 0; i -= 1) {
+    const projectile = activeArrowProjectiles[i]!
+    projectile.ttl -= delta
+    if (projectile.ttl <= 0) {
+      scene.remove(projectile.mesh)
+      activeArrowProjectiles.splice(i, 1)
+      continue
+    }
+
+    projectilePrevPosScratch.copy(projectile.position)
+    let gravityDt = delta
+    if (projectile.gravityDelay > 0) {
+      const delayStep = Math.min(projectile.gravityDelay, delta)
+      projectile.gravityDelay -= delayStep
+      gravityDt = delta - delayStep
+    }
+    if (gravityDt > 0) {
+      projectile.velocity.addScaledVector(projectile.gravity, gravityDt)
+    }
+    projectile.position.addScaledVector(projectile.velocity, delta)
+    orientArrowToVelocity(projectile.mesh, projectile.velocity)
+    placeArrowMeshAtFacing(projectile.mesh, projectile.position)
+
+    projectileStepScratch.copy(projectile.position).sub(projectilePrevPosScratch)
+    const segmentLenSq = projectileStepScratch.lengthSq()
+    let hitMob: MobEntity | null = null
+    let bestT = Number.POSITIVE_INFINITY
+
+    for (const mob of mobs) {
+      if ((mob.hp ?? 0) <= 0) continue
+      projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3)
+      const combinedRadius = mob.radius + projectile.radius
+      let t = 0
+      if (segmentLenSq > 1e-8) {
+        projectileDeltaScratch.copy(projectileMobCenterScratch).sub(projectilePrevPosScratch)
+        t = THREE.MathUtils.clamp(projectileDeltaScratch.dot(projectileStepScratch) / segmentLenSq, 0, 1)
+      }
+      projectileClosestPointScratch.copy(projectilePrevPosScratch).addScaledVector(projectileStepScratch, t)
+      if (projectileClosestPointScratch.distanceToSquared(projectileMobCenterScratch) > combinedRadius * combinedRadius) continue
+      if (t < bestT) {
+        bestT = t
+        hitMob = mob
+        projectileHitPointScratch.copy(projectileClosestPointScratch)
+      }
+    }
+
+    if (!hitMob) continue
+    projectile.position.copy(projectileHitPointScratch)
+    placeArrowMeshAtFacing(projectile.mesh, projectile.position)
+    const attack = rollAttackDamage(projectile.damage)
+    const prevHp = hitMob.hp ?? 1
+    const nextHp = prevHp - attack.damage
+    hitMob.hp = nextHp
+    hitMob.lastHitBy = 'tower'
+    spawnFloatingDamageText(hitMob, attack.damage, 'tower', attack.isCrit)
+    if (prevHp > 0 && nextHp <= 0) {
+      projectile.sourceTower.killCount += 1
+    }
+    scene.remove(projectile.mesh)
+    activeArrowProjectiles.splice(i, 1)
+  }
+}
+
 const updateMobInstanceRender = (now: number) => {
   renderVisibleMobInstances({
     mobs,
@@ -3642,41 +3928,59 @@ const tick = (now: number, delta: number) => {
 
   for (const tower of towers) {
     tower.shootCooldown = Math.max(tower.shootCooldown - delta, 0)
-    tower.laserVisibleTime = Math.max(tower.laserVisibleTime - delta, 0)
-
     const target = pickMobInRange(tower.mesh.position, tower.range)
     const rig = towerBallistaRigs.get(tower)
-    if (rig) {
-      updateBallistaRigTracking(rig, tower.mesh.position, target ? target.mesh.position : null, delta)
-    }
+    let trackedAimPoint: THREE.Vector3 | null = null
+    let canFire = true
     if (target) {
-      const start = tower.mesh.position.clone().setY(tower.mesh.position.y + TOWER_HEIGHT * 0.5)
-      const end = target.mesh.position.clone().setY(target.baseY + 0.3)
-      const direction = new THREE.Vector3().subVectors(end, start)
-      const length = direction.length()
-
-      tower.laser.position.copy(start).add(end).multiplyScalar(0.5)
-      tower.laser.scale.set(1, length, 1)
-      tower.laser.lookAt(end)
-      tower.laser.rotateX(Math.PI / 2)
-
-      if (tower.shootCooldown <= 0) {
-        const attack = rollAttackDamage(tower.damage)
-        const prevHp = target.hp ?? 1
-        const nextHp = prevHp - attack.damage
-        target.hp = nextHp
-        target.lastHitBy = 'tower'
-        spawnFloatingDamageText(target, attack.damage, 'tower', attack.isCrit)
-        if (prevHp > 0 && nextHp <= 0) {
-          tower.killCount += 1
-        }
-        tower.shootCooldown = tower.shootCadence
-        tower.laserVisibleTime = 0.07
+      getTowerLaunchTransform(
+        tower,
+        rig,
+        towerLaunchPosScratch,
+        towerLaunchQuatScratch
+      )
+      towerTargetPosScratch.copy(target.mesh.position).setY(target.baseY + 0.3)
+      const closeRangeDirectAim = towerLaunchPosScratch.distanceTo(towerTargetPosScratch) <= BALLISTA_ARROW_DIRECT_AIM_DISTANCE
+      const intercept = closeRangeDirectAim
+        ? null
+        : solveBallisticIntercept(
+          towerLaunchPosScratch,
+          towerTargetPosScratch,
+          target.velocity,
+          BALLISTA_ARROW_SPEED,
+          towerArrowGravity,
+          BALLISTA_ARROW_GRAVITY_DELAY,
+          BALLISTA_ARROW_MAX_LIFETIME
+        )
+      trackedAimPoint = intercept?.interceptPoint ?? towerTargetPosScratch
+      if (rig) {
+        canFire = updateBallistaRigTracking(rig, tower.mesh.position, trackedAimPoint, delta).aimAligned
       }
+      if (tower.shootCooldown <= 0 && arrowModelTemplate && canFire) {
+        const launchVelocity = closeRangeDirectAim
+          ? towerTargetPosScratch.clone().sub(towerLaunchPosScratch).normalize().multiplyScalar(BALLISTA_ARROW_SPEED)
+          : intercept?.velocity
+            ?? computeFallbackBallisticVelocity(
+              towerLaunchPosScratch,
+              towerTargetPosScratch,
+              towerArrowGravity,
+              BALLISTA_ARROW_GRAVITY_DELAY,
+              BALLISTA_ARROW_SPEED,
+              BALLISTA_ARROW_MAX_LIFETIME
+            )
+        spawnTowerArrowProjectile(
+          tower,
+          towerLaunchPosScratch,
+          towerLaunchQuatScratch,
+          launchVelocity
+        )
+        tower.shootCooldown = tower.shootCadence
+      }
+    } else if (rig) {
+      updateBallistaRigTracking(rig, tower.mesh.position, trackedAimPoint, delta)
     }
-
-    tower.laser.visible = tower.laserVisibleTime > 0 && target !== null
   }
+  updateTowerArrowProjectiles(delta)
 
   // Only check collisions between entities in nearby cells
   const processed = new Set<Entity>()
@@ -3952,8 +4256,10 @@ const disposeApp = () => {
   clearMobDeathVisuals()
   mobLogicGeometry.dispose()
   mobLogicMaterial.dispose()
-  towerLaserGeometry.dispose()
-  towerLaserMaterial.dispose()
+  for (const projectile of activeArrowProjectiles) {
+    scene.remove(projectile.mesh)
+  }
+  activeArrowProjectiles.length = 0
   towerRangeMaterial.dispose()
 
   scene.remove(ground)

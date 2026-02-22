@@ -6,7 +6,6 @@ import type { StaticCollider, Tower } from '../src/game/types'
 const makeTower = (): Tower => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial())
   const rangeRing = new THREE.Mesh(new THREE.RingGeometry(4, 5, 16), new THREE.MeshBasicMaterial())
-  const laser = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1, 8), new THREE.MeshBasicMaterial())
   return {
     mesh,
     range: 5,
@@ -18,8 +17,6 @@ const makeTower = (): Tower => {
     builtBy: 'test',
     shootCooldown: 0,
     shootCadence: 0.25,
-    laserVisibleTime: 0,
-    laser,
     rangeRing,
     typeId: 'base',
     level: 1

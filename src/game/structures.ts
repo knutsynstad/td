@@ -146,7 +146,6 @@ export class StructureStore {
 
     if (state.tower) {
       this.scene.remove(state.tower.rangeRing)
-      this.scene.remove(state.tower.laser)
       state.tower.rangeRing.geometry.dispose()
       const towerIdx = this.towers.indexOf(state.tower)
       if (towerIdx >= 0) this.towers.splice(towerIdx, 1)
