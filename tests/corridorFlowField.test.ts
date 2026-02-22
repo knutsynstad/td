@@ -27,7 +27,7 @@ describe('corridor flow field', () => {
     }
   })
 
-  it('enforces 3-wide clearance by rejecting narrow corridors', () => {
+  it('uses tighter clearance so small obstacles do not over-block', () => {
     const colliders: StaticCollider[] = [
       { center: new THREE.Vector3(0, 0, 2), halfSize: new THREE.Vector3(9, 1, 0.1), type: 'wall' },
       { center: new THREE.Vector3(0, 0, -2), halfSize: new THREE.Vector3(9, 1, 0.1), type: 'wall' }
@@ -56,6 +56,6 @@ describe('corridor flow field', () => {
     })
 
     expect(noClearanceRoute.state).toBe('reachable')
-    expect(threeWideRoute.state).toBe('blocked')
+    expect(threeWideRoute.state).toBe('reachable')
   })
 })

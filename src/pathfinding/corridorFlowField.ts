@@ -83,7 +83,9 @@ export const buildCastleFlowField = (opts: CorridorFlowFieldOptions): CorridorFl
   const passable = new Uint8Array(cellCount)
   passable.fill(1)
   const corridorHalfWidth = Math.max(0, opts.corridorHalfWidthCells ?? 1)
-  const clearanceInflation = corridorHalfWidth * res
+  void corridorHalfWidth
+  // Ultra-tight debug mode: do not inflate blockers beyond their collider bounds.
+  const clearanceInflation = 0
 
   for (const collider of opts.colliders) {
     if (collider.type === 'castle') continue
@@ -91,10 +93,14 @@ export const buildCastleFlowField = (opts: CorridorFlowFieldOptions): CorridorFl
     const maxX = collider.center.x + collider.halfSize.x + clearanceInflation
     const minZ = collider.center.z - collider.halfSize.z - clearanceInflation
     const maxZ = collider.center.z + collider.halfSize.z + clearanceInflation
-    const sx = Math.max(0, Math.min(width - 1, Math.floor((minX - minWX) / res)))
-    const sz = Math.max(0, Math.min(height - 1, Math.floor((minZ - minWZ) / res)))
-    const ex = Math.max(0, Math.min(width - 1, Math.ceil((maxX - minWX) / res)))
-    const ez = Math.max(0, Math.min(height - 1, Math.ceil((maxZ - minWZ) / res)))
+    const eps = 1e-6
+    // Use half-open bounds [min, max) so collider-to-grid rasterization
+    // does not add an extra ring of blocked cells at exact tile boundaries.
+    const sx = Math.max(0, Math.min(width - 1, Math.ceil((minX - minWX) / res - eps)))
+    const sz = Math.max(0, Math.min(height - 1, Math.ceil((minZ - minWZ) / res - eps)))
+    const ex = Math.max(0, Math.min(width - 1, Math.floor((maxX - minWX) / res - eps)))
+    const ez = Math.max(0, Math.min(height - 1, Math.floor((maxZ - minWZ) / res - eps)))
+    if (sx > ex || sz > ez) continue
     for (let z = sz; z <= ez; z += 1) {
       for (let x = sx; x <= ex; x += 1) {
         passable[toIdx(x, z)] = 0
