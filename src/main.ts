@@ -122,6 +122,7 @@ const HITBOX_LAYER = 1
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower')
 const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2)
 const MAP_TREE_COUNT = 64
+const SHOW_WORLD_GRID = false
 app.innerHTML = `
   <div id="hud" class="hud">
     <div class="hud-corner hud-corner--top-left">
@@ -504,7 +505,7 @@ class WorldGrid {
 
   constructor() {
     this.group = new THREE.Group()
-    this.lineMaterial = new THREE.LineBasicMaterial({ color: 0x25303a, transparent: true, opacity: 0.35 })
+    this.lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.15 })
     this.halfGrid = GRID_SIZE * 0.5
     scene.add(this.group)
   }
@@ -630,7 +631,7 @@ class SpawnContainerOverlay {
   }
 }
 
-const worldGrid = new WorldGrid()
+const worldGrid = SHOW_WORLD_GRID ? new WorldGrid() : null
 const worldBorder = new WorldBorder()
 const spawnContainerOverlay = new SpawnContainerOverlay()
 const groundTileLayer = new InstancedModelLayer(scene, 20_000, { receiveShadow: true, castShadow: false })
@@ -3209,7 +3210,7 @@ const tick = (now: number, delta: number) => {
   // Update ground + grid to cover the visible camera rectangle
   const visibleBounds = getVisibleGroundBounds(camera)
   updateGroundFromBounds(visibleBounds)
-  worldGrid.update(visibleBounds)
+  worldGrid?.update(visibleBounds)
 
   gameState.energyPopTimer = Math.max(0, gameState.energyPopTimer - delta)
   updateHud(
@@ -3286,7 +3287,7 @@ const disposeApp = () => {
   pathEdgeTileLayer.dispose()
   pathInnerCornerTileLayer.dispose()
   pathOuterCornerTileLayer.dispose()
-  worldGrid.dispose()
+  worldGrid?.dispose()
   worldBorder.dispose()
 
   scene.remove(laser)
