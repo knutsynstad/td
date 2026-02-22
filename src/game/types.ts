@@ -102,4 +102,9 @@ export type StructureState = {
   hp: number
   maxHp: number
   tower?: Tower
+  playerBuilt?: boolean
+  createdAtMs?: number
+  lastDecayTickMs?: number
+  graceUntilMs?: number
+  cumulativeBuildCost?: number
 }

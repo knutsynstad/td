@@ -54,4 +54,26 @@ describe('placement helpers', () => {
     expect(structureStore.wallMeshes).toHaveLength(4)
     expect(structureStore.getDestructibleColliders().filter(collider => collider.type === 'wall')).toHaveLength(4)
   })
+
+  it('marks placed wall segments as player-built decay candidates', () => {
+    const scene = new THREE.Scene()
+    const staticColliders: StaticCollider[] = []
+    const towers: Tower[] = []
+    const structureStore = new StructureStore(scene, staticColliders, towers, () => undefined, () => undefined)
+    const positions = [new THREE.Vector3(12, 0.5, 2)]
+
+    const placed = placeWallSegments(positions, 10, {
+      scene,
+      structureStore,
+      staticColliders,
+      applyObstacleDelta: () => undefined
+    })
+
+    expect(placed).toBe(1)
+    const collider = structureStore.getDestructibleColliders()[0]
+    const state = collider ? structureStore.structureStates.get(collider) : null
+    expect(state?.playerBuilt).toBe(true)
+    expect(state?.cumulativeBuildCost).toBe(2)
+    expect((state?.graceUntilMs ?? 0) > (state?.createdAtMs ?? 0)).toBe(true)
+  })
 })

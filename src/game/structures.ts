@@ -3,6 +3,10 @@ import type { DestructibleCollider, StaticCollider, StructureState, Tower } from
 
 type RemoveTowerCallback = (tower: Tower) => void
 type ObstacleDeltaCallback = (added: StaticCollider[], removed?: StaticCollider[]) => void
+type StructureMetadata = Pick<
+  StructureState,
+  'playerBuilt' | 'createdAtMs' | 'lastDecayTickMs' | 'graceUntilMs' | 'cumulativeBuildCost'
+>
 
 export class StructureStore {
   readonly structureStates = new Map<StaticCollider, StructureState>()
@@ -28,11 +32,17 @@ export class StructureStore {
     this.onObstacleDelta = onObstacleDelta
   }
 
-  addWallCollider(center: THREE.Vector3, halfSize: THREE.Vector3, mesh: THREE.Mesh, hp: number): DestructibleCollider {
+  addWallCollider(
+    center: THREE.Vector3,
+    halfSize: THREE.Vector3,
+    mesh: THREE.Mesh,
+    hp: number,
+    metadata?: StructureMetadata
+  ): DestructibleCollider {
     const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'wall' }
     this.staticColliders.push(collider)
     this.wallMeshes.push(mesh)
-    this.structureStates.set(collider, { mesh, hp, maxHp: hp })
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp, ...metadata })
     this.structureMeshToCollider.set(mesh, collider)
     return collider
   }
@@ -42,27 +52,40 @@ export class StructureStore {
     halfSize: THREE.Vector3,
     mesh: THREE.Mesh,
     tower: Tower,
-    hp: number
+    hp: number,
+    metadata?: StructureMetadata
   ): DestructibleCollider {
     const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'tower' }
     this.staticColliders.push(collider)
-    this.structureStates.set(collider, { mesh, hp, maxHp: hp, tower })
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp, tower, ...metadata })
     this.structureMeshToCollider.set(mesh, collider)
     return collider
   }
 
-  addTreeCollider(center: THREE.Vector3, halfSize: THREE.Vector3, mesh: THREE.Mesh, hp: number): DestructibleCollider {
+  addTreeCollider(
+    center: THREE.Vector3,
+    halfSize: THREE.Vector3,
+    mesh: THREE.Mesh,
+    hp: number,
+    metadata?: StructureMetadata
+  ): DestructibleCollider {
     const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'tree' }
     this.staticColliders.push(collider)
-    this.structureStates.set(collider, { mesh, hp, maxHp: hp })
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp, ...metadata })
     this.structureMeshToCollider.set(mesh, collider)
     return collider
   }
 
-  addRockCollider(center: THREE.Vector3, halfSize: THREE.Vector3, mesh: THREE.Mesh, hp: number): DestructibleCollider {
+  addRockCollider(
+    center: THREE.Vector3,
+    halfSize: THREE.Vector3,
+    mesh: THREE.Mesh,
+    hp: number,
+    metadata?: StructureMetadata
+  ): DestructibleCollider {
     const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'rock' }
     this.staticColliders.push(collider)
-    this.structureStates.set(collider, { mesh, hp, maxHp: hp })
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp, ...metadata })
     this.structureMeshToCollider.set(mesh, collider)
     return collider
   }

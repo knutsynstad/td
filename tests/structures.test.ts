@@ -70,4 +70,32 @@ describe('structure store', () => {
     expect(towers).toHaveLength(0)
     expect(removed).toHaveLength(1)
   })
+
+  it('stores lifecycle metadata for destructible structures', () => {
+    const scene = new THREE.Scene()
+    const staticColliders: StaticCollider[] = []
+    const towers: Tower[] = []
+    const store = new StructureStore(scene, staticColliders, towers, () => undefined, () => undefined)
+
+    const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial())
+    const nowMs = Date.now()
+    const collider = store.addWallCollider(
+      new THREE.Vector3(1, 0.5, 1),
+      new THREE.Vector3(0.5, 0.5, 0.5),
+      wallMesh,
+      100,
+      {
+        playerBuilt: true,
+        createdAtMs: nowMs,
+        lastDecayTickMs: nowMs,
+        graceUntilMs: nowMs + 1000,
+        cumulativeBuildCost: 2
+      }
+    )
+
+    const state = store.structureStates.get(collider)
+    expect(state?.playerBuilt).toBe(true)
+    expect(state?.cumulativeBuildCost).toBe(2)
+    expect(state?.graceUntilMs).toBe(nowMs + 1000)
+  })
 })

@@ -60,6 +60,8 @@ import {
   setSelectedStructures as setSelectedStructuresState
 } from './selection/selection'
 import {
+  DECAY_GRACE_MS,
+  DECAY_HP_PER_HOUR,
   ENERGY_CAP,
   ENERGY_COST_DELETE_TOWER,
   ENERGY_COST_DELETE_WALL,
@@ -86,10 +88,15 @@ import {
   PLAYER_HEIGHT,
   PLAYER_SPEED,
   PLAYER_WIDTH,
+  REPAIR_CRITICAL_HP_RATIO,
+  REPAIR_DISCOUNT_RATE,
+  REPAIR_WARNING_HP_RATIO,
   SELECTION_RADIUS,
   SHOOT_COOLDOWN,
   SHOOT_DAMAGE,
   SPATIAL_GRID_CELL_SIZE,
+  TREE_GROWTH_MS,
+  TREE_REGROW_MS,
   TOWER_HEIGHT,
   TOWER_HP,
   WAVE_MAX_SPAWNERS,
@@ -1155,6 +1162,54 @@ const applyWallVisualToMesh = (mesh: THREE.Mesh) => {
   mesh.receiveShadow = false
 }
 
+const setStructureVisualScale = (mesh: THREE.Mesh, scale: number) => {
+  mesh.scale.setScalar(scale)
+  const linkedVisual = mesh.userData.linkedVisual as THREE.Object3D | undefined
+  if (linkedVisual) {
+    linkedVisual.scale.setScalar(scale)
+  }
+}
+
+const DAMAGE_TINT = new THREE.Color(0xff5d5d)
+const TEMP_BASE_COLOR = new THREE.Color()
+
+const applyStructureDamageVisuals = () => {
+  for (const [collider, state] of structureStore.structureStates) {
+    if (collider.type !== 'wall' && collider.type !== 'tower') continue
+    const hpRatio = state.maxHp <= 0 ? 1 : state.hp / state.maxHp
+    const missingRatio = 1 - clamp(hpRatio, 0, 1)
+    const tintStrength = missingRatio >= REPAIR_WARNING_HP_RATIO
+      ? missingRatio
+      : missingRatio * 0.65
+    const applyTintToMesh = (target: THREE.Mesh) => {
+      const material = target.material
+      const applyTint = (mat: THREE.Material) => {
+        if (!(mat instanceof THREE.MeshStandardMaterial)) return
+        const storedBaseColorHex = mat.userData.damageTintBaseColorHex as number | undefined
+        if (storedBaseColorHex === undefined) {
+          mat.userData.damageTintBaseColorHex = mat.color.getHex()
+        }
+        const baseColorHex = (mat.userData.damageTintBaseColorHex as number | undefined) ?? mat.color.getHex()
+        TEMP_BASE_COLOR.setHex(baseColorHex)
+        mat.color.copy(TEMP_BASE_COLOR).lerp(DAMAGE_TINT, tintStrength)
+      }
+      if (Array.isArray(material)) {
+        for (const mat of material) applyTint(mat)
+        return
+      }
+      applyTint(material)
+    }
+    applyTintToMesh(state.mesh)
+    const linkedVisual = state.mesh.userData.linkedVisual as THREE.Object3D | undefined
+    if (linkedVisual) {
+      linkedVisual.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return
+        applyTintToMesh(node)
+      })
+    }
+  }
+}
+
 const syncHudCoinModel = () => {
   coinHudRoot.clear()
   if (!coinModelTemplate) return
@@ -1874,6 +1929,17 @@ type FloatingDamageText = {
   driftX: number
 }
 
+type TreeRegrowCandidate = {
+  center: THREE.Vector3
+  halfSize: THREE.Vector3
+  dueAtMs: number
+}
+
+type GrowingTree = {
+  mesh: THREE.Mesh
+  startedAtMs: number
+}
+
 const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
   if (upgradeId === 'range') return ENERGY_COST_UPGRADE_RANGE
   if (upgradeId === 'damage') return ENERGY_COST_UPGRADE_DAMAGE
@@ -1882,6 +1948,35 @@ const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
 
 const getDeleteEnergyCost = (collider: DestructibleCollider): number => {
   return collider.type === 'tower' ? ENERGY_COST_DELETE_TOWER : ENERGY_COST_DELETE_WALL
+}
+
+const treeRegrowQueue: TreeRegrowCandidate[] = []
+const growingTrees: GrowingTree[] = []
+
+const getRepairCost = (state: { hp: number, maxHp: number, cumulativeBuildCost?: number }) => {
+  if (state.maxHp <= 0 || state.hp >= state.maxHp) return 0
+  const missingRatio = clamp((state.maxHp - state.hp) / state.maxHp, 0, 1)
+  const cumulativeBuildCost = Math.max(0, state.cumulativeBuildCost ?? 0)
+  return Math.max(1, Math.ceil(cumulativeBuildCost * REPAIR_DISCOUNT_RATE * missingRatio))
+}
+
+const getRepairStatus = (hp: number, maxHp: number): 'healthy' | 'needs_repair' | 'critical' => {
+  if (maxHp <= 0) return 'healthy'
+  const hpRatio = hp / maxHp
+  if (hpRatio <= REPAIR_CRITICAL_HP_RATIO) return 'critical'
+  if (hpRatio < REPAIR_WARNING_HP_RATIO) return 'needs_repair'
+  return 'healthy'
+}
+
+const queueTreeRegrow = (collider: DestructibleCollider) => {
+  if (collider.type !== 'tree') return
+  const hasPending = treeRegrowQueue.some((entry) => entry.center.distanceToSquared(collider.center) < 0.001)
+  if (hasPending) return
+  treeRegrowQueue.push({
+    center: collider.center.clone(),
+    halfSize: collider.halfSize.clone(),
+    dueAtMs: Date.now() + TREE_REGROW_MS
+  })
 }
 
 const particleSystem = createParticleSystem(scene)
@@ -2007,6 +2102,18 @@ const drawMinimap = () => {
     const point = worldToMap(mob.mesh.position.x, mob.mesh.position.z)
     minimapCtx.beginPath()
     minimapCtx.arc(point.x, point.y, 1.8, 0, Math.PI * 2)
+    minimapCtx.fill()
+  }
+
+  for (const [collider, state] of structureStore.structureStates.entries()) {
+    if (collider.type !== 'wall' && collider.type !== 'tower') continue
+    if (state.playerBuilt !== true) continue
+    const hpRatio = state.maxHp <= 0 ? 1 : state.hp / state.maxHp
+    if (hpRatio >= REPAIR_WARNING_HP_RATIO) continue
+    const point = worldToMap(collider.center.x, collider.center.z)
+    minimapCtx.fillStyle = hpRatio <= REPAIR_CRITICAL_HP_RATIO ? '#ff6a6a' : '#ffcf73'
+    minimapCtx.beginPath()
+    minimapCtx.arc(point.x, point.y, 1.4, 0, Math.PI * 2)
     minimapCtx.fill()
   }
 }
@@ -2348,7 +2455,9 @@ const selectionDialog = new SelectionDialog(
     upgradeOptions: [],
     towerDetails: null,
     canRepair: false,
-    canDelete: false
+    canDelete: false,
+    repairCost: null,
+    repairStatus: null
   },
   {
     onDelete: () => {
@@ -2360,6 +2469,7 @@ const selectionDialog = new SelectionDialog(
         return
       }
       for (const collider of colliders) {
+        queueTreeRegrow(collider)
         structureStore.removeStructureCollider(collider)
       }
       clearSelection()
@@ -2375,6 +2485,10 @@ const selectionDialog = new SelectionDialog(
         return
       }
       applyTowerUpgrade(tower, upgradeId)
+      const state = structureStore.structureStates.get(collider)
+      if (state) {
+        state.cumulativeBuildCost = Math.max(0, state.cumulativeBuildCost ?? ENERGY_COST_TOWER) + upgradeCost
+      }
       triggerEventBanner('Upgraded')
     },
     onRepair: () => {
@@ -2385,7 +2499,15 @@ const selectionDialog = new SelectionDialog(
       const state = structureStore.structureStates.get(collider)
       if (!state) return
       if (state.hp >= state.maxHp) return
+      const repairCost = getRepairCost(state)
+      if (!spendEnergy(repairCost)) {
+        triggerEventBanner(`Need ${repairCost} coins`)
+        return
+      }
       state.hp = state.maxHp
+      state.lastDecayTickMs = Date.now()
+      state.graceUntilMs = Date.now() + DECAY_GRACE_MS
+      triggerEventBanner('Repaired')
     }
   }
 )
@@ -2399,6 +2521,7 @@ const updateSelectionDialog = () => {
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
   const selectedType = selectedCollider?.type
   const isNatureSelected = selectedType === 'tree' || selectedType === 'rock'
+  const selectedIsPlayerBuilt = selectedStructureState?.playerBuilt === true
   const deleteCost = inRange.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
   const selectedTowerTypeId = getSelectionTowerTypeId()
   const selectedStructureLabel = selectedType === 'tree'
@@ -2415,6 +2538,12 @@ const updateSelectionDialog = () => {
         canAfford: gameState.energy >= getUpgradeEnergyCost(option.id)
       }))
     : []
+  const repairCost = selectedStructureState && !isNatureSelected && selectedIsPlayerBuilt
+    ? getRepairCost(selectedStructureState)
+    : null
+  const repairStatus = selectedStructureState && !isNatureSelected
+    ? getRepairStatus(selectedStructureState.hp, selectedStructureState.maxHp)
+    : null
 
   selectionDialog.update({
     selectedCount,
@@ -2452,8 +2581,13 @@ const updateSelectionDialog = () => {
     canRepair: !isNatureSelected
       && selectedStructureState !== null
       && selectedStructureState.hp < selectedStructureState.maxHp
-      && inRange.length > 0,
-    canDelete: inRange.length > 0 && gameState.energy >= deleteCost
+      && selectedIsPlayerBuilt
+      && inRange.length > 0
+      && repairCost !== null
+      && gameState.energy >= repairCost,
+    canDelete: inRange.length > 0 && gameState.energy >= deleteCost,
+    repairCost,
+    repairStatus
   })
 }
 
@@ -2592,7 +2726,13 @@ const addMapTower = (center: THREE.Vector3) => {
   const tower = createTowerAt(snapped, 'base', 'Map')
   const mesh = tower.mesh
   markPersistentMapFeature(mesh)
-  structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP)
+  const nowMs = Date.now()
+  structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP, {
+    playerBuilt: false,
+    createdAtMs: nowMs,
+    lastDecayTickMs: nowMs,
+    cumulativeBuildCost: ENERGY_COST_TOWER
+  })
 }
 
 let castleGuardTowersPlaced = false
@@ -2624,7 +2764,7 @@ const placeCastleGuardTowers = () => {
   refreshAllSpawnerPathlines()
 }
 
-const addMapTree = (center: THREE.Vector3) => {
+const addMapTree = (center: THREE.Vector3, initialScale = 1) => {
   const size = TREE_BUILD_SIZE
   const half = size.clone().multiplyScalar(0.5)
   const snapped = snapCenterToBuildGrid(center, size)
@@ -2641,8 +2781,16 @@ const addMapTree = (center: THREE.Vector3) => {
     mesh.castShadow = true
     mesh.receiveShadow = true
   }
+  if (initialScale !== 1) {
+    setStructureVisualScale(mesh, initialScale)
+  }
   scene.add(mesh)
-  structureStore.addTreeCollider(snapped, half, mesh, WALL_HP)
+  const nowMs = Date.now()
+  structureStore.addTreeCollider(snapped, half, mesh, WALL_HP, {
+    playerBuilt: false,
+    createdAtMs: nowMs,
+    lastDecayTickMs: nowMs
+  })
   return true
 }
 
@@ -2675,7 +2823,12 @@ const addMapRock = (center: THREE.Vector3, variant: RockVariant) => {
   mesh.castShadow = true
   mesh.receiveShadow = true
   scene.add(mesh)
-  structureStore.addRockCollider(colliderCenter, half, mesh, WALL_HP)
+  const nowMs = Date.now()
+  structureStore.addRockCollider(colliderCenter, half, mesh, WALL_HP, {
+    playerBuilt: false,
+    createdAtMs: nowMs,
+    lastDecayTickMs: nowMs
+  })
   return true
 }
 
@@ -2749,6 +2902,8 @@ const resetGame = () => {
   for (const collider of toRemove) {
     structureStore.removeStructureCollider(collider)
   }
+  treeRegrowQueue.length = 0
+  growingTrees.length = 0
   populateSeededWorld()
   for (const tower of Array.from(towerBallistaRigs.keys())) {
     if (towers.includes(tower)) continue
@@ -2798,7 +2953,10 @@ const motionSystem = createEntityMotionSystem({
     gridSize: GRID_SIZE
   },
   random,
-  spawnCubeEffects
+  spawnCubeEffects,
+  onStructureDestroyed: (collider) => {
+    queueTreeRegrow(collider)
+  }
 })
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
@@ -2984,6 +3142,69 @@ const updateMobInstanceRender = (now: number) => {
   })
 }
 
+const applyStructureDecay = (nowMs: number) => {
+  const decayPerMs = DECAY_HP_PER_HOUR / (60 * 60 * 1000)
+  const toRemove: DestructibleCollider[] = []
+  for (const [collider, state] of structureStore.structureStates.entries()) {
+    if (collider.type !== 'wall' && collider.type !== 'tower') continue
+    if (state.playerBuilt !== true) continue
+    const graceUntilMs = state.graceUntilMs ?? (state.createdAtMs ?? nowMs) + DECAY_GRACE_MS
+    if (nowMs < graceUntilMs) continue
+    const lastTickMs = state.lastDecayTickMs ?? graceUntilMs
+    const elapsedMs = Math.max(0, nowMs - lastTickMs)
+    if (elapsedMs <= 0) continue
+    state.hp = Math.max(0, state.hp - elapsedMs * decayPerMs)
+    state.lastDecayTickMs = nowMs
+    if (state.hp <= 0) {
+      toRemove.push(collider as DestructibleCollider)
+    }
+  }
+  for (const collider of toRemove) {
+    structureStore.removeStructureCollider(collider)
+  }
+}
+
+const processTreeRegrowth = (nowMs: number) => {
+  for (let i = treeRegrowQueue.length - 1; i >= 0; i -= 1) {
+    const candidate = treeRegrowQueue[i]!
+    if (nowMs < candidate.dueAtMs) continue
+    if (!canPlaceAt(candidate.center, candidate.halfSize, staticColliders)) {
+      candidate.dueAtMs = nowMs + 2000
+      continue
+    }
+    const didRegrow = addMapTree(candidate.center, 0.2)
+    if (didRegrow) {
+      const collider = structureStore.getDestructibleColliders().find((entry) =>
+        entry.type === 'tree'
+        && entry.center.distanceToSquared(candidate.center) < 0.001
+      )
+      const state = collider ? structureStore.structureStates.get(collider) : null
+      if (state) {
+        growingTrees.push({ mesh: state.mesh, startedAtMs: nowMs })
+      }
+      treeRegrowQueue.splice(i, 1)
+    } else {
+      candidate.dueAtMs = nowMs + 2000
+    }
+  }
+}
+
+const updateGrowingTrees = (nowMs: number) => {
+  for (let i = growingTrees.length - 1; i >= 0; i -= 1) {
+    const entry = growingTrees[i]!
+    if (!structureStore.structureMeshToCollider.has(entry.mesh)) {
+      growingTrees.splice(i, 1)
+      continue
+    }
+    const t = clamp((nowMs - entry.startedAtMs) / TREE_GROWTH_MS, 0, 1)
+    const scale = 0.2 + t * 0.8
+    setStructureVisualScale(entry.mesh, scale)
+    if (t >= 1) {
+      growingTrees.splice(i, 1)
+    }
+  }
+}
+
 const tick = (now: number, delta: number) => {
   gameState.energy = Math.min(ENERGY_CAP, gameState.energy + ENERGY_REGEN_RATE * delta)
   if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
@@ -2992,6 +3213,10 @@ const tick = (now: number, delta: number) => {
   if (gameState.buildMode === 'tower' && gameState.energy < ENERGY_COST_TOWER) {
     setBuildMode('off')
   }
+  const wallClockNowMs = Date.now()
+  applyStructureDecay(wallClockNowMs)
+  processTreeRegrowth(wallClockNowMs)
+  updateGrowingTrees(wallClockNowMs)
 
   waveAndSpawnSystem.emit(activeWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
   processSpawnerPathlineQueue()
@@ -3297,6 +3522,7 @@ const tick = (now: number, delta: number) => {
     assertMobSpawnerReferences(mobs, new Set(spawnerById.keys()))
   }
 
+  applyStructureDamageVisuals()
   drawMinimap()
   updateCoinHudView(delta)
   composer.render()

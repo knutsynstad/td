@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import {
   CASTLE_RADIUS,
+  DECAY_GRACE_MS,
   ENERGY_COST_TOWER,
   ENERGY_COST_WALL,
   GRID_SIZE,
@@ -88,9 +89,19 @@ export const placeBuilding = (
   if (energy < requiredEnergy) return { placed: false, energySpent: 0 }
 
   let addedCollider: DestructibleCollider
+  const nowMs = Date.now()
+  const lifecycleMetadata = {
+    playerBuilt: true,
+    createdAtMs: nowMs,
+    lastDecayTickMs: nowMs,
+    graceUntilMs: nowMs + DECAY_GRACE_MS
+  }
   if (isTower) {
     const tower = context.createTowerAt(snapped, 'base')
-    addedCollider = context.structureStore.addTowerCollider(snapped, half, tower.mesh, tower, TOWER_HP)
+    addedCollider = context.structureStore.addTowerCollider(snapped, half, tower.mesh, tower, TOWER_HP, {
+      ...lifecycleMetadata,
+      cumulativeBuildCost: ENERGY_COST_TOWER
+    })
     context.applyObstacleDelta([addedCollider])
     return { placed: true, energySpent: ENERGY_COST_TOWER }
   }
@@ -101,7 +112,10 @@ export const placeBuilding = (
   )
   mesh.position.copy(snapped)
   context.scene.add(mesh)
-  addedCollider = context.structureStore.addWallCollider(snapped, half, mesh, WALL_HP)
+  addedCollider = context.structureStore.addWallCollider(snapped, half, mesh, WALL_HP, {
+    ...lifecycleMetadata,
+    cumulativeBuildCost: ENERGY_COST_WALL
+  })
   context.applyObstacleDelta([addedCollider])
   return { placed: true, energySpent: ENERGY_COST_WALL }
 }
@@ -201,7 +215,14 @@ export const placeWallSegments = (
     )
     mesh.position.copy(pos)
     context.scene.add(mesh)
-    context.structureStore.addWallCollider(pos, WALL_LINE_HALF, mesh, WALL_HP)
+    const nowMs = Date.now()
+    context.structureStore.addWallCollider(pos, WALL_LINE_HALF, mesh, WALL_HP, {
+      playerBuilt: true,
+      createdAtMs: nowMs,
+      lastDecayTickMs: nowMs,
+      graceUntilMs: nowMs + DECAY_GRACE_MS,
+      cumulativeBuildCost: ENERGY_COST_WALL
+    })
     placed += 1
   }
 

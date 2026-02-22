@@ -33,6 +33,8 @@ type SelectionDialogState = {
   } | null
   canRepair: boolean
   canDelete: boolean
+  repairCost: number | null
+  repairStatus: 'healthy' | 'needs_repair' | 'critical' | null
 }
 
 type SelectionDialogActions = {
@@ -76,7 +78,9 @@ export class SelectionDialog {
       upgradeOptions,
       towerDetails,
       canDelete,
-      canRepair
+      canRepair,
+      repairCost,
+      repairStatus
     } = this.state
     if (selectedCount === 0 || inRangeCount === 0) {
       this.root.style.display = 'none'
@@ -161,10 +165,22 @@ export class SelectionDialog {
     const statusMarkup = noUpgradesLeftMarkup
       ? `<div class="selection-dialog__group selection-dialog__group--status">${noUpgradesLeftMarkup}</div>`
       : ''
+    const repairStatusLabel = repairStatus === 'critical'
+      ? 'Critical'
+      : repairStatus === 'needs_repair'
+        ? 'Needs Repair'
+        : 'Healthy'
+    const repairInfoMarkup = showRepair
+      ? `<div class="selection-dialog__meta selection-dialog__repair-meta">
+          <span class="selection-dialog__repair-status selection-dialog__repair-status--${repairStatus ?? 'healthy'}">${repairStatusLabel}</span>
+          ${repairCost !== null ? `<span class="selection-dialog__repair-cost">Repair ${ENERGY_SYMBOL}${repairCost}</span>` : ''}
+        </div>`
+      : ''
 
     this.root.innerHTML = `
       <div class="selection-dialog__title">${titleMarkup}</div>
       ${summaryMarkup}
+      ${repairInfoMarkup}
       ${statsMarkup}
       ${statusMarkup}
       <div class="selection-dialog__action-bar">
@@ -173,7 +189,7 @@ export class SelectionDialog {
         </button>
         ${showRepair
           ? `<button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-               Repair
+               ${repairCost !== null ? `Repair ${ENERGY_SYMBOL}${repairCost}` : 'Repair'}
              </button>`
           : ''}
       </div>

@@ -97,6 +97,35 @@ canvas {
   line-height: 1.35;
 }
 
+.selection-dialog__repair-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: -2px;
+  margin-bottom: 2px;
+}
+
+.selection-dialog__repair-status {
+  font-weight: 700;
+}
+
+.selection-dialog__repair-status--healthy {
+  color: rgba(113, 231, 150, 0.92);
+}
+
+.selection-dialog__repair-status--needs_repair {
+  color: rgba(255, 204, 107, 0.95);
+}
+
+.selection-dialog__repair-status--critical {
+  color: rgba(255, 120, 120, 0.96);
+}
+
+.selection-dialog__repair-cost {
+  opacity: 0.92;
+}
+
 .selection-dialog__section-title {
   font-size: 0.75rem;
   font-weight: 700;
