@@ -3915,6 +3915,34 @@ const updateGrowingTrees = (nowMs: number) => {
   }
 }
 
+const processCastleCaptures = (now: number) => {
+  for (let i = mobs.length - 1; i >= 0; i -= 1) {
+    const mob = mobs[i]!
+    if (distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) > 0.2) continue
+
+    spawnCubeEffects(mob.mesh.position.clone())
+    gameState.lives = Math.max(gameState.lives - 1, 0)
+    if (mob.spawnerId) {
+      const spawner = spawnerById.get(mob.spawnerId)
+      if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
+    }
+    mobs.splice(i, 1)
+
+    if (gameState.lives === 0) {
+      const deathTax = resetGame(now + CASTLE_FALL_RESTART_DELAY_MS)
+      triggerEventBannerWithSubhead(
+        'Our castle has fallen',
+        `Mobs looted ${deathTax} gold`,
+        undefined,
+        CASTLE_FALL_BANNER_DURATION
+      )
+      return true
+    }
+  }
+
+  return false
+}
+
 const tick = (now: number, delta: number) => {
   gameState.energy = Math.min(ENERGY_CAP, gameState.energy + ENERGY_REGEN_RATE * delta)
   if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
@@ -3958,6 +3986,8 @@ const tick = (now: number, delta: number) => {
     mob.target.set(0, 0, 0)
     updateEntityMotion(mob, delta)
   }
+
+  if (processCastleCaptures(now)) return
 
   spatialGrid.clear()
   const dynamicEntities = [player, ...npcs, ...mobs]
@@ -4047,25 +4077,7 @@ const tick = (now: number, delta: number) => {
 
   for (let i = mobs.length - 1; i >= 0; i -= 1) {
     const mob = mobs[i]!
-    if (distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) <= 0.2) {
-      spawnCubeEffects(mob.mesh.position.clone())
-      gameState.lives = Math.max(gameState.lives - 1, 0)
-      if (mob.spawnerId) {
-        const spawner = spawnerById.get(mob.spawnerId)
-        if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
-      }
-      mobs.splice(i, 1)
-      if (gameState.lives === 0) {
-        const deathTax = resetGame(now + CASTLE_FALL_RESTART_DELAY_MS)
-        triggerEventBannerWithSubhead(
-          'Our castle has fallen',
-          `Mobs looted ${deathTax} gold`,
-          undefined,
-          CASTLE_FALL_BANNER_DURATION
-        )
-        break
-      }
-    } else if ((mob.hp ?? 0) <= 0) {
+    if ((mob.hp ?? 0) <= 0) {
       spawnMobDeathVisual(mob)
       spawnMobDeathEffects(mob.mesh.position.clone())
       if (mob.lastHitBy === 'player') {
