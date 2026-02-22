@@ -26,7 +26,7 @@ export const assertStructureStoreConsistency = (
 ) => {
   const destructibleCount = staticColliders.filter(
     (collider): collider is DestructibleCollider =>
-      collider.type === 'wall' || collider.type === 'tower' || collider.type === 'tree'
+      collider.type === 'wall' || collider.type === 'tower' || collider.type === 'tree' || collider.type === 'rock'
   ).length
   if (store.structureStates.size !== destructibleCount) {
     throw new Error(

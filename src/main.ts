@@ -109,19 +109,17 @@ import {
   assertSpawnerCounts,
   assertStructureStoreConsistency
 } from './game/invariants'
-import { createRandomSource } from './utils/rng'
+import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
+import { generateSeededWorldFeatures, type RockVariant } from './worldgen/seededWorldGen'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
-const seedParam = new URLSearchParams(window.location.search).get('seed')
-const parsedSeed = seedParam === null ? undefined : Number(seedParam)
-const randomSource = createRandomSource(
-  parsedSeed !== undefined && Number.isFinite(parsedSeed) ? parsedSeed : undefined
-)
+const WORLD_SEED_INPUT: string | number = 'alpha valley 01'
+const WORLD_SEED = hashSeed(WORLD_SEED_INPUT)
+const randomSource = createRandomSource(deriveSeed(WORLD_SEED, 'runtime'))
 const random = () => randomSource.next()
 const HITBOX_LAYER = 1
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower')
 const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2)
-const MAP_TREE_COUNT = 64
 const SHOW_WORLD_GRID = false
 app.innerHTML = `
   <div id="hud" class="hud">
@@ -1243,6 +1241,10 @@ const structureStore = new StructureStore(
   (added, removed = []) => applyObstacleDelta(added, removed)
 )
 
+const markPersistentMapFeature = (mesh: THREE.Mesh) => {
+  mesh.userData.persistOnReset = true
+}
+
 // Add basic walls on the map
 const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
   const halfGrid = GRID_SIZE * 0.5
@@ -1276,6 +1278,7 @@ const addMapWall = (center: THREE.Vector3, halfSize: THREE.Vector3) => {
         new THREE.MeshStandardMaterial({ color: 0x7a8a99 })
       )
       mesh.position.copy(tileCenter)
+      markPersistentMapFeature(mesh)
       if (wallModelTemplate) {
         applyWallVisualToMesh(mesh)
       } else {
@@ -2388,7 +2391,7 @@ const selectionDialog = new SelectionDialog(
     onRepair: () => {
       const [collider] = selectedStructures.values()
       if (!collider) return
-      if (collider.type === 'tree') return
+      if (collider.type === 'tree' || collider.type === 'rock') return
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return
       const state = structureStore.structureStates.get(collider)
       if (!state) return
@@ -2405,10 +2408,15 @@ const updateSelectionDialog = () => {
   const tower = getSingleSelectedTower()
   const [selectedCollider] = selectedStructures.values()
   const selectedStructureState = selectedCollider ? (structureStore.structureStates.get(selectedCollider) ?? null) : null
-  const isTreeSelected = selectedCollider?.type === 'tree'
+  const selectedType = selectedCollider?.type
+  const isNatureSelected = selectedType === 'tree' || selectedType === 'rock'
   const deleteCost = inRange.reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
   const selectedTowerTypeId = getSelectionTowerTypeId()
-  const selectedStructureLabel = isTreeSelected ? 'Tree' : 'Wall'
+  const selectedStructureLabel = selectedType === 'tree'
+    ? 'Tree'
+    : selectedType === 'rock'
+      ? 'Rock'
+      : 'Wall'
   const upgradeOptions = tower
     ? getTowerUpgradeOptions(tower).map(option => ({
         id: option.id,
@@ -2424,7 +2432,7 @@ const updateSelectionDialog = () => {
     inRangeCount: inRange.length,
     selectedTowerTypeId,
     selectedStructureLabel,
-    showRepair: !isTreeSelected,
+    showRepair: !isNatureSelected,
     buildingCoords: selectedCollider
       ? {
           x: Math.round(selectedCollider.center.x),
@@ -2432,7 +2440,7 @@ const updateSelectionDialog = () => {
         }
       : null,
     buildingHealth: selectedStructureState
-      && !isTreeSelected
+      && !isNatureSelected
       ? {
           hp: selectedStructureState.hp,
           maxHp: selectedStructureState.maxHp
@@ -2452,7 +2460,7 @@ const updateSelectionDialog = () => {
           speedLevel: tower.speedLevel
         }
       : null,
-    canRepair: !isTreeSelected
+    canRepair: !isNatureSelected
       && selectedStructureState !== null
       && selectedStructureState.hp < selectedStructureState.maxHp
       && inRange.length > 0,
@@ -2594,6 +2602,7 @@ const addMapTower = (center: THREE.Vector3) => {
   if (!canPlaceAt(snapped, half, staticColliders)) return
   const tower = createTowerAt(snapped, 'base', 'Map')
   const mesh = tower.mesh
+  markPersistentMapFeature(mesh)
   structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP)
 }
 
@@ -2607,6 +2616,7 @@ const addMapTree = (center: THREE.Vector3) => {
     new THREE.MeshStandardMaterial({ color: 0x4f8f46, transparent: true, opacity: treeModelTemplate ? 0.01 : 1 })
   )
   mesh.position.copy(snapped)
+  markPersistentMapFeature(mesh)
   if (treeModelTemplate) {
     applyTreeVisualToMesh(mesh)
   } else {
@@ -2618,15 +2628,50 @@ const addMapTree = (center: THREE.Vector3) => {
   return true
 }
 
-const scatterMapTrees = (count: number) => {
-  let placed = 0
-  let attempts = 0
-  const maxAttempts = count * 20
-  while (placed < count && attempts < maxAttempts) {
-    attempts += 1
-    const x = Math.round((random() * 2 - 1) * (WORLD_BOUNDS - 3))
-    const z = Math.round((random() * 2 - 1) * (WORLD_BOUNDS - 3))
-    if (addMapTree(new THREE.Vector3(x, 0, z))) placed += 1
+const getRockBuildSize = (variant: RockVariant) => {
+  if (variant === 'pebble') return new THREE.Vector3(1, 0.45, 1)
+  if (variant === 'small') return new THREE.Vector3(1, 0.8, 1)
+  if (variant === 'medium') return new THREE.Vector3(2, 1.2, 2)
+  return new THREE.Vector3(3, 1.65, 3)
+}
+
+const getRockColor = (variant: RockVariant) => {
+  if (variant === 'pebble') return 0x7d868f
+  if (variant === 'small') return 0x6f7883
+  if (variant === 'medium') return 0x646d79
+  return 0x545d68
+}
+
+const addMapRock = (center: THREE.Vector3, variant: RockVariant) => {
+  const size = getRockBuildSize(variant)
+  const half = size.clone().multiplyScalar(0.5)
+  const snapped = snapCenterToBuildGrid(center, size)
+  if (!canPlaceAt(snapped, half, staticColliders)) return false
+  const colliderCenter = snapped.clone().setY(half.y)
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x, size.y, size.z),
+    new THREE.MeshStandardMaterial({ color: getRockColor(variant) })
+  )
+  mesh.position.copy(colliderCenter)
+  markPersistentMapFeature(mesh)
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  scene.add(mesh)
+  structureStore.addRockCollider(colliderCenter, half, mesh, WALL_HP)
+  return true
+}
+
+const populateSeededWorld = () => {
+  const features = generateSeededWorldFeatures({
+    seed: WORLD_SEED,
+    worldBounds: WORLD_BOUNDS,
+    margin: 3
+  })
+  for (const tree of features.trees) {
+    addMapTree(new THREE.Vector3(tree.x, 0, tree.z))
+  }
+  for (const rock of features.rocks) {
+    addMapRock(new THREE.Vector3(rock.x, 0, rock.z), rock.variant)
   }
 }
 
@@ -2648,7 +2693,7 @@ const prebuiltTowers = [
 for (const pos of prebuiltTowers) {
   addMapTower(pos)
 }
-scatterMapTrees(MAP_TREE_COUNT)
+populateSeededWorld()
 
 // Initialize lane paths for active spawners once map is ready.
 refreshAllSpawnerPathlines()
@@ -2693,45 +2738,22 @@ const resetGame = () => {
   spawnerRouteOverlay.clear()
   spawnContainerOverlay.clear()
   particleSystem.dispose()
-
-  for (const state of structureStore.structureStates.values()) {
-    const linkedVisual = state.mesh.userData.linkedVisual as THREE.Object3D | undefined
-    if (linkedVisual) {
-      scene.remove(linkedVisual)
-      linkedVisual.traverse((node) => {
-        if (!(node instanceof THREE.Mesh)) return
-        node.geometry.dispose()
-        if (Array.isArray(node.material)) {
-          for (const material of node.material) material.dispose()
-        } else {
-          node.material.dispose()
-        }
-      })
-    }
-    scene.remove(state.mesh)
-    state.mesh.traverse((node) => {
-      if (!(node instanceof THREE.Mesh)) return
-      node.geometry.dispose()
-      if (Array.isArray(node.material)) {
-        for (const material of node.material) material.dispose()
-      } else {
-        node.material.dispose()
-      }
-    })
-    if (state.tower) {
-      scene.remove(state.tower.rangeRing)
-      scene.remove(state.tower.laser)
-      state.tower.rangeRing.geometry.dispose()
-    }
+  const toRemove: DestructibleCollider[] = []
+  for (const [collider, state] of structureStore.structureStates.entries()) {
+    if (collider.type === 'castle') continue
+    const isNaturalFeature = collider.type === 'tree' || collider.type === 'rock'
+    const isResetPersistent = state.mesh.userData.persistOnReset === true
+    if (!isNaturalFeature && isResetPersistent) continue
+    toRemove.push(collider as DestructibleCollider)
   }
-  towers.length = 0
-  towerBallistaRigs.clear()
-  structureStore.wallMeshes.length = 0
-  structureStore.structureStates.clear()
-  structureStore.structureMeshToCollider.clear()
-
-  staticColliders.length = 0
-  staticColliders.push(castleCollider)
+  for (const collider of toRemove) {
+    structureStore.removeStructureCollider(collider)
+  }
+  populateSeededWorld()
+  for (const tower of Array.from(towerBallistaRigs.keys())) {
+    if (towers.includes(tower)) continue
+    towerBallistaRigs.delete(tower)
+  }
 
   for (const trail of activeEnergyTrails) {
     coinTrailScene.remove(trail.mesh)

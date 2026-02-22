@@ -59,6 +59,14 @@ export class StructureStore {
     return collider
   }
 
+  addRockCollider(center: THREE.Vector3, halfSize: THREE.Vector3, mesh: THREE.Mesh, hp: number): DestructibleCollider {
+    const collider: DestructibleCollider = { center: center.clone(), halfSize: halfSize.clone(), type: 'rock' }
+    this.staticColliders.push(collider)
+    this.structureStates.set(collider, { mesh, hp, maxHp: hp })
+    this.structureMeshToCollider.set(mesh, collider)
+    return collider
+  }
+
   removeStructureCollider(collider: DestructibleCollider) {
     const state = this.structureStates.get(collider)
     if (!state) return
@@ -127,7 +135,7 @@ export class StructureStore {
   getDestructibleColliders(): DestructibleCollider[] {
     return this.staticColliders.filter(
       (collider): collider is DestructibleCollider =>
-        collider.type === 'wall' || collider.type === 'tower' || collider.type === 'tree'
+        collider.type === 'wall' || collider.type === 'tower' || collider.type === 'tree' || collider.type === 'rock'
     )
   }
 }

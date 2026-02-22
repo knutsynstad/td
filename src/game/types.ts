@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-export type ColliderType = 'castle' | 'wall' | 'tower' | 'tree'
+export type ColliderType = 'castle' | 'wall' | 'tower' | 'tree' | 'rock'
 
 export type NavPoint = { x: number, z: number }
 
@@ -15,7 +15,7 @@ export type StaticCollider = NavCollider & {
   halfSize: THREE.Vector3
 }
 
-export type StructureType = Extract<StaticCollider['type'], 'wall' | 'tower' | 'tree'>
+export type StructureType = Extract<StaticCollider['type'], 'wall' | 'tower' | 'tree' | 'rock'>
 
 export type DestructibleCollider = StaticCollider & {
   type: StructureType
