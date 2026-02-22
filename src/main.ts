@@ -306,20 +306,23 @@ scene.add(hemi)
 const ambient = new THREE.AmbientLight(0xffffff, 0.85)
 scene.add(ambient)
 const dir = new THREE.DirectionalLight(0xffffff, 1.25)
-dir.position.set(18, 10, -14)
+const dirShadowFollowOffset = new THREE.Vector3(18, 10, -14)
+dir.position.copy(dirShadowFollowOffset)
 dir.castShadow = true
 dir.shadow.mapSize.set(2048, 2048)
 dir.shadow.camera.near = 1
-dir.shadow.camera.far = 70
-dir.shadow.camera.left = -24
-dir.shadow.camera.right = 24
-dir.shadow.camera.top = 24
-dir.shadow.camera.bottom = -24
+dir.shadow.camera.far = 100
+dir.shadow.camera.left = -36
+dir.shadow.camera.right = 36
+dir.shadow.camera.top = 36
+dir.shadow.camera.bottom = -36
 dir.shadow.bias = -0.0005
 dir.shadow.normalBias = 0.02
 dir.shadow.radius = 10
 dir.shadow.blurSamples = 16
+dir.shadow.camera.updateProjectionMatrix()
 scene.add(dir)
+scene.add(dir.target)
 
 type GroundBounds = { minX: number, maxX: number, minZ: number, maxZ: number }
 
@@ -3197,6 +3200,12 @@ const tick = (now: number, delta: number) => {
   
   // Only show laser when visibility timer is active
   laser.visible = gameState.laserVisibleTime > 0 && selected !== null
+
+  dir.target.position.copy(player.mesh.position)
+  dir.position.copy(player.mesh.position).add(dirShadowFollowOffset)
+  dir.target.updateMatrixWorld()
+  dir.updateMatrixWorld()
+  dir.shadow.camera.updateMatrixWorld()
 
   camera.position.copy(player.mesh.position).add(cameraOffset)
   camera.lookAt(player.mesh.position)
