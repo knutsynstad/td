@@ -14,7 +14,7 @@ type Preset = {
 
 const ICON_SIZE = 128
 const OUTLINE_PX = 8
-const MARGIN_PX = 3
+const MARGIN_PX = 2
 const FILL_RATIO = 1 - (OUTLINE_PX + MARGIN_PX) / (ICON_SIZE * 0.5)
 
 const presets: Preset[] = [
@@ -178,13 +178,15 @@ renderer.setPixelRatio(1)
 renderer.setSize(ICON_SIZE, ICON_SIZE, false)
 renderer.setClearColor(0x000000, 0)
 renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.2
 
-const ambient = new THREE.AmbientLight(0xffffff, 1.1)
+const ambient = new THREE.AmbientLight(0xffffff, 1.35)
 scene.add(ambient)
-const keyLight = new THREE.DirectionalLight(0xfff7e5, 1.35)
+const keyLight = new THREE.DirectionalLight(0xfff7e5, 1.65)
 keyLight.position.set(1.9, 2.6, 1.8)
 scene.add(keyLight)
-const rimLight = new THREE.DirectionalLight(0xe8f0ff, 0.45)
+const rimLight = new THREE.DirectionalLight(0xe8f0ff, 0.75)
 rimLight.position.set(-1.5, 1.2, -2)
 scene.add(rimLight)
 

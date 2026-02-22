@@ -134,8 +134,8 @@ canvas {
 }
 
 .coin-cost__icon {
-  width: 1.05em;
-  height: 1.05em;
+  width: 1.18em;
+  height: 1.18em;
   display: block;
   flex: 0 0 auto;
 }
@@ -373,6 +373,16 @@ canvas {
   color: #fff;
   font-weight: 600;
   cursor: pointer;
+}
+
+.selection-dialog__action .coin-cost {
+  margin-left: 0;
+  gap: 0;
+}
+
+.selection-dialog__action .coin-cost__icon {
+  width: 1.24em;
+  height: 1.24em;
 }
 
 .selection-dialog__danger {
@@ -763,8 +773,8 @@ canvas {
 }
 
 .hud-badge .coin-cost__icon {
-  width: 0.95em;
-  height: 0.95em;
+  width: 1.1em;
+  height: 1.1em;
 }
 
 .hud-button:hover {
