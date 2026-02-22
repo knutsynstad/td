@@ -87,11 +87,12 @@ export const buildCastleFlowField = (opts: CorridorFlowFieldOptions): CorridorFl
   const clearanceInflation = corridorHalfWidth * res
 
   for (const collider of opts.colliders) {
-    if (collider.type === 'castle') continue
-    const minX = collider.center.x - collider.halfSize.x - clearanceInflation
-    const maxX = collider.center.x + collider.halfSize.x + clearanceInflation
-    const minZ = collider.center.z - collider.halfSize.z - clearanceInflation
-    const maxZ = collider.center.z + collider.halfSize.z + clearanceInflation
+    // Castle should block routing so mobs cannot path through it.
+    const inflation = collider.type === 'castle' ? 0 : clearanceInflation
+    const minX = collider.center.x - collider.halfSize.x - inflation
+    const maxX = collider.center.x + collider.halfSize.x + inflation
+    const minZ = collider.center.z - collider.halfSize.z - inflation
+    const maxZ = collider.center.z + collider.halfSize.z + inflation
     const eps = 1e-6
     // Use half-open bounds [min, max) so collider-to-grid rasterization
     // does not add an extra ring of blocked cells at exact tile boundaries.
