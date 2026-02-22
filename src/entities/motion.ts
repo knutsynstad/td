@@ -10,6 +10,7 @@ type MobConstants = {
   mobBerserkRangeBuffer: number
   mobBerserkUnreachableGrace: number
   worldBounds: number
+  mobStagingBoundsPadding: number
   gridSize: number
 }
 
@@ -140,6 +141,16 @@ export const createEntityMotionSystem = (context: MotionContext) => {
 
   const updateEntityMotion = (entity: Entity, delta: number) => {
     let dir = new THREE.Vector3()
+    if (entity.kind === 'mob' && entity.staged) {
+      entity.velocity.set(0, 0, 0)
+      const boundsPadding = context.constants.mobStagingBoundsPadding
+      const minBound = -context.constants.worldBounds - boundsPadding
+      const maxBound = context.constants.worldBounds + boundsPadding
+      entity.mesh.position.x = clamp(entity.mesh.position.x, minBound, maxBound)
+      entity.mesh.position.z = clamp(entity.mesh.position.z, minBound, maxBound)
+      entity.mesh.position.y = entity.baseY
+      return
+    }
 
     if (entity.kind === 'mob' && entity.waypoints && entity.waypointIndex !== undefined) {
       updateMobBerserkState(entity, delta)
@@ -223,8 +234,26 @@ export const createEntityMotionSystem = (context: MotionContext) => {
       resolveCircleAabb(entity.mesh.position, entity.radius, collider)
     }
 
-    entity.mesh.position.x = clamp(entity.mesh.position.x, -context.constants.worldBounds, context.constants.worldBounds)
-    entity.mesh.position.z = clamp(entity.mesh.position.z, -context.constants.worldBounds, context.constants.worldBounds)
+    const boundsPadding = entity.kind === 'mob' && (
+      entity.staged
+      || Math.abs(entity.mesh.position.x) > context.constants.worldBounds
+      || Math.abs(entity.mesh.position.z) > context.constants.worldBounds
+      || (
+        entity.waypoints !== undefined &&
+        entity.waypointIndex !== undefined &&
+        entity.waypointIndex < entity.waypoints.length &&
+        (
+          Math.abs(entity.waypoints[entity.waypointIndex]!.x) > context.constants.worldBounds
+          || Math.abs(entity.waypoints[entity.waypointIndex]!.z) > context.constants.worldBounds
+        )
+      )
+    )
+      ? context.constants.mobStagingBoundsPadding
+      : 0
+    const minBound = -context.constants.worldBounds - boundsPadding
+    const maxBound = context.constants.worldBounds + boundsPadding
+    entity.mesh.position.x = clamp(entity.mesh.position.x, minBound, maxBound)
+    entity.mesh.position.z = clamp(entity.mesh.position.z, minBound, maxBound)
     entity.mesh.position.y = entity.baseY
   }
 

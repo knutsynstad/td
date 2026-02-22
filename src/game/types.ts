@@ -44,6 +44,7 @@ export type MobEntity = EntityBase & {
   kind: 'mob'
   hp: number
   maxHp: number
+  staged: boolean
   waypoints?: THREE.Vector3[]
   waypointIndex?: number
   siegeAttackCooldown: number
@@ -63,6 +64,7 @@ export type SpawnerRouteState = 'reachable' | 'unstable' | 'blocked'
 export type WaveSpawner = {
   id: string
   position: THREE.Vector3
+  gateOpen: boolean
   totalCount: number
   spawnedCount: number
   aliveCount: number

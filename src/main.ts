@@ -126,7 +126,7 @@ import {
   updateBallistaRigTracking,
   type BallistaVisualRig
 } from './presentation/ballistaRig'
-import { createWaveAndSpawnSystem } from './game/systems/WaveAndSpawnSystem'
+import { createWaveAndSpawnSystem, type PreparedWave } from './game/systems/WaveAndSpawnSystem'
 import {
   assertEnergyInBounds,
   assertMobSpawnerReferences,
@@ -151,6 +151,16 @@ const COIN_PILE_CLUSTER_MAX_PER_CORNER = 5
 const SHOW_WORLD_GRID = false
 const SHOW_FLOW_FIELD_DEBUG = false
 const SHOW_PLAYER_SHOOT_RANGE = false
+const STAGING_ISLAND_DISTANCE = 14
+const STAGING_ISLAND_SIZE = 15
+const STAGING_ISLAND_HEIGHT = 1
+const STAGING_BRIDGE_SIDE_GROUND_ROWS = 1
+const STAGING_BRIDGE_PATH_WIDTH = 3
+const STAGING_BRIDGE_WIDTH = STAGING_BRIDGE_PATH_WIDTH + STAGING_BRIDGE_SIDE_GROUND_ROWS * 2
+const STAGING_BRIDGE_LENGTH = 11
+const STAGING_PLATFORM_Y = Math.max(0, STAGING_ISLAND_HEIGHT - 1)
+const STAGING_GATE_OPEN_DURATION = 0.8
+const MOB_STAGING_BOUNDS_PADDING = STAGING_ISLAND_DISTANCE + STAGING_ISLAND_SIZE * 0.5 + 2
 app.innerHTML = `
   <div id="hud" class="hud">
     <div class="hud-corner hud-corner--top-left">
@@ -676,6 +686,322 @@ class SpawnContainerOverlay {
   }
 }
 
+class StagingIslandsOverlay {
+  private readonly islands = new Map<string, {
+    group: THREE.Group
+    gate: THREE.Mesh
+    gateClosedY: number
+    gateOpenY: number
+    gateProgress: number
+  }>()
+  private readonly islandGroundPositionsBySpawner = new Map<string, THREE.Vector3[]>()
+  private readonly bridgePathKeysBySpawner = new Map<string, Set<string>>()
+  private readonly bridgePathCenterPositionsBySpawner = new Map<string, THREE.Vector3[]>()
+  private readonly bridgePathEdgeTransformsBySpawner = new Map<string, THREE.Matrix4[]>()
+  private readonly bridgePathInnerCornerTransformsBySpawner = new Map<string, THREE.Matrix4[]>()
+  private readonly bridgePathOuterCornerTransformsBySpawner = new Map<string, THREE.Matrix4[]>()
+  private readonly groundLayer = new InstancedModelLayer(scene, 2_500, { receiveShadow: true, castShadow: false })
+  private readonly pathCenterLayer = new InstancedModelLayer(scene, 1_500, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+  private readonly pathEdgeLayer = new InstancedModelLayer(scene, 1_500, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+  private readonly pathInnerCornerLayer = new InstancedModelLayer(scene, 600, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+  private readonly pathOuterCornerLayer = new InstancedModelLayer(scene, 600, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+  private readonly gateClosedMaterial = new THREE.MeshStandardMaterial({ color: 0xb64747, transparent: true, opacity: 0.95 })
+  private readonly gateOpenMaterial = new THREE.MeshStandardMaterial({ color: 0x4bb46a, transparent: true, opacity: 0.9 })
+
+  setGroundTemplate(source: THREE.Object3D | null) {
+    this.groundLayer.setTemplate(source)
+    this.rebuildTileLayers()
+  }
+
+  setPathTemplate(source: THREE.Object3D | null) {
+    this.pathCenterLayer.setTemplate(source)
+    this.rebuildTileLayers()
+  }
+
+  setPathEdgeTemplate(source: THREE.Object3D | null) {
+    this.pathEdgeLayer.setTemplate(source)
+    this.rebuildTileLayers()
+  }
+
+  setPathInnerCornerTemplate(source: THREE.Object3D | null) {
+    this.pathInnerCornerLayer.setTemplate(source)
+    this.rebuildTileLayers()
+  }
+
+  setPathOuterCornerTemplate(source: THREE.Object3D | null) {
+    this.pathOuterCornerLayer.setTemplate(source)
+    this.rebuildTileLayers()
+  }
+
+  private rebuildTileLayers() {
+    const groundTiles: THREE.Vector3[] = []
+    for (const tiles of this.islandGroundPositionsBySpawner.values()) {
+      groundTiles.push(...tiles)
+    }
+    this.groundLayer.setPositions(groundTiles)
+
+    const bridgePathCenterTiles: THREE.Vector3[] = []
+    for (const tiles of this.bridgePathCenterPositionsBySpawner.values()) {
+      bridgePathCenterTiles.push(...tiles)
+    }
+    this.pathCenterLayer.setPositions(bridgePathCenterTiles)
+
+    const bridgePathEdgeTransforms: THREE.Matrix4[] = []
+    for (const transforms of this.bridgePathEdgeTransformsBySpawner.values()) {
+      bridgePathEdgeTransforms.push(...transforms)
+    }
+    this.pathEdgeLayer.setTransforms(bridgePathEdgeTransforms)
+
+    const bridgePathInnerCornerTransforms: THREE.Matrix4[] = []
+    for (const transforms of this.bridgePathInnerCornerTransformsBySpawner.values()) {
+      bridgePathInnerCornerTransforms.push(...transforms)
+    }
+    this.pathInnerCornerLayer.setTransforms(bridgePathInnerCornerTransforms)
+
+    const bridgePathOuterCornerTransforms: THREE.Matrix4[] = []
+    for (const transforms of this.bridgePathOuterCornerTransformsBySpawner.values()) {
+      bridgePathOuterCornerTransforms.push(...transforms)
+    }
+    this.pathOuterCornerLayer.setTransforms(bridgePathOuterCornerTransforms)
+  }
+
+  hasBridgePathAt(x: number, z: number) {
+    const key = `${x},${z}`
+    for (const keys of this.bridgePathKeysBySpawner.values()) {
+      if (keys.has(key)) return true
+    }
+    return false
+  }
+
+  private buildIslandGroundTiles(center: THREE.Vector3) {
+    const out: THREE.Vector3[] = []
+    const baseX = Math.round(center.x)
+    const baseZ = Math.round(center.z)
+    const minOffset = -Math.floor(STAGING_ISLAND_SIZE * 0.5)
+    for (let xStep = 0; xStep < STAGING_ISLAND_SIZE; xStep += 1) {
+      for (let zStep = 0; zStep < STAGING_ISLAND_SIZE; zStep += 1) {
+        out.push(
+          new THREE.Vector3(
+            baseX + minOffset + xStep,
+            STAGING_PLATFORM_Y,
+            baseZ + minOffset + zStep
+          )
+        )
+      }
+    }
+    return out
+  }
+
+  private buildBridgeGroundTiles(center: THREE.Vector3, towardMap: THREE.Vector3, reservePathStrip = true) {
+    const out: THREE.Vector3[] = []
+    const unique = new Set<string>()
+    const tangent = new THREE.Vector3(-towardMap.z, 0, towardMap.x)
+    const islandHalf = STAGING_ISLAND_SIZE * 0.5
+    const bridgeHalf = Math.max(0, Math.floor(STAGING_BRIDGE_WIDTH * 0.5))
+    const pathHalf = Math.max(0, Math.floor(STAGING_BRIDGE_PATH_WIDTH * 0.5))
+    for (let along = 0; along < STAGING_BRIDGE_LENGTH; along += 1) {
+      const anchor = center.clone().addScaledVector(towardMap, islandHalf + along)
+      for (let lateral = 0; lateral < STAGING_BRIDGE_WIDTH; lateral += 1) {
+        const lateralOffset = lateral - bridgeHalf
+        // Reserve middle strip only when a path will actually be drawn.
+        if (reservePathStrip && Math.abs(lateralOffset) <= pathHalf) continue
+        const tile = anchor.clone().addScaledVector(tangent, lateralOffset)
+        const x = Math.round(tile.x)
+        const z = Math.round(tile.z)
+        if (Math.abs(x) <= WORLD_BOUNDS && Math.abs(z) <= WORLD_BOUNDS) continue
+        const key = `${x},${z}`
+        if (unique.has(key)) continue
+        unique.add(key)
+        out.push(new THREE.Vector3(x, STAGING_PLATFORM_Y, z))
+      }
+    }
+    return out
+  }
+
+  private buildBridgePathTiles(center: THREE.Vector3, towardMap: THREE.Vector3) {
+    const centers: THREE.Vector3[] = []
+    const edgeTransforms: THREE.Matrix4[] = []
+    const innerCornerTransforms: THREE.Matrix4[] = []
+    const outerCornerTransforms: THREE.Matrix4[] = []
+    const unique = new Set<string>()
+    const tangent = new THREE.Vector3(-towardMap.z, 0, towardMap.x)
+    const islandHalf = STAGING_ISLAND_SIZE * 0.5
+    const islandCenterRun = Math.floor(islandHalf)
+    const pathHalf = Math.max(0, Math.floor(STAGING_BRIDGE_PATH_WIDTH * 0.5))
+    const pathWidth = Math.max(1, STAGING_BRIDGE_PATH_WIDTH)
+    // Extend from island center across the bridge to the map edge.
+    for (let along = -islandCenterRun; along < STAGING_BRIDGE_LENGTH; along += 1) {
+      const anchor = center.clone().addScaledVector(towardMap, islandHalf + along)
+      for (let lateral = 0; lateral < pathWidth; lateral += 1) {
+        const lateralOffset = lateral - pathHalf
+        const tile = anchor.clone().addScaledVector(tangent, lateralOffset)
+        const x = Math.round(tile.x)
+        const z = Math.round(tile.z)
+        // Let map path layers own in-bounds tiles to avoid z-fighting.
+        if (Math.abs(x) <= WORLD_BOUNDS && Math.abs(z) <= WORLD_BOUNDS) continue
+        const key = `${x},${z}`
+        if (unique.has(key)) continue
+        unique.add(key)
+      }
+    }
+    const seamTowardMapDx = Math.sign(towardMap.x)
+    const seamTowardMapDz = Math.sign(towardMap.z)
+    const hasPathAt = (x: number, z: number) => {
+      const key = `${x},${z}`
+      if (unique.has(key)) return true
+      // Merge seam topology with immediate in-bounds neighbors.
+      if (Math.abs(x) <= WORLD_BOUNDS && Math.abs(z) <= WORLD_BOUNDS) {
+        const outsideNeighborX = x - seamTowardMapDx
+        const outsideNeighborZ = z - seamTowardMapDz
+        if (unique.has(`${outsideNeighborX},${outsideNeighborZ}`)) return true
+      }
+      return false
+    }
+    const transform = new THREE.Matrix4()
+    for (const key of unique) {
+      const { x, z } = parseGridKey(key)
+      let classification = classifyPathTile(x, z, hasPathAt)
+      const desiredYaw = directionToYaw(classification.directionDx, classification.directionDz)
+      const targetFacing = classification.variant === 'edge'
+        ? this.pathEdgeLayer.getFacingYaw()
+        : classification.variant === 'inner-corner'
+          ? this.pathInnerCornerLayer.getFacingYaw()
+          : classification.variant === 'outer-corner'
+            ? this.pathOuterCornerLayer.getFacingYaw()
+            : 0
+      const yawOffset = classification.variant === 'edge'
+        ? edgeTileYawOffset
+        : classification.variant === 'inner-corner' || classification.variant === 'outer-corner'
+          ? cornerTileYawOffset
+          : 0
+      const correctedYaw = desiredYaw - targetFacing + yawOffset
+      const finalYaw = classification.variant === 'center' ? correctedYaw : snapYawToQuarterTurn(correctedYaw)
+      if (classification.variant === 'center') {
+        centers.push(new THREE.Vector3(x, STAGING_PLATFORM_Y, z))
+      } else {
+        transform.makeRotationY(finalYaw)
+        transform.setPosition(x, STAGING_PLATFORM_Y, z)
+        if (classification.variant === 'edge') edgeTransforms.push(transform.clone())
+        if (classification.variant === 'inner-corner') innerCornerTransforms.push(transform.clone())
+        if (classification.variant === 'outer-corner') outerCornerTransforms.push(transform.clone())
+      }
+    }
+    return { centers, edgeTransforms, innerCornerTransforms, outerCornerTransforms, keys: unique }
+  }
+
+  upsert(
+    spawnerId: string,
+    center: THREE.Vector3,
+    normal: THREE.Vector3,
+    gateOpen: boolean,
+    showPath = true
+  ) {
+    this.remove(spawnerId)
+    const group = new THREE.Group()
+    const towardMap = normal.clone().multiplyScalar(-1)
+    const yaw = Math.atan2(towardMap.x, towardMap.z)
+    const islandHalf = STAGING_ISLAND_SIZE * 0.5
+
+    const bridgePath = showPath
+      ? this.buildBridgePathTiles(center, towardMap)
+      : {
+          centers: [] as THREE.Vector3[],
+          edgeTransforms: [] as THREE.Matrix4[],
+          innerCornerTransforms: [] as THREE.Matrix4[],
+          outerCornerTransforms: [] as THREE.Matrix4[],
+          keys: new Set<string>()
+        }
+    this.bridgePathKeysBySpawner.set(spawnerId, bridgePath.keys)
+    const pathTileKeys = new Set<string>()
+    for (const tile of bridgePath.centers) {
+      pathTileKeys.add(`${tile.x},${tile.z}`)
+    }
+    for (const transform of bridgePath.edgeTransforms) {
+      pathTileKeys.add(`${Math.round(transform.elements[12]!)},${Math.round(transform.elements[14]!)}`)
+    }
+    for (const transform of bridgePath.innerCornerTransforms) {
+      pathTileKeys.add(`${Math.round(transform.elements[12]!)},${Math.round(transform.elements[14]!)}`)
+    }
+    for (const transform of bridgePath.outerCornerTransforms) {
+      pathTileKeys.add(`${Math.round(transform.elements[12]!)},${Math.round(transform.elements[14]!)}`)
+    }
+    const groundTiles = [
+      ...this.buildIslandGroundTiles(center),
+      ...this.buildBridgeGroundTiles(center, towardMap, showPath)
+    ].filter((tile) => !pathTileKeys.has(`${tile.x},${tile.z}`))
+    this.islandGroundPositionsBySpawner.set(spawnerId, groundTiles)
+    this.bridgePathCenterPositionsBySpawner.set(spawnerId, bridgePath.centers)
+    this.bridgePathEdgeTransformsBySpawner.set(spawnerId, bridgePath.edgeTransforms)
+    this.bridgePathInnerCornerTransformsBySpawner.set(spawnerId, bridgePath.innerCornerTransforms)
+    this.bridgePathOuterCornerTransformsBySpawner.set(spawnerId, bridgePath.outerCornerTransforms)
+    this.rebuildTileLayers()
+
+    const gatePos = center.clone().addScaledVector(towardMap, islandHalf - 0.35)
+    const gateClosedY = STAGING_ISLAND_HEIGHT * 0.5 + 0.22
+    const gateOpenY = gateClosedY - (STAGING_ISLAND_HEIGHT + 0.55)
+    const gate = new THREE.Mesh(
+      new THREE.BoxGeometry(STAGING_BRIDGE_WIDTH + 0.3, STAGING_ISLAND_HEIGHT + 0.45, 0.25),
+      gateOpen ? this.gateOpenMaterial : this.gateClosedMaterial
+    )
+    gate.position.copy(gatePos).setY(gateOpen ? gateOpenY : gateClosedY)
+    gate.rotation.y = yaw
+    group.add(gate)
+
+    scene.add(group)
+    this.islands.set(spawnerId, {
+      group,
+      gate,
+      gateClosedY,
+      gateOpenY,
+      gateProgress: gateOpen ? 1 : 0
+    })
+  }
+
+  setGateProgress(spawnerId: string, progress: number) {
+    const entry = this.islands.get(spawnerId)
+    if (!entry) return
+    const clamped = clamp(progress, 0, 1)
+    entry.gateProgress = clamped
+    entry.gate.position.y = THREE.MathUtils.lerp(entry.gateClosedY, entry.gateOpenY, clamped)
+    entry.gate.material = clamped >= 1 ? this.gateOpenMaterial : this.gateClosedMaterial
+  }
+
+  remove(spawnerId: string) {
+    const existing = this.islands.get(spawnerId)
+    if (!existing) return
+    scene.remove(existing.group)
+    for (const child of existing.group.children) {
+      const mesh = child as THREE.Mesh
+      mesh.geometry?.dispose()
+    }
+    this.islands.delete(spawnerId)
+    this.islandGroundPositionsBySpawner.delete(spawnerId)
+    this.bridgePathKeysBySpawner.delete(spawnerId)
+    this.bridgePathCenterPositionsBySpawner.delete(spawnerId)
+    this.bridgePathEdgeTransformsBySpawner.delete(spawnerId)
+    this.bridgePathInnerCornerTransformsBySpawner.delete(spawnerId)
+    this.bridgePathOuterCornerTransformsBySpawner.delete(spawnerId)
+    this.rebuildTileLayers()
+  }
+
+  clear() {
+    for (const spawnerId of this.islands.keys()) {
+      this.remove(spawnerId)
+    }
+  }
+
+  dispose() {
+    this.clear()
+    this.groundLayer.dispose()
+    this.pathCenterLayer.dispose()
+    this.pathEdgeLayer.dispose()
+    this.pathInnerCornerLayer.dispose()
+    this.pathOuterCornerLayer.dispose()
+    this.gateClosedMaterial.dispose()
+    this.gateOpenMaterial.dispose()
+  }
+}
+
 class FlowFieldDebugOverlay {
   private reachableMesh: THREE.InstancedMesh | null = null
   private goalMesh: THREE.InstancedMesh | null = null
@@ -767,6 +1093,7 @@ class FlowFieldDebugOverlay {
 const worldGrid = SHOW_WORLD_GRID ? new WorldGrid() : null
 const worldBorder = new WorldBorder()
 const spawnContainerOverlay = new SpawnContainerOverlay()
+const stagingIslandsOverlay = new StagingIslandsOverlay()
 const flowFieldDebugOverlay = SHOW_FLOW_FIELD_DEBUG ? new FlowFieldDebugOverlay() : null
 const groundTileLayer = new InstancedModelLayer(scene, 20_000, { receiveShadow: true, castShadow: false })
 const pathCenterTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
@@ -941,7 +1268,9 @@ const rebuildPathTileLayer = () => {
       pathTileKeys.add(key)
     }
   }
-  const hasPathAt = (x: number, z: number) => pathTileKeys.has(`${x},${z}`)
+  const hasPathAt = (x: number, z: number) => (
+    pathTileKeys.has(`${x},${z}`) || stagingIslandsOverlay.hasBridgePathAt(x, z)
+  )
   for (const key of pathTileKeys) {
     const { x, z } = parseGridKey(key)
     const classification = classifyPathTile(x, z, hasPathAt)
@@ -1247,6 +1576,7 @@ gltfLoader.load(
   groundModelUrl,
   (gltf) => {
     groundTileLayer.setTemplate(gltf.scene)
+    stagingIslandsOverlay.setGroundTemplate(gltf.scene)
     ground.visible = false
     if (lastGroundBounds) {
       const bounds = lastGroundBounds
@@ -1264,6 +1594,7 @@ gltfLoader.load(
   pathModelUrl,
   (gltf) => {
     pathCenterTileLayer.setTemplate(gltf.scene)
+    stagingIslandsOverlay.setPathTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
   undefined,
@@ -1276,6 +1607,7 @@ gltfLoader.load(
   pathEdgeModelUrl,
   (gltf) => {
     pathEdgeTileLayer.setTemplate(gltf.scene)
+    stagingIslandsOverlay.setPathEdgeTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
   undefined,
@@ -1288,6 +1620,7 @@ gltfLoader.load(
   pathCornerInnerModelUrl,
   (gltf) => {
     pathInnerCornerTileLayer.setTemplate(gltf.scene)
+    stagingIslandsOverlay.setPathInnerCornerTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
   undefined,
@@ -1300,6 +1633,7 @@ gltfLoader.load(
   pathCornerOuterModelUrl,
   (gltf) => {
     pathOuterCornerTileLayer.setTemplate(gltf.scene)
+    stagingIslandsOverlay.setPathOuterCornerTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
   undefined,
@@ -1484,7 +1818,11 @@ const waveAndSpawnSystem = createWaveAndSpawnSystem({
   random
 })
 const activeWaveSpawners: WaveSpawner[] = []
+let pendingWave: PreparedWave | null = null
+const pendingWaveSpawners: WaveSpawner[] = []
 const spawnerById = new Map<string, WaveSpawner>()
+const pendingSpawnerById = new Map<string, WaveSpawner>()
+const pendingGateOpenBySpawnerId = new Map<string, number>()
 const spawnerPathlineCache = new Map<string, LanePathResult>()
 let castleFlowField: CorridorFlowField | null = null
 let isCastleFlowFieldDirty = true
@@ -1631,11 +1969,47 @@ const getSpawnerEntryPoint = (pos: THREE.Vector3) => {
   )
 }
 
-const getForwardWaypointIndex = (pos: THREE.Vector3, waypoints: THREE.Vector3[]): number => {
+const getStagingIslandCenter = (spawnerPos: THREE.Vector3) => {
+  const normal = getSpawnerOutwardNormal(spawnerPos)
+  return spawnerPos.clone().addScaledVector(normal, STAGING_ISLAND_DISTANCE)
+}
+
+const getSpawnerAnchorId = (spawnerPos: THREE.Vector3) => (
+  `anchor-${Math.round(spawnerPos.x)},${Math.round(spawnerPos.z)}`
+)
+
+const getSpawnerTowardMap = (spawnerPos: THREE.Vector3) => {
+  return getSpawnerOutwardNormal(spawnerPos).multiplyScalar(-1)
+}
+
+const getSpawnerGatePoint = (spawnerPos: THREE.Vector3) => {
+  const center = getStagingIslandCenter(spawnerPos)
+  const towardMap = getSpawnerTowardMap(spawnerPos)
+  const islandHalf = STAGING_ISLAND_SIZE * 0.5
+  return center.addScaledVector(towardMap, islandHalf - 0.35)
+}
+
+const getSpawnerBridgeExitPoint = (spawnerPos: THREE.Vector3) => {
+  const towardMap = getSpawnerTowardMap(spawnerPos)
+  return spawnerPos.clone().addScaledVector(towardMap, GRID_SIZE * 0.35)
+}
+
+const buildLaneWaypointsForSpawner = (spawner: WaveSpawner, lanePathPoints: THREE.Vector3[] | undefined) => {
+  if (!lanePathPoints || lanePathPoints.length === 0) return undefined
+  const entryPoint = getSpawnerEntryPoint(spawner.position)
+  return [
+    getSpawnerGatePoint(spawner.position),
+    getSpawnerBridgeExitPoint(spawner.position),
+    entryPoint.clone(),
+    ...lanePathPoints.slice(1).map((point) => point.clone())
+  ]
+}
+
+const getForwardWaypointIndex = (pos: THREE.Vector3, waypoints: THREE.Vector3[], minIndex = 0): number => {
   if (waypoints.length <= 1) return 0
-  let bestIdx = 0
+  let bestIdx = clamp(Math.floor(minIndex), 0, waypoints.length - 1)
   let bestDistSq = Number.POSITIVE_INFINITY
-  for (let i = 0; i < waypoints.length; i += 1) {
+  for (let i = bestIdx; i < waypoints.length; i += 1) {
     const wp = waypoints[i]!
     const dx = wp.x - pos.x
     const dz = wp.z - pos.z
@@ -1650,18 +2024,29 @@ const getForwardWaypointIndex = (pos: THREE.Vector3, waypoints: THREE.Vector3[])
 }
 
 const getSpawnCandidatePosition = (spawner: WaveSpawner) => {
+  const center = getStagingIslandCenter(spawner.position)
   const normal = getSpawnerOutwardNormal(spawner.position)
+  const towardMap = normal.clone().multiplyScalar(-1)
   const tangent = getSpawnerTangent(spawner.position)
-  const lateral = (Math.random() - 0.5) * 10
-  const outward = 0.25 + Math.random() * 9.5
-  const pos = spawner.position
+  const islandHalf = STAGING_ISLAND_SIZE * 0.5
+  if (!spawner.gateOpen) {
+    const spread = Math.max(1, islandHalf - 1.2)
+    return new THREE.Vector3(
+      center.x + (Math.random() * 2 - 1) * spread,
+      0,
+      center.z + (Math.random() * 2 - 1) * spread
+    )
+  }
+  const lateral = (Math.random() - 0.5) * (STAGING_BRIDGE_WIDTH - 0.8)
+  const alongBridge = islandHalf - 0.9 + Math.random() * 0.9
+  const pos = center
     .clone()
     .addScaledVector(tangent, lateral)
-    .addScaledVector(normal, outward)
+    .addScaledVector(towardMap, alongBridge)
   return new THREE.Vector3(
-    clamp(pos.x, -WORLD_BOUNDS - 10, WORLD_BOUNDS + 10),
+    clamp(pos.x, -WORLD_BOUNDS - MOB_STAGING_BOUNDS_PADDING, WORLD_BOUNDS + MOB_STAGING_BOUNDS_PADDING),
     0,
-    clamp(pos.z, -WORLD_BOUNDS - 10, WORLD_BOUNDS + 10)
+    clamp(pos.z, -WORLD_BOUNDS - MOB_STAGING_BOUNDS_PADDING, WORLD_BOUNDS + MOB_STAGING_BOUNDS_PADDING)
   )
 }
 
@@ -1679,14 +2064,36 @@ const canSpawnAt = (pos: THREE.Vector3, radius = MOB_WIDTH * 0.5) => {
 const getSpawnContainerCorners = (spawnerPos: THREE.Vector3) => {
   const normal = getSpawnerOutwardNormal(spawnerPos)
   const tangent = getSpawnerTangent(spawnerPos)
-  const center = spawnerPos.clone().addScaledVector(normal, 5)
-  const half = 5
+  const center = getStagingIslandCenter(spawnerPos)
+  const half = STAGING_ISLAND_SIZE * 0.5 - 0.8
   return [
     center.clone().addScaledVector(tangent, -half).addScaledVector(normal, -half),
     center.clone().addScaledVector(tangent, half).addScaledVector(normal, -half),
     center.clone().addScaledVector(tangent, half).addScaledVector(normal, half),
     center.clone().addScaledVector(tangent, -half).addScaledVector(normal, half)
   ]
+}
+
+const renderAllCardinalStagingIslands = () => {
+  for (const door of borderDoors) {
+    stagingIslandsOverlay.upsert(
+      getSpawnerAnchorId(door),
+      getStagingIslandCenter(door),
+      getSpawnerOutwardNormal(door),
+      false,
+      false
+    )
+  }
+}
+
+const clampStagedMobToSpawnerIsland = (mob: MobEntity) => {
+  if (!mob.staged || !mob.spawnerId) return
+  const spawner = spawnerById.get(mob.spawnerId) ?? pendingSpawnerById.get(mob.spawnerId)
+  if (!spawner) return
+  const center = getStagingIslandCenter(spawner.position)
+  const half = STAGING_ISLAND_SIZE * 0.5 - mob.radius - 0.25
+  mob.mesh.position.x = clamp(mob.mesh.position.x, center.x - half, center.x + half)
+  mob.mesh.position.z = clamp(mob.mesh.position.z, center.z - half, center.z + half)
 }
 
 const isPointInsideCastle = (point: THREE.Vector3) => (
@@ -1779,25 +2186,60 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   const flow = getCastleFlowField()
   const route = tracePathFromSpawner(flow, { start: entry })
   const displayPoints = extendPathToCastleCenter(trimPathToCastleBoundary(route.points))
+  const stagingPreviewPoints = [
+    getStagingIslandCenter(spawner.position),
+    getSpawnerGatePoint(spawner.position),
+    getSpawnerBridgeExitPoint(spawner.position)
+  ]
+  const fullDisplayPoints = [...stagingPreviewPoints, ...displayPoints]
   const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
+  const connector = buildPathTilesFromPoints(
+    [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
+    staticColliders,
+    WORLD_BOUNDS
+  )
   const routeState: LanePathResult['state'] = route.state
   spawner.routeState = routeState
   spawnerPathlineCache.set(spawner.id, { points: route.points, state: routeState })
-  pathTilePositions.set(
-    spawner.id,
-    routeState === 'reachable'
-      ? corridor.tiles
-      : []
+  if (routeState === 'reachable') {
+    const merged = new Map<string, THREE.Vector3>()
+    for (const tile of connector.tiles) {
+      merged.set(`${tile.x},${tile.z}`, tile)
+    }
+    for (const tile of corridor.tiles) {
+      merged.set(`${tile.x},${tile.z}`, tile)
+    }
+    pathTilePositions.set(spawner.id, Array.from(merged.values()))
+  } else {
+    pathTilePositions.set(spawner.id, [])
+  }
+  stagingIslandsOverlay.upsert(
+    getSpawnerAnchorId(spawner.position),
+    getStagingIslandCenter(spawner.position),
+    getSpawnerOutwardNormal(spawner.position),
+    spawner.gateOpen,
+    spawner.totalCount > 0
   )
   rebuildPathTileLayer()
-  spawnerRouteOverlay.upsert(spawner.id, displayPoints, routeState)
+  spawnerRouteOverlay.upsert(spawner.id, fullDisplayPoints, routeState)
   spawnContainerOverlay.upsert(spawner.id, getSpawnContainerCorners(spawner.position))
   for (const mob of mobs) {
     if (mob.spawnerId !== spawner.id) continue
     mob.laneBlocked = routeState !== 'reachable'
-    mob.waypoints = routeState === 'reachable' ? route.points : undefined
-    mob.waypointIndex = routeState === 'reachable'
-      ? getForwardWaypointIndex(mob.mesh.position, route.points)
+    if (mob.staged) {
+      mob.waypoints = undefined
+      mob.waypointIndex = undefined
+      mob.laneBlocked = true
+      continue
+    }
+    const laneWaypoints = routeState === 'reachable'
+      ? buildLaneWaypointsForSpawner(spawner, route.points)
+      : undefined
+    mob.waypoints = laneWaypoints
+    const startsInMap =
+      Math.abs(mob.mesh.position.x) <= WORLD_BOUNDS && Math.abs(mob.mesh.position.z) <= WORLD_BOUNDS
+    mob.waypointIndex = laneWaypoints
+      ? getForwardWaypointIndex(mob.mesh.position, laneWaypoints, startsInMap ? 2 : 0)
       : undefined
   }
 }
@@ -1813,7 +2255,7 @@ const processSpawnerPathlineQueue = (budget = PATHLINE_REFRESH_BUDGET_PER_FRAME)
   while (processed < budget && pendingSpawnerPathOrder.length > 0) {
     const spawnerId = pendingSpawnerPathOrder.shift()!
     pendingSpawnerPathRefresh.delete(spawnerId)
-    const spawner = spawnerById.get(spawnerId)
+    const spawner = spawnerById.get(spawnerId) ?? pendingSpawnerById.get(spawnerId)
     if (!spawner) continue
     refreshSpawnerPathline(spawner)
     processed += 1
@@ -1824,16 +2266,22 @@ const refreshAllSpawnerPathlines = () => {
   for (const spawner of activeWaveSpawners) {
     refreshSpawnerPathline(spawner)
   }
+  for (const spawner of pendingWaveSpawners) {
+    refreshSpawnerPathline(spawner)
+  }
 }
 
 const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] = []) => {
   if (added.length === 0 && removed.length === 0) return
-  if (activeWaveSpawners.length === 0) return
+  if (activeWaveSpawners.length === 0 && pendingWaveSpawners.length === 0) return
 
   const deltas = [...added, ...removed].filter((collider) => collider.type !== 'castle')
   if (deltas.length === 0) return
   invalidateCastleFlowField()
   for (const spawner of activeWaveSpawners) {
+    enqueueSpawnerPathRefresh(spawner.id)
+  }
+  for (const spawner of pendingWaveSpawners) {
     enqueueSpawnerPathRefresh(spawner.id)
   }
 }
@@ -2013,17 +2461,14 @@ const createTowerAt = (snapped: THREE.Vector3, typeId: TowerTypeId, builtBy: str
   return tower
 }
 
-const makeMob = (spawner: WaveSpawner) => {
+const makeMob = (spawner: WaveSpawner, forceSpawn = false) => {
   const pos = getSpawnCandidatePosition(spawner)
-  if (!canSpawnAt(pos)) return false
+  if (!forceSpawn && !canSpawnAt(pos)) return false
   const mob = new THREE.Mesh(mobLogicGeometry, mobLogicMaterial)
   mob.position.copy(pos).setY(MOB_HEIGHT * 0.5)
   const lanePath = spawnerPathlineCache.get(spawner.id)
   const hasLane = lanePath?.state === 'reachable'
-  const entryPoint = getSpawnerEntryPoint(spawner.position)
-  const laneWaypoints = hasLane
-    ? [entryPoint.clone(), ...lanePath!.points.slice(1).map((p) => p.clone())]
-    : undefined
+  const laneWaypoints = hasLane ? buildLaneWaypointsForSpawner(spawner, lanePath?.points) : undefined
   const maxHp = 3
   mobs.push({
     mesh: mob,
@@ -2035,17 +2480,72 @@ const makeMob = (spawner: WaveSpawner) => {
     hp: maxHp,
     maxHp: maxHp,
     baseY: MOB_HEIGHT * 0.5,
+    staged: !spawner.gateOpen,
     waypoints: laneWaypoints,
-    waypointIndex: hasLane ? 0 : undefined,
+    waypointIndex: hasLane && spawner.gateOpen && laneWaypoints
+      ? getForwardWaypointIndex(mob.position, laneWaypoints)
+      : undefined,
     berserkMode: false,
     berserkTarget: null,
-    laneBlocked: !hasLane,
+    laneBlocked: !hasLane || !spawner.gateOpen,
     siegeAttackCooldown: 0,
     unreachableTime: 0,
     lastHitBy: undefined,
     spawnerId: spawner.id
   })
   return true
+}
+
+const stageAllMobsForSpawner = (spawner: WaveSpawner) => {
+  const remaining = Math.max(0, spawner.totalCount - spawner.spawnedCount)
+  if (remaining === 0) return
+  const maxAttempts = Math.max(remaining * 40, 400)
+  let attempts = 0
+  while (spawner.spawnedCount < spawner.totalCount && attempts < maxAttempts) {
+    const forceSpawn = attempts > maxAttempts * 0.7
+    if (makeMob(spawner, forceSpawn)) {
+      spawner.spawnedCount += 1
+      spawner.aliveCount += 1
+    }
+    attempts += 1
+  }
+  spawner.spawnAccumulator = 0
+}
+
+const releaseStagedMobsForSpawner = (spawner: WaveSpawner) => {
+  const lanePath = spawnerPathlineCache.get(spawner.id)
+  const hasLane = lanePath?.state === 'reachable'
+  const laneWaypoints = hasLane ? buildLaneWaypointsForSpawner(spawner, lanePath?.points) : undefined
+  for (const mob of mobs) {
+    if (mob.spawnerId !== spawner.id) continue
+    mob.staged = false
+    mob.waypoints = laneWaypoints ? laneWaypoints.map((point) => point.clone()) : undefined
+    // Start released mobs at the beginning so they visibly cross gate + bridge.
+    mob.waypointIndex = laneWaypoints ? 0 : undefined
+    mob.laneBlocked = !hasLane
+  }
+}
+
+const processPendingGateOpens = (delta: number) => {
+  if (pendingGateOpenBySpawnerId.size === 0) return
+  for (const [spawnerId, elapsed] of Array.from(pendingGateOpenBySpawnerId.entries())) {
+    const nextElapsed = elapsed + delta
+    const progress = clamp(nextElapsed / STAGING_GATE_OPEN_DURATION, 0, 1)
+    const spawner = spawnerById.get(spawnerId)
+    if (!spawner) {
+      pendingGateOpenBySpawnerId.delete(spawnerId)
+      continue
+    }
+    const anchorId = getSpawnerAnchorId(spawner.position)
+    stagingIslandsOverlay.setGateProgress(anchorId, progress)
+    if (progress >= 1) {
+      spawner.gateOpen = true
+      releaseStagedMobsForSpawner(spawner)
+      pendingGateOpenBySpawnerId.delete(spawnerId)
+      continue
+    }
+    pendingGateOpenBySpawnerId.set(spawnerId, nextElapsed)
+  }
 }
 
 const gameState = createGameState(ENERGY_CAP)
@@ -3504,6 +4004,7 @@ const populateSeededWorld = () => {
 }
 
 populateSeededWorld()
+renderAllCardinalStagingIslands()
 
 // Initialize lane paths for active spawners once map is ready.
 refreshAllSpawnerPathlines()
@@ -3547,7 +4048,11 @@ const resetGame = (restartAt: number) => {
   mobInstanceMesh.count = 0
   clearMobDeathVisuals()
   spawnerById.clear()
+  pendingSpawnerById.clear()
+  pendingGateOpenBySpawnerId.clear()
   activeWaveSpawners.length = 0
+  pendingWaveSpawners.length = 0
+  pendingWave = null
   spawnerPathlineCache.clear()
   pathTilePositions.clear()
   rebuildPathTileLayer()
@@ -3555,6 +4060,8 @@ const resetGame = (restartAt: number) => {
   pendingSpawnerPathOrder.length = 0
   spawnerRouteOverlay.clear()
   spawnContainerOverlay.clear()
+  stagingIslandsOverlay.clear()
+  renderAllCardinalStagingIslands()
   particleSystem.dispose()
   const toRemove: DestructibleCollider[] = []
   for (const [collider, state] of structureStore.structureStates.entries()) {
@@ -3626,6 +4133,7 @@ const motionSystem = createEntityMotionSystem({
     mobBerserkRangeBuffer: MOB_SIEGE_RANGE_BUFFER,
     mobBerserkUnreachableGrace: MOB_SIEGE_UNREACHABLE_GRACE,
     worldBounds: WORLD_BOUNDS,
+    mobStagingBoundsPadding: MOB_STAGING_BOUNDS_PADDING,
     gridSize: GRID_SIZE
   },
   random,
@@ -3799,22 +4307,50 @@ const triggerEventBannerWithSubhead = (
   gameState.eventBannerTimer = duration
 }
 
-const spawnWave = () => {
-  gameState.wave = waveAndSpawnSystem.spawnWave({
+const clearWaveOverlays = () => {
+  spawnerRouteOverlay.clear()
+  spawnerPathlineCache.clear()
+  pathTilePositions.clear()
+  rebuildPathTileLayer()
+  spawnContainerOverlay.clear()
+  stagingIslandsOverlay.clear()
+  renderAllCardinalStagingIslands()
+  pendingGateOpenBySpawnerId.clear()
+  pendingSpawnerPathRefresh.clear()
+  pendingSpawnerPathOrder.length = 0
+}
+
+const prepareNextWave = () => {
+  pendingWave = waveAndSpawnSystem.prepareNextWave({
     wave: gameState.wave,
+    refreshSpawnerPathline,
+    clearWaveOverlays
+  })
+  pendingWaveSpawners.length = 0
+  pendingSpawnerById.clear()
+  for (const spawner of pendingWave.spawners) {
+    pendingWaveSpawners.push(spawner)
+    pendingSpawnerById.set(spawner.id, spawner)
+    stageAllMobsForSpawner(spawner)
+  }
+}
+
+const startPreparedWave = () => {
+  if (!pendingWave) return
+  pendingGateOpenBySpawnerId.clear()
+  gameState.wave = waveAndSpawnSystem.startPreparedWave({
+    preparedWave: pendingWave,
     activeWaveSpawners,
     spawnerById,
-    refreshSpawnerPathline,
-    clearWaveOverlays: () => {
-      spawnerRouteOverlay.clear()
-      spawnerPathlineCache.clear()
-      pathTilePositions.clear()
-      rebuildPathTileLayer()
-      spawnContainerOverlay.clear()
-      pendingSpawnerPathRefresh.clear()
-      pendingSpawnerPathOrder.length = 0
+    onReleaseSpawnerMobs: (spawner) => {
+      spawner.gateOpen = false
+      stagingIslandsOverlay.setGateProgress(getSpawnerAnchorId(spawner.position), 0)
+      pendingGateOpenBySpawnerId.set(spawner.id, 0)
     }
   })
+  pendingWave = null
+  pendingWaveSpawners.length = 0
+  pendingSpawnerById.clear()
   triggerEventBanner(`Wave ${gameState.wave} spawned`)
 }
 
@@ -3824,6 +4360,7 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
   const candidates = spatialGrid.getNearbyInto(center, radius, rangeCandidateScratch)
   for (const mob of candidates) {
     if (mob.kind !== 'mob') continue
+    if (mob.staged) continue
     if ((mob.hp ?? 0) <= 0) continue
     const distToCenter = mob.mesh.position.distanceTo(center)
     if (distToCenter > radius) continue
@@ -3909,6 +4446,7 @@ const updateTowerArrowProjectiles = (delta: number) => {
     let bestT = Number.POSITIVE_INFINITY
 
     for (const mob of mobs) {
+      if (mob.staged) continue
       if ((mob.hp ?? 0) <= 0) continue
       projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3)
       const combinedRadius = mob.radius + projectile.radius
@@ -3991,6 +4529,7 @@ const updatePlayerArrowProjectiles = (delta: number) => {
     let bestT = Number.POSITIVE_INFINITY
 
     for (const mob of mobs) {
+      if (mob.staged) continue
       if ((mob.hp ?? 0) <= 0) continue
       projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3)
       const combinedRadius = mob.radius + projectile.radius
@@ -4101,6 +4640,7 @@ const updateGrowingTrees = (nowMs: number) => {
 const processCastleCaptures = (now: number) => {
   for (let i = mobs.length - 1; i >= 0; i -= 1) {
     const mob = mobs[i]!
+    if (mob.staged) continue
     if (distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) > 0.2) continue
 
     spawnCubeEffects(mob.mesh.position.clone())
@@ -4142,7 +4682,9 @@ const tick = (now: number, delta: number) => {
   applyStructureDecay(wallClockNowMs)
   processTreeRegrowth(wallClockNowMs)
   updateGrowingTrees(wallClockNowMs)
+  processPendingGateOpens(delta)
 
+  waveAndSpawnSystem.emit(pendingWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
   waveAndSpawnSystem.emit(activeWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
   processSpawnerPathlineQueue()
 
@@ -4262,6 +4804,9 @@ const tick = (now: number, delta: number) => {
       resolveCircleCircle(entity, other)
     }
   }
+  for (const mob of mobs) {
+    clampStagedMobToSpawnerIsland(mob)
+  }
 
   for (let i = mobs.length - 1; i >= 0; i -= 1) {
     const mob = mobs[i]!
@@ -4286,15 +4831,20 @@ const tick = (now: number, delta: number) => {
 
   const waveComplete = gameState.wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
   if (waveComplete && gameState.nextWaveAt === 0) {
+    prepareNextWave()
     gameState.nextWaveAt = now + 10000
   }
   if (waveComplete && now >= gameState.nextWaveAt && gameState.nextWaveAt !== 0) {
     gameState.nextWaveAt = 0
-    spawnWave()
+    startPreparedWave()
   }
-  if (gameState.wave === 0 && (gameState.nextWaveAt === 0 || now >= gameState.nextWaveAt)) {
+  if (gameState.wave === 0 && pendingWave === null) {
+    prepareNextWave()
+    gameState.nextWaveAt = now + 10000
+  }
+  if (gameState.wave === 0 && gameState.nextWaveAt !== 0 && now >= gameState.nextWaveAt) {
     gameState.nextWaveAt = 0
-    spawnWave()
+    startPreparedWave()
   }
 
   const selected = pickSelectedMob()
@@ -4465,7 +5015,7 @@ const tick = (now: number, delta: number) => {
     }
     assertSpawnerCounts(activeWaveSpawners)
     assertStructureStoreConsistency(structureStore, staticColliders)
-    assertMobSpawnerReferences(mobs, new Set(spawnerById.keys()))
+    assertMobSpawnerReferences(mobs, new Set([...spawnerById.keys(), ...pendingSpawnerById.keys()]))
   }
 
   applyStructureDamageVisuals()
@@ -4483,6 +5033,7 @@ const disposeApp = () => {
 
   particleSystem.dispose()
   spawnContainerOverlay.dispose()
+  stagingIslandsOverlay.dispose()
   spawnerRouteOverlay.clear()
   pathCenterTileLayer.dispose()
   pathEdgeTileLayer.dispose()

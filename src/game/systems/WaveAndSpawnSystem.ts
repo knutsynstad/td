@@ -13,20 +13,28 @@ type WaveAndSpawnSystemConfig = {
 
 type SpawnWaveContext = {
   wave: number
-  activeWaveSpawners: WaveSpawner[]
-  spawnerById: Map<string, WaveSpawner>
   refreshSpawnerPathline: (spawner: WaveSpawner) => void
   clearWaveOverlays: () => void
 }
 
+type StartPreparedWaveContext = {
+  preparedWave: PreparedWave
+  activeWaveSpawners: WaveSpawner[]
+  spawnerById: Map<string, WaveSpawner>
+  onReleaseSpawnerMobs: (spawner: WaveSpawner) => void
+}
+
+export type PreparedWave = {
+  wave: number
+  spawners: WaveSpawner[]
+}
+
 export const createWaveAndSpawnSystem = (config: WaveAndSpawnSystemConfig) => {
   return {
-    spawnWave(context: SpawnWaveContext): number {
+    prepareNextWave(context: SpawnWaveContext): PreparedWave {
       const nextWave = context.wave + 1
       const count = (5 + nextWave * 2) * 10
       context.clearWaveOverlays()
-      context.activeWaveSpawners.length = 0
-      context.spawnerById.clear()
 
       const activeDoors = selectActiveDoorsForWave(
         config.borderDoors,
@@ -43,11 +51,24 @@ export const createWaveAndSpawnSystem = (config: WaveAndSpawnSystemConfig) => {
         random: config.random
       })
       for (const spawner of created) {
-        context.activeWaveSpawners.push(spawner)
-        context.spawnerById.set(spawner.id, spawner)
         context.refreshSpawnerPathline(spawner)
       }
-      return nextWave
+      return {
+        wave: nextWave,
+        spawners: created
+      }
+    },
+
+    startPreparedWave(context: StartPreparedWaveContext): number {
+      context.activeWaveSpawners.length = 0
+      context.spawnerById.clear()
+      for (const spawner of context.preparedWave.spawners) {
+        spawner.gateOpen = false
+        context.activeWaveSpawners.push(spawner)
+        context.spawnerById.set(spawner.id, spawner)
+        context.onReleaseSpawnerMobs(spawner)
+      }
+      return context.preparedWave.wave
     },
 
     emit(spawners: WaveSpawner[], delta: number, onSpawn: (spawner: WaveSpawner) => boolean) {

@@ -44,6 +44,7 @@ export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
     return {
       id,
       position,
+      gateOpen: false,
       totalCount: count,
       spawnedCount: 0,
       aliveCount: 0,

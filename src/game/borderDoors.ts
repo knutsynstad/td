@@ -1,18 +1,12 @@
 import * as THREE from 'three'
 
-const DOOR_OFFSETS = [-0.5, 0, 0.5]
-
 export const getAllBorderDoors = (worldBounds: number): THREE.Vector3[] => {
-  const offsets = DOOR_OFFSETS.map((ratio) => ratio * worldBounds)
-  const doors: THREE.Vector3[] = []
-
-  for (const offset of offsets) {
-    doors.push(new THREE.Vector3(offset, 0, -worldBounds))
-    doors.push(new THREE.Vector3(offset, 0, worldBounds))
-    doors.push(new THREE.Vector3(-worldBounds, 0, offset))
-    doors.push(new THREE.Vector3(worldBounds, 0, offset))
-  }
-  return doors
+  return [
+    new THREE.Vector3(0, 0, -worldBounds),
+    new THREE.Vector3(worldBounds, 0, 0),
+    new THREE.Vector3(0, 0, worldBounds),
+    new THREE.Vector3(-worldBounds, 0, 0)
+  ]
 }
 
 const clampInt = (value: number, min: number, max: number) => {
