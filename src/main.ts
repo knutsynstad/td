@@ -265,7 +265,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.shadowMap.enabled = true
-renderer.shadowMap.type = THREE.VSMShadowMap
+renderer.shadowMap.type = THREE.PCFShadowMap
 app.appendChild(renderer.domElement)
 
 const viewportFogEl = document.createElement('div')
@@ -318,8 +318,6 @@ dir.shadow.camera.top = 36
 dir.shadow.camera.bottom = -36
 dir.shadow.bias = -0.0005
 dir.shadow.normalBias = 0.02
-dir.shadow.radius = 10
-dir.shadow.blurSamples = 16
 dir.shadow.camera.updateProjectionMatrix()
 scene.add(dir)
 scene.add(dir.target)
