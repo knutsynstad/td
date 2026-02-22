@@ -8,6 +8,9 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import castleModelUrl from './assets/models/castle.glb?url'
 import coinModelUrl from './assets/models/coin.glb?url'
 import groundModelUrl from './assets/models/ground.glb?url'
+import pathCornerInnerModelUrl from './assets/models/path-corner-inner.glb?url'
+import pathCornerOuterModelUrl from './assets/models/path-corner-outer.glb?url'
+import pathEdgeModelUrl from './assets/models/path-edge.glb?url'
 import pathModelUrl from './assets/models/path.glb?url'
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
 import treeModelUrl from './assets/models/tree.glb?url'
@@ -335,10 +338,13 @@ class InstancedModelLayer {
   private readonly entries: InstancedLayerEntry[] = []
   private readonly transformScratch = new THREE.Matrix4()
   private readonly instanceMatrixScratch = new THREE.Matrix4()
+  private readonly facingQuaternionScratch = new THREE.Quaternion()
+  private readonly facingDirectionScratch = new THREE.Vector3()
   private readonly capacity: number
   private readonly castShadow: boolean
   private readonly receiveShadow: boolean
   private readonly yOffset: number
+  private facingYaw = 0
 
   constructor(scene: THREE.Scene, capacity: number, options: InstancedLayerOptions = {}) {
     this.capacity = capacity
@@ -350,8 +356,10 @@ class InstancedModelLayer {
 
   setTemplate(source: THREE.Object3D | null) {
     this.clearEntries()
+    this.facingYaw = 0
     if (!source) return
     source.updateMatrixWorld(true)
+    this.facingYaw = this.computeFacingYaw(source)
     source.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return
       const material = Array.isArray(node.material)
@@ -382,6 +390,26 @@ class InstancedModelLayer {
     }
   }
 
+  setTransforms(transforms: readonly THREE.Matrix4[]) {
+    const count = Math.min(transforms.length, this.capacity)
+    for (const entry of this.entries) {
+      entry.mesh.count = count
+      for (let i = 0; i < count; i += 1) {
+        this.transformScratch.copy(transforms[i]!)
+        if (this.yOffset !== 0) {
+          this.transformScratch.elements[13] += this.yOffset
+        }
+        this.instanceMatrixScratch.multiplyMatrices(this.transformScratch, entry.baseMatrix)
+        entry.mesh.setMatrixAt(i, this.instanceMatrixScratch)
+      }
+      entry.mesh.instanceMatrix.needsUpdate = true
+    }
+  }
+
+  getFacingYaw() {
+    return this.facingYaw
+  }
+
   clear() {
     for (const entry of this.entries) {
       entry.mesh.count = 0
@@ -406,6 +434,18 @@ class InstancedModelLayer {
         entry.mesh.material.dispose()
       }
     }
+  }
+
+  private computeFacingYaw(source: THREE.Object3D) {
+    const facing = source.getObjectByName('Facing')
+    if (!facing) return 0
+    facing.getWorldQuaternion(this.facingQuaternionScratch)
+    // Blender empties commonly author "forward" as local -Y in export workflows.
+    this.facingDirectionScratch.set(0, -1, 0).applyQuaternion(this.facingQuaternionScratch)
+    this.facingDirectionScratch.y = 0
+    if (this.facingDirectionScratch.lengthSq() < 1e-9) return 0
+    this.facingDirectionScratch.normalize()
+    return Math.atan2(this.facingDirectionScratch.x, this.facingDirectionScratch.z)
   }
 }
 
@@ -594,10 +634,71 @@ const worldGrid = new WorldGrid()
 const worldBorder = new WorldBorder()
 const spawnContainerOverlay = new SpawnContainerOverlay()
 const groundTileLayer = new InstancedModelLayer(scene, 20_000, { receiveShadow: true, castShadow: false })
-const pathTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+const pathCenterTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+const pathEdgeTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+const pathInnerCornerTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
+const pathOuterCornerTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
 const pathTilePositions = new Map<string, THREE.Vector3[]>()
-const tmpPathTileAccumulator: THREE.Vector3[] = []
 const pathTileKeys = new Set<string>()
+const tmpPathCenterTransforms: THREE.Matrix4[] = []
+const tmpPathEdgeTransforms: THREE.Matrix4[] = []
+const tmpPathInnerCornerTransforms: THREE.Matrix4[] = []
+const tmpPathOuterCornerTransforms: THREE.Matrix4[] = []
+const tmpPathTransformScratch = new THREE.Matrix4()
+const cardinalGrassOffsets = [
+  { key: 'north', dx: 0, dz: -1 },
+  { key: 'east', dx: 1, dz: 0 },
+  { key: 'south', dx: 0, dz: 1 },
+  { key: 'west', dx: -1, dz: 0 }
+] as const
+type PathTileVariant = 'center' | 'edge' | 'inner-corner' | 'outer-corner'
+type PathTileClassification = { variant: PathTileVariant, directionDx: number, directionDz: number }
+const parseGridKey = (key: string) => {
+  const [xRaw = '0', zRaw = '0'] = key.split(',')
+  return { x: Number(xRaw), z: Number(zRaw) }
+}
+const classifyPathTile = (x: number, z: number, hasPathAt: (x: number, z: number) => boolean): PathTileClassification => {
+  const north = hasPathAt(x, z - 1)
+  const east = hasPathAt(x + 1, z)
+  const south = hasPathAt(x, z + 1)
+  const west = hasPathAt(x - 1, z)
+  const northEast = hasPathAt(x + 1, z - 1)
+  const southEast = hasPathAt(x + 1, z + 1)
+  const southWest = hasPathAt(x - 1, z + 1)
+  const northWest = hasPathAt(x - 1, z - 1)
+
+  const grassCardinals = cardinalGrassOffsets.filter(({ dx, dz }) => !hasPathAt(x + dx, z + dz))
+  if (grassCardinals.length === 1) {
+    return { variant: 'edge', directionDx: grassCardinals[0]!.dx, directionDz: grassCardinals[0]!.dz }
+  }
+
+  if (grassCardinals.length === 2) {
+    const hasNorth = grassCardinals.some(({ key }) => key === 'north')
+    const hasEast = grassCardinals.some(({ key }) => key === 'east')
+    const hasSouth = grassCardinals.some(({ key }) => key === 'south')
+    const hasWest = grassCardinals.some(({ key }) => key === 'west')
+    if (hasNorth && hasEast) return { variant: 'outer-corner', directionDx: 1, directionDz: -1 }
+    if (hasEast && hasSouth) return { variant: 'outer-corner', directionDx: 1, directionDz: 1 }
+    if (hasSouth && hasWest) return { variant: 'outer-corner', directionDx: -1, directionDz: 1 }
+    if (hasWest && hasNorth) return { variant: 'outer-corner', directionDx: -1, directionDz: -1 }
+  }
+
+  const innerCornerDirections: Array<{ dx: number, dz: number }> = []
+  if (north && east && !northEast) innerCornerDirections.push({ dx: 1, dz: -1 })
+  if (east && south && !southEast) innerCornerDirections.push({ dx: 1, dz: 1 })
+  if (south && west && !southWest) innerCornerDirections.push({ dx: -1, dz: 1 })
+  if (west && north && !northWest) innerCornerDirections.push({ dx: -1, dz: -1 })
+  if (innerCornerDirections.length === 1) {
+    const dir = innerCornerDirections[0]!
+    return { variant: 'inner-corner', directionDx: dir.dx, directionDz: dir.dz }
+  }
+
+  return { variant: 'center', directionDx: 0, directionDz: 1 }
+}
+const directionToYaw = (dx: number, dz: number) => Math.atan2(dx, dz)
+const edgeTileYawOffset = -Math.PI * 0.5
+const cornerTileYawOffset = Math.PI
+const snapYawToQuarterTurn = (yaw: number) => Math.round(yaw / (Math.PI * 0.5)) * (Math.PI * 0.5)
 const buildPathTilesFromPoints = (
   points: readonly THREE.Vector3[],
   colliders: readonly StaticCollider[],
@@ -691,7 +792,10 @@ const buildPathTilesFromPoints = (
   return { tiles: out, isComplete }
 }
 const rebuildPathTileLayer = () => {
-  tmpPathTileAccumulator.length = 0
+  tmpPathCenterTransforms.length = 0
+  tmpPathEdgeTransforms.length = 0
+  tmpPathInnerCornerTransforms.length = 0
+  tmpPathOuterCornerTransforms.length = 0
   pathTileKeys.clear()
   const uniqueKeys = new Set<string>()
   for (const points of pathTilePositions.values()) {
@@ -700,10 +804,42 @@ const rebuildPathTileLayer = () => {
       if (uniqueKeys.has(key)) continue
       uniqueKeys.add(key)
       pathTileKeys.add(key)
-      tmpPathTileAccumulator.push(new THREE.Vector3(point.x, 0, point.z))
     }
   }
-  pathTileLayer.setPositions(tmpPathTileAccumulator)
+  const hasPathAt = (x: number, z: number) => pathTileKeys.has(`${x},${z}`)
+  for (const key of pathTileKeys) {
+    const { x, z } = parseGridKey(key)
+    const classification = classifyPathTile(x, z, hasPathAt)
+    const targetLayer = classification.variant === 'edge'
+      ? pathEdgeTileLayer
+      : classification.variant === 'inner-corner'
+        ? pathInnerCornerTileLayer
+        : classification.variant === 'outer-corner'
+          ? pathOuterCornerTileLayer
+          : pathCenterTileLayer
+    const targetTransforms = classification.variant === 'edge'
+      ? tmpPathEdgeTransforms
+      : classification.variant === 'inner-corner'
+        ? tmpPathInnerCornerTransforms
+        : classification.variant === 'outer-corner'
+          ? tmpPathOuterCornerTransforms
+          : tmpPathCenterTransforms
+    const desiredYaw = directionToYaw(classification.directionDx, classification.directionDz)
+    const variantYawOffset = classification.variant === 'edge'
+      ? edgeTileYawOffset
+      : classification.variant === 'inner-corner' || classification.variant === 'outer-corner'
+        ? cornerTileYawOffset
+        : 0
+    const correctedYaw = desiredYaw - targetLayer.getFacingYaw() + variantYawOffset
+    const finalYaw = classification.variant === 'center' ? correctedYaw : snapYawToQuarterTurn(correctedYaw)
+    tmpPathTransformScratch.makeRotationY(finalYaw)
+    tmpPathTransformScratch.setPosition(x, 0, z)
+    targetTransforms.push(tmpPathTransformScratch.clone())
+  }
+  pathCenterTileLayer.setTransforms(tmpPathCenterTransforms)
+  pathEdgeTileLayer.setTransforms(tmpPathEdgeTransforms)
+  pathInnerCornerTileLayer.setTransforms(tmpPathInnerCornerTransforms)
+  pathOuterCornerTileLayer.setTransforms(tmpPathOuterCornerTransforms)
   if (lastGroundBounds) {
     const bounds = lastGroundBounds
     lastGroundBounds = null
@@ -957,12 +1093,48 @@ gltfLoader.load(
 gltfLoader.load(
   pathModelUrl,
   (gltf) => {
-    pathTileLayer.setTemplate(gltf.scene)
+    pathCenterTileLayer.setTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
   undefined,
   (error) => {
     console.error('Failed to load path model:', error)
+  }
+)
+
+gltfLoader.load(
+  pathEdgeModelUrl,
+  (gltf) => {
+    pathEdgeTileLayer.setTemplate(gltf.scene)
+    rebuildPathTileLayer()
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load path edge model:', error)
+  }
+)
+
+gltfLoader.load(
+  pathCornerInnerModelUrl,
+  (gltf) => {
+    pathInnerCornerTileLayer.setTemplate(gltf.scene)
+    rebuildPathTileLayer()
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load path inner corner model:', error)
+  }
+)
+
+gltfLoader.load(
+  pathCornerOuterModelUrl,
+  (gltf) => {
+    pathOuterCornerTileLayer.setTemplate(gltf.scene)
+    rebuildPathTileLayer()
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load path outer corner model:', error)
   }
 )
 
@@ -3110,7 +3282,10 @@ const disposeApp = () => {
   particleSystem.dispose()
   spawnContainerOverlay.dispose()
   spawnerRouteOverlay.clear()
-  pathTileLayer.dispose()
+  pathCenterTileLayer.dispose()
+  pathEdgeTileLayer.dispose()
+  pathInnerCornerTileLayer.dispose()
+  pathOuterCornerTileLayer.dispose()
   worldGrid.dispose()
   worldBorder.dispose()
 
