@@ -12,7 +12,7 @@ export type BallistaVisualRig = {
 const YAW_TURN_SPEED_RAD_PER_SEC = Math.PI * 2
 const PITCH_TURN_SPEED_RAD_PER_SEC = Math.PI * 1.5
 const IDLE_PITCH_RAD = THREE.MathUtils.degToRad(30)
-const MAX_TRACK_PITCH_RAD = THREE.MathUtils.degToRad(65)
+const MAX_TRACK_PITCH_RAD = THREE.MathUtils.degToRad(89)
 const AIM_LOCK_TOLERANCE_RAD = THREE.MathUtils.degToRad(4)
 
 const setShadows = (object: THREE.Object3D) => {
@@ -96,12 +96,32 @@ export const updateBallistaRigTracking = (
   rig: BallistaVisualRig,
   sourcePos: THREE.Vector3,
   targetPos: THREE.Vector3 | null,
+  desiredLaunchVelocity: THREE.Vector3 | null,
   deltaSeconds: number
 ) => {
   const dt = Math.max(deltaSeconds, 0)
   let yawError = 0
   let desiredPitch = IDLE_PITCH_RAD
-  if (targetPos) {
+  if (desiredLaunchVelocity && desiredLaunchVelocity.lengthSq() > 1e-8) {
+    const horizontalLenSq = desiredLaunchVelocity.x * desiredLaunchVelocity.x + desiredLaunchVelocity.z * desiredLaunchVelocity.z
+    if (horizontalLenSq > 1e-8) {
+      const targetYaw = Math.atan2(desiredLaunchVelocity.x, desiredLaunchVelocity.z)
+      const desiredYaw = targetYaw - rig.baseForwardYaw
+      const yawDelta = THREE.MathUtils.euclideanModulo(
+        desiredYaw - rig.yawGroup.rotation.y + Math.PI,
+        Math.PI * 2
+      ) - Math.PI
+      const maxYawStep = YAW_TURN_SPEED_RAD_PER_SEC * dt
+      const clampedYawStep = THREE.MathUtils.clamp(yawDelta, -maxYawStep, maxYawStep)
+      rig.yawGroup.rotation.y += clampedYawStep
+      yawError = Math.abs(yawDelta - clampedYawStep)
+    }
+    desiredPitch = THREE.MathUtils.clamp(
+      -Math.atan2(desiredLaunchVelocity.y, Math.sqrt(horizontalLenSq)),
+      -MAX_TRACK_PITCH_RAD,
+      MAX_TRACK_PITCH_RAD
+    )
+  } else if (targetPos) {
     const pivotWorldX = sourcePos.x + rig.yawPivotLocal.x
     const pivotWorldY = sourcePos.y + rig.yawPivotLocal.y
     const pivotWorldZ = sourcePos.z + rig.yawPivotLocal.z
@@ -121,7 +141,7 @@ export const updateBallistaRigTracking = (
       rig.yawGroup.rotation.y += clampedYawStep
       yawError = Math.abs(yawDelta - clampedYawStep)
       desiredPitch = THREE.MathUtils.clamp(
-        Math.atan2(dy, Math.sqrt(horizontalLenSq)),
+        -Math.atan2(dy, Math.sqrt(horizontalLenSq)),
         -MAX_TRACK_PITCH_RAD,
         MAX_TRACK_PITCH_RAD
       )
@@ -134,7 +154,7 @@ export const updateBallistaRigTracking = (
   rig.cradlePitchGroup.rotation.z += clampedPitchStep
   const pitchError = Math.abs(pitchDelta - clampedPitchStep)
   return {
-    aimAligned: targetPos !== null && yawError <= AIM_LOCK_TOLERANCE_RAD && pitchError <= AIM_LOCK_TOLERANCE_RAD
+    aimAligned: desiredLaunchVelocity !== null && yawError <= AIM_LOCK_TOLERANCE_RAD && pitchError <= AIM_LOCK_TOLERANCE_RAD
   }
 }
 

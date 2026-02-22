@@ -3931,7 +3931,6 @@ const tick = (now: number, delta: number) => {
     tower.shootCooldown = Math.max(tower.shootCooldown - delta, 0)
     const target = pickMobInRange(tower.mesh.position, tower.range)
     const rig = towerBallistaRigs.get(tower)
-    let trackedAimPoint: THREE.Vector3 | null = null
     let canFire = true
     if (target) {
       getTowerLaunchTransform(
@@ -3953,22 +3952,27 @@ const tick = (now: number, delta: number) => {
           BALLISTA_ARROW_GRAVITY_DELAY,
           BALLISTA_ARROW_MAX_LIFETIME
         )
-      trackedAimPoint = intercept?.interceptPoint ?? towerTargetPosScratch
+      const launchVelocity = closeRangeDirectAim
+        ? towerTargetPosScratch.clone().sub(towerLaunchPosScratch).normalize().multiplyScalar(BALLISTA_ARROW_SPEED)
+        : intercept?.velocity
+          ?? computeFallbackBallisticVelocity(
+            towerLaunchPosScratch,
+            towerTargetPosScratch,
+            towerArrowGravity,
+            BALLISTA_ARROW_GRAVITY_DELAY,
+            BALLISTA_ARROW_SPEED,
+            BALLISTA_ARROW_MAX_LIFETIME
+          )
       if (rig) {
-        canFire = updateBallistaRigTracking(rig, tower.mesh.position, trackedAimPoint, delta).aimAligned
+        canFire = updateBallistaRigTracking(
+          rig,
+          tower.mesh.position,
+          towerTargetPosScratch,
+          launchVelocity,
+          delta
+        ).aimAligned
       }
       if (tower.shootCooldown <= 0 && arrowModelTemplate && canFire) {
-        const launchVelocity = closeRangeDirectAim
-          ? towerTargetPosScratch.clone().sub(towerLaunchPosScratch).normalize().multiplyScalar(BALLISTA_ARROW_SPEED)
-          : intercept?.velocity
-            ?? computeFallbackBallisticVelocity(
-              towerLaunchPosScratch,
-              towerTargetPosScratch,
-              towerArrowGravity,
-              BALLISTA_ARROW_GRAVITY_DELAY,
-              BALLISTA_ARROW_SPEED,
-              BALLISTA_ARROW_MAX_LIFETIME
-            )
         spawnTowerArrowProjectile(
           tower,
           towerLaunchPosScratch,
@@ -3978,7 +3982,7 @@ const tick = (now: number, delta: number) => {
         tower.shootCooldown = tower.shootCadence
       }
     } else if (rig) {
-      updateBallistaRigTracking(rig, tower.mesh.position, trackedAimPoint, delta)
+      updateBallistaRigTracking(rig, tower.mesh.position, null, null, delta)
     }
   }
   updateTowerArrowProjectiles(delta)
