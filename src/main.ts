@@ -8,6 +8,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import castleModelUrl from './assets/models/castle.glb?url'
 import coinModelUrl from './assets/models/coin.glb?url'
 import groundModelUrl from './assets/models/ground.glb?url'
+import mobModelUrl from './assets/models/mob.glb?url'
 import pathCornerInnerModelUrl from './assets/models/path-corner-inner.glb?url'
 import pathCornerOuterModelUrl from './assets/models/path-corner-outer.glb?url'
 import pathEdgeModelUrl from './assets/models/path-edge.glb?url'
@@ -1352,6 +1353,17 @@ gltfLoader.load(
 )
 
 gltfLoader.load(
+  mobModelUrl,
+  (gltf) => {
+    applyMobVisualTemplate(gltf.scene)
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load mob model:', error)
+  }
+)
+
+gltfLoader.load(
   castleModelUrl,
   (gltf) => {
     if (castleContentLoaded) return
@@ -1451,11 +1463,54 @@ mobInstanceMesh.frustumCulled = false
 mobInstanceMesh.castShadow = true
 mobInstanceMesh.receiveShadow = true
 scene.add(mobInstanceMesh)
+const mobFacingQuaternionScratch = new THREE.Quaternion()
+const mobFacingDirectionScratch = new THREE.Vector3()
+const mobInstanceBaseMatrix = new THREE.Matrix4()
+const mobInstanceGroundOffsetY = -MOB_HEIGHT * 0.5
+let mobInstanceHeadingOffset = 0
+let mobDeathVisualTemplate: THREE.Object3D | null = null
+
+const computeFacingYawFromTemplate = (source: THREE.Object3D) => {
+  const facing = source.getObjectByName('Facing')
+  if (!facing) return 0
+  facing.getWorldQuaternion(mobFacingQuaternionScratch)
+  // Mob Facing empty is authored as an arrow; exported forward is local +Y.
+  mobFacingDirectionScratch.set(0, 1, 0).applyQuaternion(mobFacingQuaternionScratch)
+  mobFacingDirectionScratch.y = 0
+  if (mobFacingDirectionScratch.lengthSq() < 1e-9) return 0
+  mobFacingDirectionScratch.normalize()
+  return Math.atan2(mobFacingDirectionScratch.x, mobFacingDirectionScratch.z)
+}
+
+const applyMobVisualTemplate = (source: THREE.Object3D) => {
+  const model = source.clone(true)
+  const bounds = new THREE.Box3().setFromObject(model)
+  if (!bounds.isEmpty()) {
+    const center = new THREE.Vector3()
+    bounds.getCenter(center)
+    // Keep authored bottom alignment while centering footprint around entity origin.
+    model.position.set(-center.x, 0, -center.z)
+  }
+  model.updateMatrixWorld(true)
+  mobInstanceHeadingOffset = -computeFacingYawFromTemplate(model) + Math.PI
+  mobDeathVisualTemplate = model.clone(true)
+  const meshNode = model.getObjectByProperty('isMesh', true)
+  if (!(meshNode instanceof THREE.Mesh)) return
+  mobInstanceBaseMatrix.copy(meshNode.matrixWorld)
+  mobInstanceMesh.geometry.dispose()
+  mobInstanceMesh.geometry = meshNode.geometry
+  if (Array.isArray(mobInstanceMesh.material)) {
+    for (const material of mobInstanceMesh.material) material.dispose()
+  } else {
+    mobInstanceMesh.material.dispose()
+  }
+  mobInstanceMesh.material = Array.isArray(meshNode.material)
+    ? meshNode.material.map((material) => material.clone())
+    : meshNode.material.clone()
+}
 const mobLogicGeometry = new THREE.BoxGeometry(MOB_WIDTH, MOB_HEIGHT, MOB_WIDTH)
 const mobLogicMaterial = new THREE.MeshBasicMaterial({ visible: false })
 const mobInstanceDummy = new THREE.Object3D()
-const normalMobColor = new THREE.Color(0xff7a7a)
-const berserkMobColor = new THREE.Color(0xff3a3a)
 
 const getSpawnerOutwardNormal = (pos: THREE.Vector3) => {
   if (Math.abs(pos.x) >= Math.abs(pos.z)) {
@@ -1960,6 +2015,15 @@ type GrowingTree = {
   startedAtMs: number
 }
 
+type MobDeathVisual = {
+  root: THREE.Object3D
+  materials: THREE.Material[]
+  age: number
+  heading: number
+  fallSign: number
+  startY: number
+}
+
 const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
   if (upgradeId === 'range') return ENERGY_COST_UPGRADE_RANGE
   if (upgradeId === 'damage') return ENERGY_COST_UPGRADE_DAMAGE
@@ -2039,8 +2103,98 @@ app.appendChild(damageTextContainer)
 
 const activeEnergyTrails: EnergyTrail[] = []
 const activeDamageTexts: FloatingDamageText[] = []
+const activeMobDeathVisuals: MobDeathVisual[] = []
 const CRIT_CHANCE = 1 / 8
 const CRIT_MULTIPLIER = 2
+
+const clearMobDeathVisuals = () => {
+  for (const visual of activeMobDeathVisuals) {
+    scene.remove(visual.root)
+    for (const material of visual.materials) {
+      material.dispose()
+    }
+  }
+  activeMobDeathVisuals.length = 0
+}
+
+const spawnMobDeathVisual = (mob: MobEntity) => {
+  if (!mobDeathVisualTemplate) return
+  const deathRoot = new THREE.Group()
+  const corpse = mobDeathVisualTemplate.clone(true)
+  const corpseBounds = new THREE.Box3().setFromObject(corpse)
+  if (!corpseBounds.isEmpty()) {
+    // Force the local pivot to the model's bottom, so tipping hinges at ground contact.
+    corpse.position.y -= corpseBounds.min.y
+  }
+  deathRoot.add(corpse)
+  deathRoot.position.copy(mob.mesh.position)
+  deathRoot.position.y += mobInstanceGroundOffsetY
+  const startY = deathRoot.position.y
+  const headingSpeedSq = mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z
+  const heading = headingSpeedSq > 1e-6 ? Math.atan2(mob.velocity.x, mob.velocity.z) + mobInstanceHeadingOffset : mobInstanceHeadingOffset
+  deathRoot.rotation.y = heading
+
+  const deathMaterials: THREE.Material[] = []
+  corpse.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return
+    const clonedMaterial = Array.isArray(node.material)
+      ? node.material.map((material) => material.clone())
+      : node.material.clone()
+    const asArray = Array.isArray(clonedMaterial) ? clonedMaterial : [clonedMaterial]
+    for (const material of asArray) {
+      material.transparent = true
+      material.opacity = 1
+      material.depthWrite = false
+      deathMaterials.push(material)
+    }
+    node.material = clonedMaterial
+    node.castShadow = true
+    node.receiveShadow = true
+  })
+  scene.add(deathRoot)
+
+  activeMobDeathVisuals.push({
+    root: deathRoot,
+    materials: deathMaterials,
+    age: 0,
+    heading,
+    fallSign: ((mob.mesh.id * 2654435761) >>> 0) % 2 === 0 ? 1 : -1
+    ,
+    startY
+  })
+}
+
+const updateMobDeathVisuals = (delta: number) => {
+  const FALL_DURATION = 0.5
+  const HOLD_DURATION = 1.15
+  const FADE_DURATION = 1.0
+  const TOTAL_DURATION = FALL_DURATION + HOLD_DURATION + FADE_DURATION
+  const MAX_FALL_ANGLE = Math.PI * 0.56
+  const SINK_DISTANCE = 0.85
+  for (let i = activeMobDeathVisuals.length - 1; i >= 0; i -= 1) {
+    const visual = activeMobDeathVisuals[i]!
+    visual.age += delta
+    const clampedFallT = clamp(visual.age / FALL_DURATION, 0, 1)
+    const easedFall = 1 - (1 - clampedFallT) * (1 - clampedFallT)
+    visual.root.rotation.set(0, visual.heading, 0)
+    visual.root.rotateZ(visual.fallSign * MAX_FALL_ANGLE * easedFall)
+    const fadeStart = FALL_DURATION + HOLD_DURATION
+    const fadeT = clamp((visual.age - fadeStart) / FADE_DURATION, 0, 1)
+    const sinkEase = 1 - (1 - fadeT) * (1 - fadeT)
+    visual.root.position.y = visual.startY - SINK_DISTANCE * sinkEase
+    const opacity = 1 - fadeT
+    for (const material of visual.materials) {
+      material.opacity = opacity
+    }
+    if (visual.age >= TOTAL_DURATION) {
+      scene.remove(visual.root)
+      for (const material of visual.materials) {
+        material.dispose()
+      }
+      activeMobDeathVisuals.splice(i, 1)
+    }
+  }
+}
 
 const updateCoinHudView = (delta: number) => {
   const rect = coinHudCanvasEl.getBoundingClientRect()
@@ -3104,6 +3258,7 @@ const resetGame = () => {
   }
   mobs.length = 0
   mobInstanceMesh.count = 0
+  clearMobDeathVisuals()
   spawnerById.clear()
   activeWaveSpawners.length = 0
   spawnerPathlineCache.clear()
@@ -3358,11 +3513,12 @@ const updateMobInstanceRender = (now: number) => {
     camera,
     mobInstanceMesh,
     mobInstanceDummy,
+    mobInstanceBaseMatrix,
+    mobInstanceGroundOffsetY,
+    mobInstanceHeadingOffset,
     nowMs: now,
     maxVisibleMobInstances: MAX_VISIBLE_MOB_INSTANCES,
-    mobInstanceCap: MOB_INSTANCE_CAP,
-    normalMobColor,
-    berserkMobColor
+    mobInstanceCap: MOB_INSTANCE_CAP
   })
 }
 
@@ -3480,6 +3636,7 @@ const tick = (now: number, delta: number) => {
   }
 
   updateParticles(delta)
+  updateMobDeathVisuals(delta)
   updateEnergyTrails(delta)
   updateFloatingDamageTexts(delta)
 
@@ -3551,6 +3708,7 @@ const tick = (now: number, delta: number) => {
         break
       }
     } else if ((mob.hp ?? 0) <= 0) {
+      spawnMobDeathVisual(mob)
       spawnMobDeathEffects(mob.mesh.position.clone())
       if (mob.lastHitBy === 'player') {
         spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL)
@@ -3786,7 +3944,12 @@ const disposeApp = () => {
 
   scene.remove(mobInstanceMesh)
   mobInstanceMesh.geometry.dispose()
-  ;(mobInstanceMesh.material as THREE.Material).dispose()
+  if (Array.isArray(mobInstanceMesh.material)) {
+    for (const material of mobInstanceMesh.material) material.dispose()
+  } else {
+    mobInstanceMesh.material.dispose()
+  }
+  clearMobDeathVisuals()
   mobLogicGeometry.dispose()
   mobLogicMaterial.dispose()
   towerLaserGeometry.dispose()

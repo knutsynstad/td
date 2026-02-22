@@ -6,11 +6,12 @@ type RenderMobInstancesOptions = {
   camera: THREE.Camera
   mobInstanceMesh: THREE.InstancedMesh
   mobInstanceDummy: THREE.Object3D
+  mobInstanceBaseMatrix: THREE.Matrix4
+  mobInstanceGroundOffsetY: number
+  mobInstanceHeadingOffset: number
   nowMs: number
   maxVisibleMobInstances: number
   mobInstanceCap: number
-  normalMobColor: THREE.Color
-  berserkMobColor: THREE.Color
 }
 
 export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
@@ -26,6 +27,7 @@ export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
   frustum.setFromProjectionMatrix(viewProjectionMatrix)
   const cullingSphere = new THREE.Sphere()
   const cullingRadius = 0.95
+  const finalMatrix = new THREE.Matrix4()
   const time = opts.nowMs * 0.001
   let renderCount = 0
 
@@ -43,19 +45,16 @@ export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
     const heightScale = 0.9 + ((seed * 3.731) % 0.2)
     const rollScale = 0.88 + ((seed * 5.417) % 0.24)
     const wiggle = isWalking ? Math.sin(time * frequency + phaseOffset) : 0
-    opts.mobInstanceDummy.position.y = mob.baseY + wiggle * WALK_WIGGLE_HEIGHT * heightScale
+    opts.mobInstanceDummy.position.y = mob.baseY + opts.mobInstanceGroundOffsetY + wiggle * WALK_WIGGLE_HEIGHT * heightScale
     opts.mobInstanceDummy.scale.setScalar(1)
-    const heading = isWalking ? Math.atan2(mob.velocity.x, mob.velocity.z) : 0
+    const heading = (isWalking ? Math.atan2(mob.velocity.x, mob.velocity.z) : 0) + opts.mobInstanceHeadingOffset
     opts.mobInstanceDummy.rotation.set(0, heading, wiggle * WALK_WIGGLE_ROLL * rollScale)
     opts.mobInstanceDummy.updateMatrix()
-    opts.mobInstanceMesh.setMatrixAt(renderCount, opts.mobInstanceDummy.matrix)
-    opts.mobInstanceMesh.setColorAt(renderCount, mob.berserkMode ? opts.berserkMobColor : opts.normalMobColor)
+    finalMatrix.multiplyMatrices(opts.mobInstanceDummy.matrix, opts.mobInstanceBaseMatrix)
+    opts.mobInstanceMesh.setMatrixAt(renderCount, finalMatrix)
     renderCount += 1
   }
 
   opts.mobInstanceMesh.count = renderCount
   opts.mobInstanceMesh.instanceMatrix.needsUpdate = true
-  if (opts.mobInstanceMesh.instanceColor) {
-    opts.mobInstanceMesh.instanceColor.needsUpdate = true
-  }
 }
