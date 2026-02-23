@@ -109,6 +109,11 @@ import {
   TREE_REGROW_MS,
   TOWER_HEIGHT,
   TOWER_HP,
+  WATER_BOB_AMPLITUDE,
+  WATER_BOB_SPEED,
+  WATER_LEVEL,
+  WATER_RING_INNER_PADDING,
+  WATER_RING_OUTER_PADDING,
   WAVE_MAX_SPAWNERS,
   WAVE_MIN_SPAWNERS,
   WAVE_SPAWNER_BASE_RATE,
@@ -707,6 +712,26 @@ class StagingIslandsOverlay {
   private readonly pathOuterCornerLayer = new InstancedModelLayer(scene, 600, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
   private readonly gateClosedMaterial = new THREE.MeshStandardMaterial({ color: 0xb64747, transparent: true, opacity: 0.95 })
   private readonly gateOpenMaterial = new THREE.MeshStandardMaterial({ color: 0x4bb46a, transparent: true, opacity: 0.9 })
+  private tilesChangedListener: (() => void) | null = null
+
+  setTilesChangedListener(listener: (() => void) | null) {
+    this.tilesChangedListener = listener
+  }
+
+  getLandTileKeys() {
+    const keys = new Set<string>()
+    for (const tiles of this.islandGroundPositionsBySpawner.values()) {
+      for (const tile of tiles) {
+        keys.add(`${tile.x},${tile.z}`)
+      }
+    }
+    for (const bridgePathKeys of this.bridgePathKeysBySpawner.values()) {
+      for (const key of bridgePathKeys) {
+        keys.add(key)
+      }
+    }
+    return keys
+  }
 
   setGroundTemplate(source: THREE.Object3D | null) {
     this.groundLayer.setTemplate(source)
@@ -763,6 +788,7 @@ class StagingIslandsOverlay {
       bridgePathOuterCornerTransforms.push(...transforms)
     }
     this.pathOuterCornerLayer.setTransforms(bridgePathOuterCornerTransforms)
+    this.tilesChangedListener?.()
   }
 
   hasBridgePathAt(x: number, z: number) {
@@ -1358,6 +1384,239 @@ ground.position.y = 0
 ground.visible = false
 ground.receiveShadow = true
 scene.add(ground)
+type WaterDistanceField = {
+  texture: THREE.DataTexture,
+  minX: number,
+  minZ: number,
+  sizeX: number,
+  sizeZ: number
+}
+const waterInnerEdge = WORLD_BOUNDS + WATER_RING_INNER_PADDING
+const waterOuterEdge = WORLD_BOUNDS + WATER_RING_OUTER_PADDING
+const waterBandDepth = Math.max(2, waterOuterEdge - waterInnerEdge)
+const waterPerimeterCenter = (waterInnerEdge + waterOuterEdge) * 0.5
+const waterPerimeterLength = waterOuterEdge * 2 + waterBandDepth * 2
+const buildCoastlineLandKeys = () => {
+  const landKeys = new Set<string>()
+  for (let x = -WORLD_BOUNDS; x <= WORLD_BOUNDS; x += GRID_SIZE) {
+    for (let z = -WORLD_BOUNDS; z <= WORLD_BOUNDS; z += GRID_SIZE) {
+      landKeys.add(`${x},${z}`)
+    }
+  }
+  const stagingKeys = stagingIslandsOverlay.getLandTileKeys()
+  for (const key of stagingKeys) {
+    landKeys.add(key)
+  }
+  return landKeys
+}
+
+const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number): WaterDistanceField => {
+  let minX = -waterOuterEdge
+  let maxX = waterOuterEdge
+  let minZ = -waterOuterEdge
+  let maxZ = waterOuterEdge
+  for (const key of landTileKeys) {
+    const { x, z } = parseGridKey(key)
+    minX = Math.min(minX, x - GRID_SIZE * 3)
+    maxX = Math.max(maxX, x + GRID_SIZE * 3)
+    minZ = Math.min(minZ, z - GRID_SIZE * 3)
+    maxZ = Math.max(maxZ, z + GRID_SIZE * 3)
+  }
+  const sizeX = Math.max(GRID_SIZE * 2, maxX - minX)
+  const sizeZ = Math.max(GRID_SIZE * 2, maxZ - minZ)
+  const maxDistCells = 34
+  const dist = new Int16Array(resolution * resolution)
+  dist.fill(-1)
+  const landMask = new Uint8Array(resolution * resolution)
+  const queue = new Int32Array(resolution * resolution)
+  let head = 0
+  let tail = 0
+  const indexOf = (tx: number, tz: number) => tz * resolution + tx
+  const toCellX = (x: number) => Math.max(0, Math.min(resolution - 1, Math.floor(((x - minX) / sizeX) * (resolution - 1))))
+  const toCellZ = (z: number) => Math.max(0, Math.min(resolution - 1, Math.floor(((z - minZ) / sizeZ) * (resolution - 1))))
+
+  for (const key of landTileKeys) {
+    const { x, z } = parseGridKey(key)
+    const minTx = toCellX(x - GRID_SIZE * 0.5)
+    const maxTx = toCellX(x + GRID_SIZE * 0.5)
+    const minTz = toCellZ(z - GRID_SIZE * 0.5)
+    const maxTz = toCellZ(z + GRID_SIZE * 0.5)
+    for (let tz = minTz; tz <= maxTz; tz += 1) {
+      for (let tx = minTx; tx <= maxTx; tx += 1) {
+        const idx = indexOf(tx, tz)
+        landMask[idx] = 1
+      }
+    }
+  }
+
+  // Seed from shoreline water cells (water cells directly adjacent to land),
+  // so every coast emits at the same phase origin.
+  for (let tz = 0; tz < resolution; tz += 1) {
+    for (let tx = 0; tx < resolution; tx += 1) {
+      const idx = indexOf(tx, tz)
+      if (landMask[idx] === 1) continue
+      let touchesLand = false
+      if (tx > 0 && landMask[idx - 1] === 1) touchesLand = true
+      if (tx + 1 < resolution && landMask[idx + 1] === 1) touchesLand = true
+      if (tz > 0 && landMask[idx - resolution] === 1) touchesLand = true
+      if (tz + 1 < resolution && landMask[idx + resolution] === 1) touchesLand = true
+      if (!touchesLand) continue
+      dist[idx] = 0
+      queue[tail] = idx
+      tail += 1
+    }
+  }
+
+  while (head < tail) {
+    const idx = queue[head]!
+    head += 1
+    const baseDist = dist[idx]!
+    if (baseDist >= maxDistCells) continue
+    const tx = idx % resolution
+    const tz = (idx - tx) / resolution
+    const nextDist = baseDist + 1
+    if (tx > 0) {
+      const ni = idx - 1
+      if (landMask[ni] === 0 && dist[ni] === -1) {
+        dist[ni] = nextDist
+        queue[tail] = ni
+        tail += 1
+      }
+    }
+    if (tx + 1 < resolution) {
+      const ni = idx + 1
+      if (landMask[ni] === 0 && dist[ni] === -1) {
+        dist[ni] = nextDist
+        queue[tail] = ni
+        tail += 1
+      }
+    }
+    if (tz > 0) {
+      const ni = idx - resolution
+      if (landMask[ni] === 0 && dist[ni] === -1) {
+        dist[ni] = nextDist
+        queue[tail] = ni
+        tail += 1
+      }
+    }
+    if (tz + 1 < resolution) {
+      const ni = idx + resolution
+      if (landMask[ni] === 0 && dist[ni] === -1) {
+        dist[ni] = nextDist
+        queue[tail] = ni
+        tail += 1
+      }
+    }
+  }
+
+  const data = new Uint8Array(resolution * resolution * 4)
+  for (let i = 0; i < dist.length; i += 1) {
+    if (landMask[i] === 1) {
+      const diLand = i * 4
+      data[diLand] = 0
+      data[diLand + 1] = 0
+      data[diLand + 2] = 0
+      data[diLand + 3] = 255
+      continue
+    }
+    const raw = dist[i]!
+    const clamped = raw < 0 ? maxDistCells : Math.min(raw, maxDistCells)
+    const normalized = clamped / maxDistCells
+    const byte = Math.round(normalized * 255)
+    const di = i * 4
+    data[di] = byte
+    data[di + 1] = byte
+    data[di + 2] = byte
+    data[di + 3] = 255
+  }
+
+  const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat)
+  texture.needsUpdate = true
+  texture.magFilter = THREE.LinearFilter
+  texture.minFilter = THREE.LinearFilter
+  texture.wrapS = THREE.ClampToEdgeWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
+  return { texture, minX, minZ, sizeX, sizeZ }
+}
+
+const waterDistanceResolution = 512
+let waterDistanceField = buildWaterDistanceField(buildCoastlineLandKeys(), waterDistanceResolution)
+const waterMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uDistanceTex: { value: waterDistanceField.texture },
+    uBounds: { value: new THREE.Vector4(waterDistanceField.minX, waterDistanceField.minZ, waterDistanceField.sizeX, waterDistanceField.sizeZ) },
+    uWaterColor: { value: new THREE.Color(0x3f8fb2) },
+    uFoamColor: { value: new THREE.Color(0xc9f3fb) }
+  },
+  vertexShader: `
+    varying vec2 vWorldXZ;
+    void main() {
+      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      vWorldXZ = worldPos.xz;
+      gl_Position = projectionMatrix * viewMatrix * worldPos;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vWorldXZ;
+    uniform float uTime;
+    uniform sampler2D uDistanceTex;
+    uniform vec4 uBounds;
+    uniform vec3 uWaterColor;
+    uniform vec3 uFoamColor;
+
+    void main() {
+      vec2 uv = (vWorldXZ - uBounds.xy) / uBounds.zw;
+      uv = clamp(uv, 0.0, 1.0);
+      float distanceToLand = texture2D(uDistanceTex, uv).r;
+
+      vec3 baseColor = uWaterColor;
+
+      // Simplified pulse controls:
+      // emitRate, travelSpeed, stroke, fadeDistance.
+      float emitRate = 0.90;
+      float travelSpeed = 0.08;
+      float stroke = 0.028;
+      float fadeDistance = 2.0;
+      float cycle = fract(uTime * emitRate);
+
+      // Start fully hidden: negative offset of half stroke + blur.
+      float blur = stroke * 0.5;
+      float startOffset = -(0.5 * stroke + blur);
+      float center = startOffset + cycle * travelSpeed;
+      float halfStroke = max(0.00075, stroke * 0.5);
+      float distToCenter = abs(distanceToLand - center);
+      float band = 1.0 - smoothstep(halfStroke - blur, halfStroke + blur, distToCenter);
+
+      float lifeFade = 1.0 - cycle;
+      float distanceFade = exp(-distanceToLand / max(0.0001, fadeDistance));
+      float ringFoam = band * lifeFade * distanceFade;
+      float foamAmount = clamp(ringFoam * 0.42, 0.0, 1.0);
+      vec3 color = mix(baseColor, uFoamColor, foamAmount * 0.65);
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+})
+const waterMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(waterPerimeterLength * 1.4, waterPerimeterLength * 1.4, 1, 1),
+  waterMaterial
+)
+waterMesh.rotation.x = -Math.PI / 2
+waterMesh.position.y = WATER_LEVEL - 0.01
+waterMesh.castShadow = false
+waterMesh.receiveShadow = false
+scene.add(waterMesh)
+
+const rebuildWaterDistanceField = () => {
+  const next = buildWaterDistanceField(buildCoastlineLandKeys(), waterDistanceResolution)
+  waterDistanceField.texture.dispose()
+  waterDistanceField = next
+  waterMaterial.uniforms.uDistanceTex.value = next.texture
+  waterMaterial.uniforms.uBounds.value.set(next.minX, next.minZ, next.sizeX, next.sizeZ)
+}
+stagingIslandsOverlay.setTilesChangedListener(rebuildWaterDistanceField)
 
 const castle = new THREE.Group()
 castle.position.set(0, 0, 0)
@@ -4712,6 +4971,10 @@ const processCastleCaptures = (now: number) => {
 }
 
 const tick = (now: number, delta: number) => {
+  const waterTime = now * 0.001
+  waterMesh.position.y = WATER_LEVEL - 0.01 + Math.sin(waterTime * WATER_BOB_SPEED) * WATER_BOB_AMPLITUDE * 0.22
+  waterMaterial.uniforms.uTime.value = waterTime
+
   updateMinimapEmbellishAlpha(delta)
   if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlpha) > 0.001) {
     syncMinimapCanvasSize()
@@ -5078,6 +5341,7 @@ const disposeApp = () => {
 
   particleSystem.dispose()
   spawnContainerOverlay.dispose()
+  stagingIslandsOverlay.setTilesChangedListener(null)
   stagingIslandsOverlay.dispose()
   spawnerRouteOverlay.clear()
   pathCenterTileLayer.dispose()
@@ -5121,6 +5385,10 @@ const disposeApp = () => {
   scene.remove(ground)
   ground.geometry.dispose()
   groundMaterial.dispose()
+  scene.remove(waterMesh)
+  waterMesh.geometry.dispose()
+  waterMaterial.dispose()
+  waterDistanceField.texture.dispose()
   groundTileLayer.dispose()
   scene.remove(castle)
   castle.traverse((node) => {
