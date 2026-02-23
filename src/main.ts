@@ -1826,6 +1826,7 @@ const setStructureVisualScale = (mesh: THREE.Mesh, scale: number) => {
 }
 
 const DAMAGE_TINT = new THREE.Color(0xff5d5d)
+const DEATH_FLASH_TINT = new THREE.Color(0xff2a2a)
 const TEMP_BASE_COLOR = new THREE.Color()
 
 const applyStructureDamageVisuals = () => {
@@ -2147,6 +2148,17 @@ mobInstanceMesh.frustumCulled = false
 mobInstanceMesh.castShadow = true
 mobInstanceMesh.receiveShadow = true
 scene.add(mobInstanceMesh)
+const mobHitFlashMesh = new THREE.InstancedMesh(
+  mobInstanceMesh.geometry,
+  new THREE.MeshBasicMaterial({ color: 0xff3f3f, transparent: true, opacity: 0.75, depthWrite: false, depthTest: false }),
+  MOB_INSTANCE_CAP
+)
+mobHitFlashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+mobHitFlashMesh.frustumCulled = false
+mobHitFlashMesh.castShadow = false
+mobHitFlashMesh.receiveShadow = false
+mobHitFlashMesh.renderOrder = 1000
+scene.add(mobHitFlashMesh)
 const mobFacingQuaternionScratch = new THREE.Quaternion()
 const mobFacingDirectionScratch = new THREE.Vector3()
 const mobInstanceBaseMatrix = new THREE.Matrix4()
@@ -2235,8 +2247,10 @@ const applyMobVisualTemplate = (source: THREE.Object3D) => {
   const meshNode = model.getObjectByProperty('isMesh', true)
   if (!(meshNode instanceof THREE.Mesh)) return
   mobInstanceBaseMatrix.copy(meshNode.matrixWorld)
-  mobInstanceMesh.geometry.dispose()
+  const previousGeometry = mobInstanceMesh.geometry
   mobInstanceMesh.geometry = meshNode.geometry
+  mobHitFlashMesh.geometry = meshNode.geometry
+  previousGeometry.dispose()
   if (Array.isArray(mobInstanceMesh.material)) {
     for (const material of mobInstanceMesh.material) material.dispose()
   } else {
@@ -2914,7 +2928,11 @@ type MobDeathVisual = {
   age: number
   heading: number
   fallSign: number
+  startX: number
+  startZ: number
   startY: number
+  knockbackX: number
+  knockbackZ: number
 }
 
 const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
@@ -2959,7 +2977,6 @@ const queueTreeRegrow = (collider: DestructibleCollider) => {
 
 const particleSystem = createParticleSystem(scene)
 const spawnCubeEffects = particleSystem.spawnCubeEffects
-const spawnMobDeathEffects = particleSystem.spawnMobDeathEffects
 const setCoinParticleTemplate = particleSystem.setCoinParticleTemplate
 const updateParticles = particleSystem.updateParticles
 
@@ -3021,10 +3038,34 @@ const spawnMobDeathVisual = (mob: MobEntity) => {
   }
   deathRoot.add(corpse)
   deathRoot.position.copy(mob.mesh.position)
-  deathRoot.position.y += mobInstanceGroundOffsetY
+  const DEATH_VISUAL_LIFT_Y = 0.3
+  deathRoot.position.y += mobInstanceGroundOffsetY + DEATH_VISUAL_LIFT_Y
+  const startX = deathRoot.position.x
+  const startZ = deathRoot.position.z
   const startY = deathRoot.position.y
   const headingSpeedSq = mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z
-  const heading = headingSpeedSq > 1e-6 ? Math.atan2(mob.velocity.x, mob.velocity.z) + mobInstanceHeadingOffset : mobInstanceHeadingOffset
+  let heading = headingSpeedSq > 1e-6 ? Math.atan2(mob.velocity.x, mob.velocity.z) + mobInstanceHeadingOffset : mobInstanceHeadingOffset
+  const fallSignFallback = ((mob.mesh.id * 2654435761) >>> 0) % 2 === 0 ? 1 : -1
+  let fallSign = fallSignFallback
+  let knockbackX = 0
+  let knockbackZ = 0
+  if (mob.lastHitDirection) {
+    const hitDirX = mob.lastHitDirection.x
+    const hitDirZ = mob.lastHitDirection.z
+    const hitLenSq = hitDirX * hitDirX + hitDirZ * hitDirZ
+    if (hitLenSq > 1e-8) {
+      const hitLenInv = 1 / Math.sqrt(hitLenSq)
+      const normalizedHitDirX = hitDirX * hitLenInv
+      const normalizedHitDirZ = hitDirZ * hitLenInv
+      // Align yaw so local +Z faces the hit direction, then tip front/back.
+      heading = Math.atan2(normalizedHitDirX, normalizedHitDirZ) + mobInstanceHeadingOffset
+      // Rig pitch orientation is mirrored; this sign tips along local +Z.
+      fallSign = -1
+      const DEATH_KNOCKBACK_DISTANCE = 2.6
+      knockbackX = normalizedHitDirX * DEATH_KNOCKBACK_DISTANCE
+      knockbackZ = normalizedHitDirZ * DEATH_KNOCKBACK_DISTANCE
+    }
+  }
   deathRoot.rotation.y = heading
 
   const deathMaterials: THREE.Material[] = []
@@ -3038,6 +3079,10 @@ const spawnMobDeathVisual = (mob: MobEntity) => {
       material.transparent = true
       material.opacity = 1
       material.depthWrite = false
+      const tintableMaterial = material as THREE.Material & { color?: THREE.Color }
+      if (tintableMaterial.color) {
+        tintableMaterial.userData.deathFlashBaseColorHex = tintableMaterial.color.getHex()
+      }
       deathMaterials.push(material)
     }
     node.material = clonedMaterial
@@ -3051,9 +3096,12 @@ const spawnMobDeathVisual = (mob: MobEntity) => {
     materials: deathMaterials,
     age: 0,
     heading,
-    fallSign: ((mob.mesh.id * 2654435761) >>> 0) % 2 === 0 ? 1 : -1
-    ,
-    startY
+    fallSign,
+    startX,
+    startZ,
+    startY,
+    knockbackX,
+    knockbackZ
   })
 }
 
@@ -3061,22 +3109,41 @@ const updateMobDeathVisuals = (delta: number) => {
   const FALL_DURATION = 0.5
   const HOLD_DURATION = 1.15
   const FADE_DURATION = 1.0
+  const HIT_FLASH_HOLD_DURATION = 0.32
+  const HIT_FLASH_LERP_OUT_DURATION = 0.2
+  const KNOCKBACK_DURATION = 0.38
   const TOTAL_DURATION = FALL_DURATION + HOLD_DURATION + FADE_DURATION
   const MAX_FALL_ANGLE = Math.PI * 0.56
   const SINK_DISTANCE = 0.85
+  const MIN_DEATH_Y = -2
   for (let i = activeMobDeathVisuals.length - 1; i >= 0; i -= 1) {
     const visual = activeMobDeathVisuals[i]!
     visual.age += delta
     const clampedFallT = clamp(visual.age / FALL_DURATION, 0, 1)
     const easedFall = 1 - (1 - clampedFallT) * (1 - clampedFallT)
+    const knockbackT = clamp(visual.age / KNOCKBACK_DURATION, 0, 1)
+    const knockbackEase = 1 - (1 - knockbackT) * (1 - knockbackT) * (1 - knockbackT)
+    visual.root.position.x = visual.startX + visual.knockbackX * knockbackEase
+    visual.root.position.z = visual.startZ + visual.knockbackZ * knockbackEase
     visual.root.rotation.set(0, visual.heading, 0)
-    visual.root.rotateZ(visual.fallSign * MAX_FALL_ANGLE * easedFall)
+    visual.root.rotateX(visual.fallSign * MAX_FALL_ANGLE * easedFall)
+    const hitFlashStrength = visual.age <= HIT_FLASH_HOLD_DURATION
+      ? 1
+      : clamp(1 - (visual.age - HIT_FLASH_HOLD_DURATION) / HIT_FLASH_LERP_OUT_DURATION, 0, 1)
     const fadeStart = FALL_DURATION + HOLD_DURATION
     const fadeT = clamp((visual.age - fadeStart) / FADE_DURATION, 0, 1)
     const sinkEase = 1 - (1 - fadeT) * (1 - fadeT)
-    visual.root.position.y = visual.startY - SINK_DISTANCE * sinkEase
+    visual.root.position.y = Math.max(visual.startY - SINK_DISTANCE * sinkEase, MIN_DEATH_Y)
     const opacity = 1 - fadeT
     for (const material of visual.materials) {
+      const tintableMaterial = material as THREE.Material & { color?: THREE.Color }
+      if (tintableMaterial.color) {
+        const baseColorHex = tintableMaterial.userData.deathFlashBaseColorHex as number | undefined
+        if (baseColorHex !== undefined) {
+          TEMP_BASE_COLOR.setHex(baseColorHex)
+          tintableMaterial.color.copy(TEMP_BASE_COLOR).lerp(DEATH_FLASH_TINT, hitFlashStrength)
+        }
+      }
       material.opacity = opacity
     }
     if (visual.age >= TOTAL_DURATION) {
@@ -3531,6 +3598,8 @@ const projectileClosestPointScratch = new THREE.Vector3()
 const projectileDeltaScratch = new THREE.Vector3()
 const projectileMobCenterScratch = new THREE.Vector3()
 const projectileHitPointScratch = new THREE.Vector3()
+const projectileHitDirectionScratch = new THREE.Vector3()
+const MOB_HIT_FLASH_MS = 120
 const arrowFacingDirectionScratch = new THREE.Vector3()
 const arrowOrientSourceAxisScratch = new THREE.Vector3()
 const arrowDesiredFacingQuaternionScratch = new THREE.Quaternion()
@@ -3551,6 +3620,23 @@ const orientArrowToVelocity = (object: THREE.Object3D, velocity: THREE.Vector3) 
 const placeArrowMeshAtFacing = (object: THREE.Object3D, facingPosition: THREE.Vector3) => {
   arrowOffsetWorldScratch.copy(arrowFacingAnchorLocalPos).applyQuaternion(object.quaternion)
   object.position.copy(facingPosition).sub(arrowOffsetWorldScratch)
+}
+
+const setMobLastHitDirection = (
+  mob: MobEntity,
+  primaryDirection: THREE.Vector3,
+  fallbackDirection?: THREE.Vector3
+) => {
+  projectileHitDirectionScratch.set(primaryDirection.x, 0, primaryDirection.z)
+  if (projectileHitDirectionScratch.lengthSq() <= 1e-8 && fallbackDirection) {
+    projectileHitDirectionScratch.set(fallbackDirection.x, 0, fallbackDirection.z)
+  }
+  if (projectileHitDirectionScratch.lengthSq() <= 1e-8) return
+  mob.lastHitDirection = projectileHitDirectionScratch.normalize().clone()
+}
+
+const markMobHitFlash = (mob: MobEntity) => {
+  mob.hitFlashUntilMs = performance.now() + MOB_HIT_FLASH_MS
 }
 
 const solveBallisticIntercept = (
@@ -4771,10 +4857,12 @@ const updateTowerArrowProjectiles = (delta: number) => {
     if (!hitMob) continue
     projectile.position.copy(projectileHitPointScratch)
     placeArrowMeshAtFacing(projectile.mesh, projectile.position)
+    setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity)
     const attack = rollAttackDamage(projectile.damage)
     const prevHp = hitMob.hp ?? 1
     const nextHp = prevHp - attack.damage
     hitMob.hp = nextHp
+    markMobHitFlash(hitMob)
     hitMob.lastHitBy = 'tower'
     spawnFloatingDamageText(hitMob, attack.damage, 'tower', attack.isCrit)
     if (prevHp > 0 && nextHp <= 0) {
@@ -4854,8 +4942,10 @@ const updatePlayerArrowProjectiles = (delta: number) => {
     if (!hitMob) continue
     projectile.position.copy(projectileHitPointScratch)
     placeArrowMeshAtFacing(projectile.mesh, projectile.position)
+    setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity)
     const attack = rollAttackDamage(projectile.damage)
     hitMob.hp = (hitMob.hp ?? 0) - attack.damage
+    markMobHitFlash(hitMob)
     hitMob.lastHitBy = 'player'
     spawnFloatingDamageText(hitMob, attack.damage, 'player', attack.isCrit)
     scene.remove(projectile.mesh)
@@ -4868,6 +4958,7 @@ const updateMobInstanceRender = (now: number) => {
     mobs,
     camera,
     mobInstanceMesh,
+    mobHitFlashMesh,
     mobInstanceDummy,
     mobInstanceBaseMatrix,
     mobInstanceGroundOffsetY,
@@ -5120,7 +5211,6 @@ const tick = (now: number, delta: number) => {
     const mob = mobs[i]!
     if ((mob.hp ?? 0) <= 0) {
       spawnMobDeathVisual(mob)
-      spawnMobDeathEffects(mob.mesh.position.clone())
       if (mob.lastHitBy === 'player') {
         spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL)
       }
@@ -5361,11 +5451,17 @@ const disposeApp = () => {
   ;(buildPreview.material as THREE.Material).dispose()
 
   scene.remove(mobInstanceMesh)
+  scene.remove(mobHitFlashMesh)
   mobInstanceMesh.geometry.dispose()
   if (Array.isArray(mobInstanceMesh.material)) {
     for (const material of mobInstanceMesh.material) material.dispose()
   } else {
     mobInstanceMesh.material.dispose()
+  }
+  if (Array.isArray(mobHitFlashMesh.material)) {
+    for (const material of mobHitFlashMesh.material) material.dispose()
+  } else {
+    mobHitFlashMesh.material.dispose()
   }
   clearMobDeathVisuals()
   mobLogicGeometry.dispose()

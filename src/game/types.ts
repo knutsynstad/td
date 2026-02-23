@@ -50,6 +50,8 @@ export type MobEntity = EntityBase & {
   siegeAttackCooldown: number
   unreachableTime: number
   lastHitBy?: 'player' | 'tower'
+  lastHitDirection?: THREE.Vector3
+  hitFlashUntilMs?: number
   spawnerId?: string
   berserkMode: boolean
   berserkTarget: DestructibleCollider | null

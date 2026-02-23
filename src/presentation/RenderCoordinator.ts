@@ -5,6 +5,7 @@ type RenderMobInstancesOptions = {
   mobs: MobEntity[]
   camera: THREE.Camera
   mobInstanceMesh: THREE.InstancedMesh
+  mobHitFlashMesh: THREE.InstancedMesh
   mobInstanceDummy: THREE.Object3D
   mobInstanceBaseMatrix: THREE.Matrix4
   mobInstanceGroundOffsetY: number
@@ -30,6 +31,7 @@ export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
   const finalMatrix = new THREE.Matrix4()
   const time = opts.nowMs * 0.001
   let renderCount = 0
+  let flashRenderCount = 0
 
   for (const mob of opts.mobs) {
     cullingSphere.center.copy(mob.mesh.position)
@@ -52,9 +54,16 @@ export const renderVisibleMobInstances = (opts: RenderMobInstancesOptions) => {
     opts.mobInstanceDummy.updateMatrix()
     finalMatrix.multiplyMatrices(opts.mobInstanceDummy.matrix, opts.mobInstanceBaseMatrix)
     opts.mobInstanceMesh.setMatrixAt(renderCount, finalMatrix)
+    const flashActive = (mob.hitFlashUntilMs ?? 0) > opts.nowMs
+    if (flashActive) {
+      opts.mobHitFlashMesh.setMatrixAt(flashRenderCount, finalMatrix)
+      flashRenderCount += 1
+    }
     renderCount += 1
   }
 
   opts.mobInstanceMesh.count = renderCount
   opts.mobInstanceMesh.instanceMatrix.needsUpdate = true
+  opts.mobHitFlashMesh.count = flashRenderCount
+  opts.mobHitFlashMesh.instanceMatrix.needsUpdate = true
 }
