@@ -1,0 +1,14 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../dist/types/server",
+    "tsBuildInfoFile": "../../dist/types/server/tsconfig.tsbuildinfo",
+    "customConditions": [],
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "rootDir": "."
+  },
+  "include": ["./**/*"],
+  "exclude": [],
+  "references": [{ "path": "../shared/tsconfig.json" }]
+}

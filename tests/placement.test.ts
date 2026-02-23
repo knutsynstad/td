@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { getCardinalWallLine, getWallLinePlacement, placeWallSegments } from '../src/placement/building'
-import type { StaticCollider, Tower } from '../src/game/types'
-import { StructureStore } from '../src/game/structures'
+import { getCardinalWallLine, getWallLinePlacement, placeWallSegments } from '../src/client/placement/building'
+import type { StaticCollider, Tower } from '../src/client/game/types'
+import { StructureStore } from '../src/client/game/structures'
 
 describe('placement helpers', () => {
   it('creates cardinal wall lines using dominant axis', () => {

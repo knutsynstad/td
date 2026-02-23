@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import type { WaveSpawner } from '../src/game/types'
-import { createWaveAndSpawnSystem } from '../src/game/systems/WaveAndSpawnSystem'
+import type { WaveSpawner } from '../src/client/game/types'
+import { createWaveAndSpawnSystem } from '../src/client/game/systems/WaveAndSpawnSystem'
 
 describe('wave and spawn integration', () => {
   it('spawns a new wave and updates spawner registries', () => {
@@ -18,14 +18,18 @@ describe('wave and spawn integration', () => {
       random: () => 0.5
     })
 
-    const nextWave = system.spawnWave({
+    const preparedWave = system.prepareNextWave({
       wave: 0,
-      activeWaveSpawners,
-      spawnerById,
       refreshSpawnerPathline: (spawner) => refreshed.push(spawner.id),
       clearWaveOverlays: () => {
         cleared.push('ok')
-      }
+      },
+    })
+    const nextWave = system.startPreparedWave({
+      preparedWave,
+      activeWaveSpawners,
+      spawnerById,
+      onReleaseSpawnerMobs: () => {},
     })
 
     expect(nextWave).toBe(1)

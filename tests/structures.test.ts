@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { StructureStore } from '../src/game/structures'
-import type { StaticCollider, Tower } from '../src/game/types'
+import { StructureStore } from '../src/client/game/structures'
+import type { StaticCollider, Tower } from '../src/client/game/types'
 
 const makeTower = (): Tower => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial())

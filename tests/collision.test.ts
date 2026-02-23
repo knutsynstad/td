@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { aabbOverlap, distanceToColliderSurface } from '../src/physics/collision'
-import type { StaticCollider } from '../src/game/types'
+import { aabbOverlap, distanceToColliderSurface } from '../src/client/physics/collision'
+import type { StaticCollider } from '../src/client/game/types'
 
 describe('collision helpers', () => {
   it('detects AABB overlap correctly', () => {

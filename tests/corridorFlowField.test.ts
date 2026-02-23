@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { buildCastleFlowField, tracePathFromSpawner } from '../src/pathfinding/corridorFlowField'
-import type { StaticCollider } from '../src/game/types'
+import { buildCastleFlowField, tracePathFromSpawner } from '../src/client/pathfinding/corridorFlowField'
+import type { StaticCollider } from '../src/client/game/types'
 
 describe('corridor flow field', () => {
   it('finds very long cardinal paths without search caps', () => {

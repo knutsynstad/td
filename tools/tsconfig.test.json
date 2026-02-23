@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "vitest/globals"],
+    "noEmit": true,
+    "customConditions": ["browser"]
+  },
+  "include": ["src/client/**/*", "src/shared/**/*", "tests/**/*", "src/client/vite-env.d.ts"],
+  "exclude": []
+}

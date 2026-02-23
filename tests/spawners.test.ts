@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { areWaveSpawnersDone, createWaveSpawners, emitFromSpawner } from '../src/game/spawners'
+import { areWaveSpawnersDone, createWaveSpawners, emitFromSpawner } from '../src/client/game/spawners'
 
 describe('spawner system', () => {
   it('splits total mobs across spawners exactly', () => {

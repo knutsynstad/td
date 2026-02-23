@@ -1,11 +1,11 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { computeLanePathAStar } from '../../src/pathfinding/laneAStar'
-import { buildCastleFlowField, tracePathFromSpawner } from '../../src/pathfinding/corridorFlowField'
-import { createEntityMotionSystem } from '../../src/entities/motion'
-import { StructureStore } from '../../src/game/structures'
-import { SpatialGrid } from '../../src/utils/SpatialGrid'
-import type { Entity, StaticCollider, Tower } from '../../src/game/types'
+import { computeLanePathAStar } from '../../src/client/pathfinding/laneAStar'
+import { buildCastleFlowField, tracePathFromSpawner } from '../../src/client/pathfinding/corridorFlowField'
+import { createEntityMotionSystem } from '../../src/client/entities/motion'
+import { StructureStore } from '../../src/client/game/structures'
+import { SpatialGrid } from '../../src/client/utils/SpatialGrid'
+import type { Entity, StaticCollider, Tower } from '../../src/client/game/types'
 
 const WORLD_BOUNDS = 64
 const GRID_SIZE = 1

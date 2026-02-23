@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { computeLanePathAStar } from '../src/pathfinding/laneAStar'
-import type { StaticCollider } from '../src/game/types'
+import { computeLanePathAStar } from '../src/client/pathfinding/laneAStar'
+import type { StaticCollider } from '../src/client/game/types'
 
 describe('lane A*', () => {
   it('finds a reachable path in open space', () => {
