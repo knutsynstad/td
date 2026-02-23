@@ -2126,7 +2126,8 @@ const getCastleEntryGoals = () => {
   const z = castleCollider.center.z
   const hx = castleCollider.halfSize.x
   const hz = castleCollider.halfSize.z
-  const approachOffset = GRID_SIZE
+  // Keep the front entry goal beyond the castle flow-field blocker inflation.
+  const approachOffset = GRID_SIZE * 3
   const useX = Math.abs(CASTLE_FRONT_DIRECTION.x) >= Math.abs(CASTLE_FRONT_DIRECTION.y)
   const dirX = useX ? Math.sign(CASTLE_FRONT_DIRECTION.x || 1) : 0
   const dirZ = useX ? 0 : Math.sign(CASTLE_FRONT_DIRECTION.y || 1)
