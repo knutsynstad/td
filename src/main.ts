@@ -5268,7 +5268,9 @@ const tick = (now: number, delta: number) => {
   }
   if (gameState.wave === 0 && pendingWave === null) {
     prepareNextWave()
-    gameState.nextWaveAt = now + 10000
+    if (gameState.nextWaveAt === 0) {
+      gameState.nextWaveAt = now + 10000
+    }
   }
   if (gameState.wave === 0 && gameState.nextWaveAt !== 0 && now >= gameState.nextWaveAt) {
     gameState.nextWaveAt = 0
