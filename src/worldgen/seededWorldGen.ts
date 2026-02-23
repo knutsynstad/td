@@ -3,6 +3,7 @@ import { createMulberry32, deriveSeed } from '../utils/rng'
 export type TreePlacement = {
   x: number
   z: number
+  footprint: 1 | 2 | 3 | 4
 }
 
 export type RockPlacement = {
@@ -103,15 +104,23 @@ const fractalNoise2D = (
 
 const getKey = (x: number, z: number) => `${x},${z}`
 
-const pushTree = (state: WorldGenState, x: number, z: number) => {
+const pushTree = (state: WorldGenState, x: number, z: number, footprint: 1 | 2 | 3 | 4) => {
   const key = getKey(x, z)
   if (state.occupied.has(key)) return
   state.occupied.add(key)
-  state.trees.push({ x, z })
+  state.trees.push({ x, z, footprint })
 }
 
 const pushRock = (state: WorldGenState, placement: RockPlacement) => {
   state.rocks.push(placement)
+}
+
+const pickTreeFootprint = (seed: number, x: number, z: number): 1 | 2 | 3 | 4 => {
+  const roll = hash2(seed, x, z)
+  if (roll < 0.12) return 1
+  if (roll < 0.84) return 2
+  if (roll < 0.99) return 3
+  return 4
 }
 
 const treeRule: WorldGenRule = {
@@ -119,6 +128,7 @@ const treeRule: WorldGenRule = {
   apply: (context, state) => {
     const densitySeed = deriveSeed(context.seed, 'trees:density')
     const thresholdSeed = deriveSeed(context.seed, 'trees:threshold')
+    const shapeSeed = deriveSeed(context.seed, 'trees:shape')
     const stream = createMulberry32(deriveSeed(context.seed, 'trees:macro'))
     const baseDensity = 0.0008 + stream.next() * 0.0014
     const maxCoord = context.worldBounds - context.margin
@@ -135,7 +145,10 @@ const treeRule: WorldGenRule = {
         const edgeDensityBoost = Math.pow(smoothStep(gradientT), 0.45)
         const density = Math.min(0.3, baseDensity + clumpBoost * (0.01 + edgeDensityBoost * 0.28))
         const pick = hash2(thresholdSeed, x, z)
-        if (pick < density) pushTree(state, x, z)
+        if (pick < density) {
+          const footprint = pickTreeFootprint(shapeSeed, x, z)
+          pushTree(state, x, z, footprint)
+        }
       }
     }
   }

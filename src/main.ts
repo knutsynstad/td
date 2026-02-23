@@ -140,7 +140,11 @@ import {
   assertStructureStoreConsistency
 } from './game/invariants'
 import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
-import { generateSeededWorldFeatures, type RockPlacement } from './worldgen/seededWorldGen'
+import {
+  generateSeededWorldFeatures,
+  type RockPlacement,
+  type TreePlacement
+} from './worldgen/seededWorldGen'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const WORLD_SEED_INPUT: string | number = 'alpha valley 01'
@@ -150,6 +154,17 @@ const random = () => randomSource.next()
 const HITBOX_LAYER = 1
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower')
 const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2)
+type TreeFootprint = TreePlacement['footprint']
+const DEFAULT_TREE_FOOTPRINT: TreeFootprint = 2
+const clampTreeFootprint = (value: number): TreeFootprint => {
+  if (value <= 1) return 1
+  if (value >= 4) return 4
+  if (value >= 3) return 3
+  return 2
+}
+const getTreeScaleForFootprint = (footprint: TreeFootprint) => footprint / DEFAULT_TREE_FOOTPRINT
+const getTreeBuildSizeForFootprint = (footprint: TreeFootprint) =>
+  TREE_BUILD_SIZE.clone().multiplyScalar(getTreeScaleForFootprint(footprint))
 const COIN_PILE_CYLINDER_MIN = 3
 const COIN_PILE_CYLINDER_MAX = 96
 const COIN_PILE_MAX_RADIUS = 2.1
@@ -1936,9 +1951,12 @@ const applyTowerVisualToMesh = (mesh: THREE.Mesh, tower?: Tower) => {
 const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
   if (!treeModelTemplate) return
   if (mesh.userData.outlineTarget) return
+  const footprint = clampTreeFootprint(Number(mesh.userData.treeFootprint ?? DEFAULT_TREE_FOOTPRINT))
+  const footprintScale = getTreeScaleForFootprint(footprint)
   const treeVisual = treeModelTemplate.clone(true)
   treeVisual.position.copy(mesh.position)
-  treeVisual.position.y -= TREE_BUILD_SIZE.y * 0.5
+  treeVisual.position.y -= TREE_BUILD_SIZE.y * 0.5 * footprintScale
+  treeVisual.scale.setScalar(footprintScale)
   treeVisual.userData.isTreeVisual = true
   scene.add(treeVisual)
   mesh.userData.outlineTarget = treeVisual
@@ -4725,8 +4743,13 @@ const placeCastleGuardTowers = () => {
   refreshAllSpawnerPathlines()
 }
 
-const addMapTree = (center: THREE.Vector3, initialScale = 1) => {
-  const size = TREE_BUILD_SIZE
+const addMapTree = (
+  center: THREE.Vector3,
+  initialScale = 1,
+  footprint: TreeFootprint = DEFAULT_TREE_FOOTPRINT
+) => {
+  const treeFootprint = clampTreeFootprint(footprint)
+  const size = getTreeBuildSizeForFootprint(treeFootprint)
   const half = size.clone().multiplyScalar(0.5)
   const snapped = snapCenterToBuildGrid(center, size)
   if (!canPlaceAt(snapped, half, staticColliders)) return false
@@ -4742,6 +4765,7 @@ const addMapTree = (center: THREE.Vector3, initialScale = 1) => {
     hitboxMaterial
   )
   mesh.position.copy(snapped)
+  mesh.userData.treeFootprint = treeFootprint
   // Keep tree collider hitboxes out of the render passes from frame one.
   mesh.layers.set(HITBOX_LAYER)
   mesh.castShadow = false
@@ -4807,7 +4831,7 @@ const populateSeededWorld = () => {
     margin: 3
   })
   for (const tree of features.trees) {
-    addMapTree(new THREE.Vector3(tree.x, 0, tree.z))
+    addMapTree(new THREE.Vector3(tree.x, 0, tree.z), 1, tree.footprint)
   }
   for (const rock of features.rocks) {
     addMapRock(new THREE.Vector3(rock.x, 0, rock.z), rock)
