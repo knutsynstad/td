@@ -32,4 +32,21 @@ describe('lane A*', () => {
     expect(['blocked', 'unstable', 'reachable']).toContain(result.state)
     expect(result.points.length).toBeGreaterThan(1)
   })
+
+  it('does not thread through one-cell choke points', () => {
+    const colliders: StaticCollider[] = [
+      { center: new THREE.Vector3(0, 0, 2), halfSize: new THREE.Vector3(9, 1, 0.1), type: 'wall' },
+      { center: new THREE.Vector3(0, 0, -2), halfSize: new THREE.Vector3(9, 1, 0.1), type: 'wall' }
+    ]
+    const result = computeLanePathAStar({
+      start: new THREE.Vector3(-8, 0, 0),
+      goal: new THREE.Vector3(8, 0, 0),
+      colliders,
+      worldBounds: 9,
+      resolution: 1
+    })
+
+    expect(result.state).not.toBe('reachable')
+    expect(result.points.length).toBeGreaterThan(1)
+  })
 })

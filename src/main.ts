@@ -172,6 +172,9 @@ const STAGING_BRIDGE_SIDE_GROUND_ROWS = 1
 const STAGING_BRIDGE_PATH_WIDTH = 3
 const STAGING_BRIDGE_WIDTH = STAGING_BRIDGE_PATH_WIDTH + STAGING_BRIDGE_SIDE_GROUND_ROWS * 2
 const STAGING_BRIDGE_LENGTH = 11
+const CASTLE_ROUTE_HALF_WIDTH_CELLS = Math.max(0, Math.floor(STAGING_BRIDGE_PATH_WIDTH * 0.5))
+const CASTLE_ENTRY_GOAL_STRIP_HALF_WIDTH_CELLS = CASTLE_ROUTE_HALF_WIDTH_CELLS
+const SPAWNER_ENTRY_INSET_CELLS = 3
 const STAGING_PLATFORM_Y = Math.max(0, STAGING_ISLAND_HEIGHT - 1)
 const STAGING_GATE_OPEN_DURATION = 0.8
 const MOB_STAGING_BOUNDS_PADDING = STAGING_ISLAND_DISTANCE + STAGING_ISLAND_SIZE * 0.5 + 2
@@ -1203,19 +1206,36 @@ const snapYawToQuarterTurn = (yaw: number) => Math.round(yaw / (Math.PI * 0.5)) 
 const buildPathTilesFromPoints = (
   points: readonly THREE.Vector3[],
   colliders: readonly StaticCollider[],
-  worldBounds: number
+  worldBounds: number,
+  halfWidth: number
 ) => {
-  if (points.length === 0) return { tiles: [] as THREE.Vector3[], isComplete: false }
+  if (points.length === 0) {
+    return {
+      tiles: [] as THREE.Vector3[],
+      isComplete: false,
+      firstRejectedCell: null as { x: number, z: number } | null,
+      firstRejectedReason: null as 'blocked' | 'out_of_bounds' | 'diagonal' | null
+    }
+  }
   const out: THREE.Vector3[] = []
   const seen = new Set<string>()
   let isComplete = true
-  const halfWidth = 1
+  let blockedRejects = 0
+  let outOfBoundsRejects = 0
+  let diagonalSegments = 0
+  let cornerCapWrites = 0
+  let segmentRejects = 0
+  let cornerCapRejects = 0
+  let inCornerCapPhase = false
+  let firstRejectedCell: { x: number, z: number } | null = null
+  let firstRejectedReason: 'blocked' | 'out_of_bounds' | 'diagonal' | null = null
+  const widthHalfCells = Math.max(0, Math.floor(halfWidth))
   const isBlockedCell = (x: number, z: number) => {
     for (const collider of colliders) {
       if (collider.type === 'castle') continue
       if (
-        Math.abs(x - collider.center.x) <= collider.halfSize.x &&
-        Math.abs(z - collider.center.z) <= collider.halfSize.z
+        Math.abs(x - collider.center.x) < collider.halfSize.x &&
+        Math.abs(z - collider.center.z) < collider.halfSize.z
       ) {
         return true
       }
@@ -1227,10 +1247,25 @@ const buildPathTilesFromPoints = (
     const gz = Math.round(z)
     if (Math.abs(gx) > worldBounds || Math.abs(gz) > worldBounds) {
       isComplete = false
+      outOfBoundsRejects += 1
+      if (!firstRejectedCell) {
+        firstRejectedCell = { x: gx, z: gz }
+        firstRejectedReason = 'out_of_bounds'
+      }
       return
     }
     if (isBlockedCell(gx, gz)) {
       isComplete = false
+      blockedRejects += 1
+      if (inCornerCapPhase) {
+        cornerCapRejects += 1
+      } else {
+        segmentRejects += 1
+      }
+      if (!firstRejectedCell) {
+        firstRejectedCell = { x: gx, z: gz }
+        firstRejectedReason = 'blocked'
+      }
       return
     }
     const key = `${gx},${gz}`
@@ -1238,7 +1273,6 @@ const buildPathTilesFromPoints = (
     seen.add(key)
     out.push(new THREE.Vector3(gx, 0, gz))
   }
-
   const snappedPoints = points.map((point) => new THREE.Vector3(Math.round(point.x), 0, Math.round(point.z)))
   for (let i = 1; i < snappedPoints.length; i += 1) {
     const a = snappedPoints[i - 1]!
@@ -1247,10 +1281,12 @@ const buildPathTilesFromPoints = (
     const dz = b.z - a.z
     if (dx !== 0 && dz !== 0) {
       isComplete = false
+      diagonalSegments += 1
+      if (!firstRejectedReason) firstRejectedReason = 'diagonal'
       continue
     }
     if (dx === 0 && dz === 0) {
-      for (let ox = -halfWidth; ox <= halfWidth; ox += 1) {
+      for (let ox = -widthHalfCells; ox <= widthHalfCells; ox += 1) {
         pushCell(a.x + ox, a.z)
       }
       continue
@@ -1258,7 +1294,7 @@ const buildPathTilesFromPoints = (
     if (dz === 0) {
       const stepX = Math.sign(dx)
       for (let x = a.x; x !== b.x + stepX; x += stepX) {
-        for (let oz = -halfWidth; oz <= halfWidth; oz += 1) {
+        for (let oz = -widthHalfCells; oz <= widthHalfCells; oz += 1) {
           pushCell(x, a.z + oz)
         }
       }
@@ -1266,7 +1302,7 @@ const buildPathTilesFromPoints = (
     }
     const stepZ = Math.sign(dz)
     for (let z = a.z; z !== b.z + stepZ; z += stepZ) {
-      for (let ox = -halfWidth; ox <= halfWidth; ox += 1) {
+      for (let ox = -widthHalfCells; ox <= widthHalfCells; ox += 1) {
         pushCell(a.x + ox, z)
       }
     }
@@ -1274,6 +1310,7 @@ const buildPathTilesFromPoints = (
 
   // Fill outside-corner caps so 90deg turns stay visually sharp.
   for (let i = 1; i < snappedPoints.length - 1; i += 1) {
+    inCornerCapPhase = true
     const prev = snappedPoints[i - 1]!
     const curr = snappedPoints[i]!
     const next = snappedPoints[i + 1]!
@@ -1281,16 +1318,21 @@ const buildPathTilesFromPoints = (
     const inDz = Math.sign(curr.z - prev.z)
     const outDx = Math.sign(next.x - curr.x)
     const outDz = Math.sign(next.z - curr.z)
+    const inLen = Math.abs(curr.x - prev.x) + Math.abs(curr.z - prev.z)
+    const outLen = Math.abs(next.x - curr.x) + Math.abs(next.z - curr.z)
     const isTurn = (inDx !== outDx || inDz !== outDz) && (inDx === 0 || inDz === 0) && (outDx === 0 || outDz === 0)
     if (!isTurn) continue
-    for (let a = 1; a <= halfWidth; a += 1) {
-      for (let b = 1; b <= halfWidth; b += 1) {
+    // Skip cap fill when either leg is too short; this avoids single-diagonal artifacts
+    // near merges (especially at the castle approach) while keeping square corners on normal turns.
+    if (inLen <= widthHalfCells || outLen <= widthHalfCells) continue
+    for (let a = 1; a <= widthHalfCells; a += 1) {
+      for (let b = 1; b <= widthHalfCells; b += 1) {
+        cornerCapWrites += 1
         pushCell(curr.x + inDx * a - outDx * b, curr.z + inDz * a - outDz * b)
       }
     }
   }
-
-  return { tiles: out, isComplete }
+  return { tiles: out, isComplete, firstRejectedCell, firstRejectedReason }
 }
 const rebuildPathTileLayer = () => {
   tmpPathCenterTransforms.length = 0
@@ -1310,9 +1352,30 @@ const rebuildPathTileLayer = () => {
   const hasPathAt = (x: number, z: number) => (
     pathTileKeys.has(`${x},${z}`) || stagingIslandsOverlay.hasBridgePathAt(x, z)
   )
+  let nearCastleCenter = 0
+  let nearCastleEdge = 0
+  let nearCastleInnerCorner = 0
+  let nearCastleOuterCorner = 0
+  const nearCastleCornerSamples: Array<{ x: number, z: number, variant: string, dx: number, dz: number }> = []
   for (const key of pathTileKeys) {
     const { x, z } = parseGridKey(key)
     const classification = classifyPathTile(x, z, hasPathAt)
+    const nearCastle = Math.abs(x - castleCollider.center.x) <= 8 && Math.abs(z - castleCollider.center.z) <= 8
+    if (nearCastle) {
+      if (classification.variant === 'center') nearCastleCenter += 1
+      else if (classification.variant === 'edge') nearCastleEdge += 1
+      else if (classification.variant === 'inner-corner') nearCastleInnerCorner += 1
+      else if (classification.variant === 'outer-corner') nearCastleOuterCorner += 1
+      if ((classification.variant === 'inner-corner' || classification.variant === 'outer-corner') && nearCastleCornerSamples.length < 6) {
+        nearCastleCornerSamples.push({
+          x,
+          z,
+          variant: classification.variant,
+          dx: classification.directionDx,
+          dz: classification.directionDz
+        })
+      }
+    }
     const targetLayer = classification.variant === 'edge'
       ? pathEdgeTileLayer
       : classification.variant === 'inner-corner'
@@ -2258,8 +2321,9 @@ const markPersistentMapFeature = (mesh: THREE.Mesh) => {
 // Initialize spatial grid and lane path caches
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE)
 const getCastleEntryGoals = () => {
-  const x = castleCollider.center.x
-  const z = castleCollider.center.z
+  const snapToGrid = (v: number) => Math.round(v / GRID_SIZE) * GRID_SIZE
+  const x = snapToGrid(castleCollider.center.x)
+  const z = snapToGrid(castleCollider.center.z)
   const hx = castleCollider.halfSize.x
   const hz = castleCollider.halfSize.z
   // Keep the front entry goal beyond the castle flow-field blocker inflation.
@@ -2267,11 +2331,33 @@ const getCastleEntryGoals = () => {
   const useX = Math.abs(CASTLE_FRONT_DIRECTION.x) >= Math.abs(CASTLE_FRONT_DIRECTION.y)
   const dirX = useX ? Math.sign(CASTLE_FRONT_DIRECTION.x || 1) : 0
   const dirZ = useX ? 0 : Math.sign(CASTLE_FRONT_DIRECTION.y || 1)
+  const tangentX = -dirZ
+  const tangentZ = dirX
   const goalX = x + dirX * (hx + approachOffset)
   const goalZ = z + dirZ * (hz + approachOffset)
-  return [
-    new THREE.Vector3(goalX, 0, goalZ)
-  ]
+  const goals: THREE.Vector3[] = []
+  const lateralOrder: number[] = [0]
+  for (let lateral = 1; lateral <= CASTLE_ENTRY_GOAL_STRIP_HALF_WIDTH_CELLS; lateral += 1) {
+    lateralOrder.push(-lateral, lateral)
+  }
+  const rawGoals: Array<{ x: number, z: number }> = []
+  const snappedGoals: Array<{ x: number, z: number }> = []
+  for (const lateral of lateralOrder) {
+    const rawX = goalX + tangentX * lateral * GRID_SIZE
+    const rawZ = goalZ + tangentZ * lateral * GRID_SIZE
+    const snappedX = snapToGrid(rawX)
+    const snappedZ = snapToGrid(rawZ)
+    rawGoals.push({ x: rawX, z: rawZ })
+    snappedGoals.push({ x: snappedX, z: snappedZ })
+    goals.push(
+      new THREE.Vector3(
+        snappedX,
+        0,
+        snappedZ
+      )
+    )
+  }
+  return goals
 }
 const borderDoors = getAllBorderDoors(WORLD_BOUNDS)
 const waveAndSpawnSystem = createWaveAndSpawnSystem({
@@ -2437,12 +2523,13 @@ const getSpawnerTangent = (pos: THREE.Vector3) => {
 
 const getSpawnerEntryPoint = (pos: THREE.Vector3) => {
   const normal = getSpawnerOutwardNormal(pos)
-  const x = Math.round(pos.x - normal.x * GRID_SIZE)
-  const z = Math.round(pos.z - normal.z * GRID_SIZE)
+  const insetDistance = GRID_SIZE * SPAWNER_ENTRY_INSET_CELLS
+  const x = Math.round(pos.x - normal.x * insetDistance)
+  const z = Math.round(pos.z - normal.z * insetDistance)
   return new THREE.Vector3(
-    clamp(x, -WORLD_BOUNDS + GRID_SIZE, WORLD_BOUNDS - GRID_SIZE),
+    clamp(x, -WORLD_BOUNDS + insetDistance, WORLD_BOUNDS - insetDistance),
     0,
-    clamp(z, -WORLD_BOUNDS + GRID_SIZE, WORLD_BOUNDS - GRID_SIZE)
+    clamp(z, -WORLD_BOUNDS + insetDistance, WORLD_BOUNDS - insetDistance)
   )
 }
 
@@ -2497,7 +2584,10 @@ const getForwardWaypointIndex = (pos: THREE.Vector3, waypoints: THREE.Vector3[],
     }
   }
   // Prevent backtracking toward waypoints behind current progress.
-  return Math.min(bestIdx + 1, waypoints.length - 1)
+  const result = Math.min(bestIdx + 1, waypoints.length - 1)
+  if (Math.abs(pos.x - castleCollider.center.x) <= 14 && Math.abs(pos.z - castleCollider.center.z) <= 14) {
+  }
+  return result
 }
 
 const getSpawnCandidatePosition = (spawner: WaveSpawner) => {
@@ -2618,7 +2708,16 @@ const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
     const curr = points[i]!
     if (!isPointInsideCastle(prev) && isPointInsideCastle(curr)) {
       const clipped = points.slice(0, i).map((point) => point.clone())
-      clipped.push(getCastleBoundaryIntersection(prev, curr))
+      const boundaryRaw = getCastleBoundaryIntersection(prev, curr)
+      const boundary = new THREE.Vector3(
+        Math.round(boundaryRaw.x / GRID_SIZE) * GRID_SIZE,
+        boundaryRaw.y,
+        Math.round(boundaryRaw.z / GRID_SIZE) * GRID_SIZE
+      )
+      const lastClipped = clipped[clipped.length - 1]
+      if (!lastClipped || lastClipped.distanceToSquared(boundary) > 1e-6) {
+        clipped.push(boundary)
+      }
       return clipped
     }
   }
@@ -2626,15 +2725,75 @@ const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
   return points.map((point) => point.clone())
 }
 
+const simplifyCollinearPath = (points: THREE.Vector3[], epsilon = 0.01) => {
+  if (points.length <= 2) return points.map((p) => p.clone())
+  const out: THREE.Vector3[] = [points[0]!.clone()]
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const a = out[out.length - 1]!
+    const b = points[i]!
+    const c = points[i + 1]!
+    const abx = b.x - a.x
+    const abz = b.z - a.z
+    const bcx = c.x - b.x
+    const bcz = c.z - b.z
+    const cross = Math.abs(abx * bcz - abz * bcx)
+    if (cross > epsilon) out.push(b.clone())
+  }
+  out.push(points[points.length - 1]!.clone())
+  return out
+}
+
 const extendPathToCastleCenter = (points: THREE.Vector3[]) => {
   const extended = points.map((point) => point.clone())
   if (extended.length === 0) return extended
-  const center = new THREE.Vector3(castleCollider.center.x, 0, castleCollider.center.z)
+  const center = new THREE.Vector3(
+    Math.round(castleCollider.center.x / GRID_SIZE) * GRID_SIZE,
+    0,
+    Math.round(castleCollider.center.z / GRID_SIZE) * GRID_SIZE
+  )
   const last = extended[extended.length - 1]!
-  if (last.distanceToSquared(center) > 1e-6) {
-    extended.push(center)
+  const dx = center.x - last.x
+  const dz = center.z - last.z
+  if (Math.abs(dx) <= 1e-6 && Math.abs(dz) <= 1e-6) return extended
+  // Keep the castle entry extension cardinal so path tile stamping never drops it as a diagonal.
+  if (Math.abs(dx) > 1e-6 && Math.abs(dz) > 1e-6) {
+    extended.push(new THREE.Vector3(center.x, 0, last.z))
   }
-  return extended
+  extended.push(center)
+  const frontAxisUsesX = Math.abs(CASTLE_FRONT_DIRECTION.x) >= Math.abs(CASTLE_FRONT_DIRECTION.y)
+  const smoothed = extended.map((p) => p.clone())
+  if (smoothed.length >= 4) {
+    const a = smoothed[smoothed.length - 4]!
+    const b = smoothed[smoothed.length - 3]!
+    const c = smoothed[smoothed.length - 2]!
+    const d = smoothed[smoothed.length - 1]!
+    const nearCastle = [a, b, c, d].some((p) => Math.abs(p.x - center.x) <= 12 && Math.abs(p.z - center.z) <= 12)
+    if (nearCastle) {
+      if (!frontAxisUsesX) {
+        const onCenterAtC = Math.abs(c.x - center.x) <= 1e-6
+        const onCenterAtD = Math.abs(d.x - center.x) <= 1e-6
+        const oneCellLateralAtB = Math.abs(b.x - center.x) <= GRID_SIZE + 1e-6
+        const bToCLateralOne = Math.abs(b.x - c.x) <= GRID_SIZE + 1e-6 && Math.abs(b.z - c.z) <= 1e-6
+        const aToBFrontRun = Math.abs(a.x - b.x) <= 1e-6 && Math.abs(a.z - b.z) >= 2 * GRID_SIZE - 1e-6
+        if (onCenterAtC && onCenterAtD && oneCellLateralAtB && bToCLateralOne && aToBFrontRun) {
+          b.x = center.x
+          b.z = a.z
+        }
+      } else {
+        const onCenterAtC = Math.abs(c.z - center.z) <= 1e-6
+        const onCenterAtD = Math.abs(d.z - center.z) <= 1e-6
+        const oneCellLateralAtB = Math.abs(b.z - center.z) <= GRID_SIZE + 1e-6
+        const bToCLateralOne = Math.abs(b.z - c.z) <= GRID_SIZE + 1e-6 && Math.abs(b.x - c.x) <= 1e-6
+        const aToBFrontRun = Math.abs(a.z - b.z) <= 1e-6 && Math.abs(a.x - b.x) >= 2 * GRID_SIZE - 1e-6
+        if (onCenterAtC && onCenterAtD && oneCellLateralAtB && bToCLateralOne && aToBFrontRun) {
+          b.z = center.z
+          b.x = a.x
+        }
+      }
+    }
+  }
+  const simplified = simplifyCollinearPath(smoothed)
+  return simplified
 }
 
 const invalidateCastleFlowField = () => {
@@ -2648,7 +2807,7 @@ const getCastleFlowField = () => {
       colliders: staticColliders,
       worldBounds: WORLD_BOUNDS,
       resolution: GRID_SIZE,
-      corridorHalfWidthCells: 1
+      corridorHalfWidthCells: CASTLE_ROUTE_HALF_WIDTH_CELLS
     })
     if (debugViewState.flowField) {
       flowFieldDebugOverlay.upsert(castleFlowField)
@@ -2662,22 +2821,27 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   const entry = getSpawnerEntryPoint(spawner.position)
   const flow = getCastleFlowField()
   const route = tracePathFromSpawner(flow, { start: entry })
-  const displayPoints = extendPathToCastleCenter(trimPathToCastleBoundary(route.points))
+  const mapCorridorPoints = trimPathToCastleBoundary(route.points)
+  const displayPoints = extendPathToCastleCenter(mapCorridorPoints)
   const stagingPreviewPoints = [
     getStagingIslandCenter(spawner.position),
     getSpawnerGatePoint(spawner.position),
     getSpawnerBridgeExitPoint(spawner.position)
   ]
   const fullDisplayPoints = [...stagingPreviewPoints, ...displayPoints]
-  const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS)
+  const corridor = buildPathTilesFromPoints(displayPoints, staticColliders, WORLD_BOUNDS, CASTLE_ROUTE_HALF_WIDTH_CELLS)
   const connector = buildPathTilesFromPoints(
     [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
     staticColliders,
-    WORLD_BOUNDS
+    WORLD_BOUNDS,
+    CASTLE_ROUTE_HALF_WIDTH_CELLS
   )
+  // Route validity should follow the width-aware flow field result directly.
+  // Tile stamping includes extra square-corner caps for visuals and can reject cells
+  // near blockers even when a valid 3-wide centerline route exists.
   const routeState: LanePathResult['state'] = route.state
   spawner.routeState = routeState
-  spawnerPathlineCache.set(spawner.id, { points: route.points, state: routeState })
+  spawnerPathlineCache.set(spawner.id, { points: displayPoints, state: routeState })
   if (routeState === 'reachable') {
     const merged = new Map<string, THREE.Vector3>()
     for (const tile of connector.tiles) {
@@ -2686,7 +2850,8 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
     for (const tile of corridor.tiles) {
       merged.set(`${tile.x},${tile.z}`, tile)
     }
-    pathTilePositions.set(spawner.id, Array.from(merged.values()))
+    const mergedTiles = Array.from(merged.values())
+    pathTilePositions.set(spawner.id, mergedTiles)
   } else {
     pathTilePositions.set(spawner.id, [])
   }
@@ -2710,7 +2875,7 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
       continue
     }
     const laneWaypoints = routeState === 'reachable'
-      ? buildLaneWaypointsForSpawner(spawner, route.points)
+      ? buildLaneWaypointsForSpawner(spawner, displayPoints)
       : undefined
     mob.waypoints = laneWaypoints
     const startsInMap =
@@ -2761,6 +2926,8 @@ const applyObstacleDelta = (added: StaticCollider[], removed: StaticCollider[] =
   for (const spawner of pendingWaveSpawners) {
     enqueueSpawnerPathRefresh(spawner.id)
   }
+  // Force an immediate reroute on build/destruction so mobs do not keep stale lanes.
+  processSpawnerPathlineQueue(Number.MAX_SAFE_INTEGER)
 }
 
 const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.001, 0x4ad1ff)

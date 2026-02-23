@@ -27,16 +27,16 @@ describe('corridor flow field', () => {
     }
   })
 
-  it('uses tighter clearance so small obstacles do not over-block', () => {
+  it('rejects one-cell choke points for three-wide corridors', () => {
     const colliders: StaticCollider[] = [
-      { center: new THREE.Vector3(0, 0, 2), halfSize: new THREE.Vector3(9, 1, 0.1), type: 'wall' },
-      { center: new THREE.Vector3(0, 0, -2), halfSize: new THREE.Vector3(9, 1, 0.1), type: 'wall' }
+      { center: new THREE.Vector3(0, 0, 1), halfSize: new THREE.Vector3(10, 1, 0.1), type: 'wall' },
+      { center: new THREE.Vector3(0, 0, -1), halfSize: new THREE.Vector3(10, 1, 0.1), type: 'wall' }
     ]
 
     const noClearanceField = buildCastleFlowField({
       goals: [new THREE.Vector3(8, 0, 0)],
       colliders,
-      worldBounds: 12,
+      worldBounds: 10,
       resolution: 1,
       corridorHalfWidthCells: 0
     })
@@ -47,7 +47,7 @@ describe('corridor flow field', () => {
     const threeWideField = buildCastleFlowField({
       goals: [new THREE.Vector3(8, 0, 0)],
       colliders,
-      worldBounds: 12,
+      worldBounds: 10,
       resolution: 1,
       corridorHalfWidthCells: 1
     })
@@ -56,6 +56,6 @@ describe('corridor flow field', () => {
     })
 
     expect(noClearanceRoute.state).toBe('reachable')
-    expect(threeWideRoute.state).toBe('reachable')
+    expect(threeWideRoute.state).toBe('blocked')
   })
 })

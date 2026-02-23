@@ -172,9 +172,53 @@ export const createEntityMotionSystem = (context: MotionContext) => {
             0,
             context.spatialGrid.getNearbyInto(entity.mesh.position, entity.radius * 4, progressScratch).length - 1
           )
-          const crowdBonus = Math.min(1.4, nearbyForProgress * 0.08)
-          const waypointReachRadius = entity.radius + 1.0 + crowdBonus
-          if (distToWaypoint < waypointReachRadius) {
+          const crowdBonus = Math.min(0.35, nearbyForProgress * 0.03)
+          const waypointReachRadius = entity.radius + 0.55 + crowdBonus
+          let progressT = 1
+          let passedProgressGate = true
+          if (waypointIdx > 0) {
+            const prevWaypoint = waypoints[waypointIdx - 1]
+            if (prevWaypoint) {
+              const segX = targetWaypoint.x - prevWaypoint.x
+              const segZ = targetWaypoint.z - prevWaypoint.z
+              const segLenSq = segX * segX + segZ * segZ
+              if (segLenSq > 1e-6) {
+                const mobFromPrevX = entity.mesh.position.x - prevWaypoint.x
+                const mobFromPrevZ = entity.mesh.position.z - prevWaypoint.z
+                progressT = (mobFromPrevX * segX + mobFromPrevZ * segZ) / segLenSq
+                // Require meaningful segment progress before allowing waypoint advance.
+                passedProgressGate = progressT >= 0.85
+              }
+            }
+          }
+          let turnDot: number | null = null
+          let isTurnWaypoint = false
+          if (waypointIdx > 0 && waypointIdx < waypoints.length - 1) {
+            const prevWp = waypoints[waypointIdx - 1]
+            const currWp = waypoints[waypointIdx]
+            const nextWp = waypoints[waypointIdx + 1]
+            if (prevWp && currWp && nextWp) {
+              const inX = currWp.x - prevWp.x
+              const inZ = currWp.z - prevWp.z
+              const outX = nextWp.x - currWp.x
+              const outZ = nextWp.z - currWp.z
+              const inLen = Math.hypot(inX, inZ)
+              const outLen = Math.hypot(outX, outZ)
+              if (inLen > 1e-6 && outLen > 1e-6) {
+                turnDot = (inX / inLen) * (outX / outLen) + (inZ / inLen) * (outZ / outLen)
+                isTurnWaypoint = Math.abs(turnDot) < 0.95
+              }
+            }
+          }
+          const isFinalApproachWaypoint = waypointIdx >= waypoints.length - 3
+          const applyStrictTurnGate = isTurnWaypoint && !isFinalApproachWaypoint
+          const requiredProgress = applyStrictTurnGate ? 0.97 : (isFinalApproachWaypoint ? 0.9 : 0.85)
+          const strictTurnRadius = entity.radius + 0.45
+          const effectiveReachRadius = applyStrictTurnGate
+            ? Math.min(waypointReachRadius, strictTurnRadius)
+            : waypointReachRadius
+          const canAdvance = distToWaypoint < effectiveReachRadius && progressT >= requiredProgress && passedProgressGate
+          if (canAdvance) {
             waypointIdx++
             entity.waypointIndex = waypointIdx
           }

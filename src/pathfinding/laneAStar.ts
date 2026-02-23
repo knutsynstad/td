@@ -96,6 +96,7 @@ const OFFSETS: Array<[number, number, number]> = [
 ]
 
 const MIN_CORRIDOR_INFLATION_RADIUS = 1.0
+const REQUIRED_LANE_HALF_WIDTH_CELLS = 1
 export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
   const maxVisited = opts.maxVisited ?? 200_000
   const res = opts.resolution
@@ -144,6 +145,15 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
   const goalIdx = toIdx(goalX, goalZ)
   blocked[startIdx] = 0
   blocked[goalIdx] = 0
+  const hasRequiredClearanceAt = (x: number, z: number, dx: number, dz: number) => {
+    for (let lateral = -REQUIRED_LANE_HALF_WIDTH_CELLS; lateral <= REQUIRED_LANE_HALF_WIDTH_CELLS; lateral += 1) {
+      const cx = dz !== 0 ? x + lateral : x
+      const cz = dx !== 0 ? z + lateral : z
+      if (cx < 0 || cz < 0 || cx >= width || cz >= height) return false
+      if (blocked[toIdx(cx, cz)] === 1) return false
+    }
+    return true
+  }
 
   const gScore = new Float32Array(cellCount)
   gScore.fill(Number.POSITIVE_INFINITY)
@@ -217,6 +227,7 @@ export const computeLanePathAStar = (opts: LanePathOptions): LanePathResult => {
       const nx = cx + dx
       const nz = cz + dz
       if (nx < 0 || nz < 0 || nx >= width || nz >= height) continue
+      if (!hasRequiredClearanceAt(nx, nz, dx, dz)) continue
       const nIdx = toIdx(nx, nz)
       if (blocked[nIdx] === 1 || closed[nIdx] === 1) continue
       if (dx !== 0 && dz !== 0) {
