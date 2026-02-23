@@ -3222,7 +3222,8 @@ const drawMinimap = () => {
   const height = minimapCanvasEl.height
   if (width <= 0 || height <= 0) return
   const minDimension = Math.min(width, height)
-  const markerScale = Math.max(1, minDimension / 84)
+  const baseMarkerScale = Math.max(1, minDimension / 84)
+  const markerScale = isMinimapExpanded ? baseMarkerScale * 0.5 : baseMarkerScale
 
   minimapCtx.clearRect(0, 0, width, height)
   minimapCtx.fillStyle = 'rgba(224, 202, 156, 0.96)'
@@ -4135,6 +4136,7 @@ buildWallBtn.addEventListener('click', () => setBuildMode('wall'))
 buildTowerBtn.addEventListener('click', () => setBuildMode('tower'))
 minimapToggleBtn.addEventListener('click', () => {
   if (isMinimapExpanded) return
+  clearSelection()
   setMinimapExpanded(true)
 })
 minimapWrapEl.addEventListener('transitionend', (event) => {
