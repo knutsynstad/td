@@ -6,7 +6,7 @@
   background-color: #0f1419;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --hud-button-size: 84px;
+  --hud-button-size: 64px;
   --hud-minimap-size: var(--hud-button-size);
   --hud-minimap-expanded-size: min(72vw, 620px);
   --hud-minimap-collapsed-offset: 32px;

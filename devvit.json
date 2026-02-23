@@ -9,6 +9,7 @@
         "entry": "entrypoints/splash/index.html"
       },
       "game": {
+        "inline": false,
         "entry": "entrypoints/game/index.html"
       }
     }
