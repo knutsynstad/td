@@ -112,7 +112,6 @@ import {
   WATER_BOB_AMPLITUDE,
   WATER_BOB_SPEED,
   WATER_LEVEL,
-  WATER_RING_INNER_PADDING,
   WATER_RING_OUTER_PADDING,
   WAVE_MAX_SPAWNERS,
   WAVE_MIN_SPAWNERS,
@@ -1391,11 +1390,7 @@ type WaterDistanceField = {
   sizeX: number,
   sizeZ: number
 }
-const waterInnerEdge = WORLD_BOUNDS + WATER_RING_INNER_PADDING
 const waterOuterEdge = WORLD_BOUNDS + WATER_RING_OUTER_PADDING
-const waterBandDepth = Math.max(2, waterOuterEdge - waterInnerEdge)
-const waterPerimeterCenter = (waterInnerEdge + waterOuterEdge) * 0.5
-const waterPerimeterLength = waterOuterEdge * 2 + waterBandDepth * 2
 const buildCoastlineLandKeys = () => {
   const landKeys = new Set<string>()
   for (let x = -WORLD_BOUNDS; x <= WORLD_BOUNDS; x += GRID_SIZE) {
@@ -1516,7 +1511,7 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
       data[diLand] = 0
       data[diLand + 1] = 0
       data[diLand + 2] = 0
-      data[diLand + 3] = 255
+      data[diLand + 3] = 0
       continue
     }
     const raw = dist[i]!
@@ -1546,9 +1541,12 @@ const waterMaterial = new THREE.ShaderMaterial({
     uTime: { value: 0 },
     uDistanceTex: { value: waterDistanceField.texture },
     uBounds: { value: new THREE.Vector4(waterDistanceField.minX, waterDistanceField.minZ, waterDistanceField.sizeX, waterDistanceField.sizeZ) },
+    uViewportBounds: { value: new THREE.Vector4(-1, -1, 2, 2) },
     uWaterColor: { value: new THREE.Color(0x3f8fb2) },
     uFoamColor: { value: new THREE.Color(0xc9f3fb) }
   },
+  transparent: true,
+  depthWrite: false,
   vertexShader: `
     varying vec2 vWorldXZ;
     void main() {
@@ -1563,13 +1561,30 @@ const waterMaterial = new THREE.ShaderMaterial({
     uniform float uTime;
     uniform sampler2D uDistanceTex;
     uniform vec4 uBounds;
+    uniform vec4 uViewportBounds;
     uniform vec3 uWaterColor;
     uniform vec3 uFoamColor;
 
     void main() {
+      vec2 viewportMin = uViewportBounds.xy;
+      vec2 viewportMax = uViewportBounds.xy + uViewportBounds.zw;
+      if (
+        vWorldXZ.x < viewportMin.x ||
+        vWorldXZ.x > viewportMax.x ||
+        vWorldXZ.y < viewportMin.y ||
+        vWorldXZ.y > viewportMax.y
+      ) {
+        discard;
+      }
+
       vec2 uv = (vWorldXZ - uBounds.xy) / uBounds.zw;
       uv = clamp(uv, 0.0, 1.0);
-      float distanceToLand = texture2D(uDistanceTex, uv).r;
+      vec4 distanceSample = texture2D(uDistanceTex, uv);
+      float distanceToLand = distanceSample.r;
+      float isWater = distanceSample.a;
+      if (isWater < 0.5) {
+        discard;
+      }
 
       vec3 baseColor = uWaterColor;
 
@@ -1600,7 +1615,7 @@ const waterMaterial = new THREE.ShaderMaterial({
   `
 })
 const waterMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(waterPerimeterLength * 1.4, waterPerimeterLength * 1.4, 1, 1),
+  new THREE.PlaneGeometry(1, 1, 1, 1),
   waterMaterial
 )
 waterMesh.rotation.x = -Math.PI / 2
@@ -1608,6 +1623,13 @@ waterMesh.position.y = WATER_LEVEL - 0.01
 waterMesh.castShadow = false
 waterMesh.receiveShadow = false
 scene.add(waterMesh)
+const updateWaterFromBounds = (bounds: GroundBounds) => {
+  const width = Math.max(GRID_SIZE, bounds.maxX - bounds.minX)
+  const depth = Math.max(GRID_SIZE, bounds.maxZ - bounds.minZ)
+  waterMesh.scale.set(width, depth, 1)
+  waterMesh.position.set((bounds.minX + bounds.maxX) * 0.5, WATER_LEVEL - 0.01, (bounds.minZ + bounds.maxZ) * 0.5)
+  waterMaterial.uniforms.uViewportBounds.value.set(bounds.minX, bounds.minZ, width, depth)
+}
 
 const rebuildWaterDistanceField = () => {
   const next = buildWaterDistanceField(buildCoastlineLandKeys(), waterDistanceResolution)
@@ -4316,17 +4338,25 @@ const addMapTree = (center: THREE.Vector3, initialScale = 1) => {
   const half = size.clone().multiplyScalar(0.5)
   const snapped = snapCenterToBuildGrid(center, size)
   if (!canPlaceAt(snapped, half, staticColliders)) return false
+  const hitboxMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4f8f46,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false
+  })
+  hitboxMaterial.colorWrite = false
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
-    new THREE.MeshStandardMaterial({ color: 0x4f8f46, transparent: true, opacity: treeModelTemplate ? 0.01 : 1 })
+    hitboxMaterial
   )
   mesh.position.copy(snapped)
+  // Keep tree collider hitboxes out of the render passes from frame one.
+  mesh.layers.set(HITBOX_LAYER)
+  mesh.castShadow = false
+  mesh.receiveShadow = false
   markPersistentMapFeature(mesh)
   if (treeModelTemplate) {
     applyTreeVisualToMesh(mesh)
-  } else {
-    mesh.castShadow = true
-    mesh.receiveShadow = true
   }
   if (initialScale !== 1) {
     setStructureVisualScale(mesh, initialScale)
@@ -5356,6 +5386,7 @@ const tick = (now: number, delta: number) => {
   // Update ground + grid to cover the visible camera rectangle
   const visibleBounds = getVisibleGroundBounds(camera)
   updateGroundFromBounds(visibleBounds)
+  updateWaterFromBounds(visibleBounds)
   worldGrid?.update(visibleBounds)
 
   gameState.energyPopTimer = Math.max(0, gameState.energyPopTimer - delta)
