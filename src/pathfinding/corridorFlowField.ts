@@ -88,7 +88,12 @@ export const buildCastleFlowField = (opts: CorridorFlowFieldOptions): CorridorFl
 
   for (const collider of opts.colliders) {
     // Keep two extra cells around the castle so routes do not hug its walls.
-    const inflation = collider.type === 'castle' ? 2 * res : clearanceInflation
+    // Rocks already have explicit grid-sized colliders, so avoid adding a second ring.
+    const inflation = collider.type === 'castle'
+      ? 2 * res
+      : collider.type === 'rock' || collider.type === 'tree' || collider.type === 'tower'
+        ? 0
+        : clearanceInflation
     const minX = collider.center.x - collider.halfSize.x - inflation
     const maxX = collider.center.x + collider.halfSize.x + inflation
     const minZ = collider.center.z - collider.halfSize.z - inflation

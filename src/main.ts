@@ -15,6 +15,8 @@ import pathCornerInnerModelUrl from './assets/models/path-corner-inner.glb?url'
 import pathCornerOuterModelUrl from './assets/models/path-corner-outer.glb?url'
 import pathEdgeModelUrl from './assets/models/path-edge.glb?url'
 import pathModelUrl from './assets/models/path.glb?url'
+import rock2ModelUrl from './assets/models/rock-2.glb?url'
+import rockModelUrl from './assets/models/rock.glb?url'
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
 import treeModelUrl from './assets/models/tree.glb?url'
 import wallModelUrl from './assets/models/wall.glb?url'
@@ -138,7 +140,7 @@ import {
   assertStructureStoreConsistency
 } from './game/invariants'
 import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
-import { generateSeededWorldFeatures, type RockVariant } from './worldgen/seededWorldGen'
+import { generateSeededWorldFeatures, type RockPlacement } from './worldgen/seededWorldGen'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const WORLD_SEED_INPUT: string | number = 'alpha valley 01'
@@ -1684,12 +1686,19 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
     Math.max(minHalfSize, size.z * 0.5 + collisionPadding)
   )
 
+  const queue: THREE.Object3D[] = [object]
   let facingMarker: THREE.Object3D | null = null
-  object.traverse((child) => {
-    if (facingMarker) return
+  while (queue.length > 0 && !facingMarker) {
+    const child = queue.pop()!
     const name = (child.name || '').toLowerCase()
-    if (name === 'facing' || name.startsWith('facing')) facingMarker = child
-  })
+    if (name === 'facing' || name.startsWith('facing')) {
+      facingMarker = child
+      break
+    }
+    for (let i = 0; i < child.children.length; i += 1) {
+      queue.push(child.children[i]!)
+    }
+  }
   if (facingMarker) {
     const facingQuat = new THREE.Quaternion()
     facingMarker.getWorldQuaternion(facingQuat)
@@ -1735,6 +1744,41 @@ let wallModelTemplate: THREE.Object3D | null = null
 const arrowFacingAnchorLocalPos = new THREE.Vector3()
 const arrowFacingForwardLocal = new THREE.Vector3(0, 1, 0)
 const towerBallistaRigs = new Map<Tower, BallistaVisualRig>()
+type RockVisualTemplate = {
+  sourceUrl: string
+  template: THREE.Object3D
+}
+const rockTemplates: RockVisualTemplate[] = []
+let rockVisualsNeedFullRefresh = true
+const ROCK_TEMPLATE_EXPECTED_COUNT = 2
+const ROCK_BASE_HEIGHT = 0.5
+
+const getRockTemplateForPlacement = (modelIndex: number) => {
+  if (rockTemplates.length === 0) return null
+  const safeIndex = Math.abs(Math.round(modelIndex)) % rockTemplates.length
+  return rockTemplates[safeIndex] ?? rockTemplates[0] ?? null
+}
+
+const hasAllRockTemplates = () => rockTemplates.length >= ROCK_TEMPLATE_EXPECTED_COUNT
+
+const refreshAllRockVisuals = (forceRefresh: boolean) => {
+  for (const [collider, state] of structureStore.structureStates.entries()) {
+    if (collider.type !== 'rock') continue
+    applyRockVisualToMesh(state.mesh, forceRefresh)
+  }
+}
+
+const registerRockTemplate = (sourceUrl: string, source: THREE.Object3D) => {
+  const template = prepareStaticModelPreserveScale(source)
+  const entry: RockVisualTemplate = { sourceUrl, template }
+  const existingIndex = rockTemplates.findIndex((rock) => rock.sourceUrl === sourceUrl)
+  if (existingIndex >= 0) {
+    rockTemplates[existingIndex] = entry
+  } else {
+    rockTemplates.push(entry)
+  }
+  rockVisualsNeedFullRefresh = true
+}
 
 const prepareStaticModelPreserveScale = (source: THREE.Object3D) => {
   const model = source.clone(true)
@@ -1808,6 +1852,62 @@ const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
   mesh.userData.outlineTarget = treeVisual
   mesh.userData.linkedVisual = treeVisual
   // Keep collision/raycast hitboxes out of render + outline passes.
+  mesh.layers.set(HITBOX_LAYER)
+  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
+  hitboxMaterial.transparent = true
+  hitboxMaterial.opacity = 0
+  hitboxMaterial.colorWrite = false
+  hitboxMaterial.depthWrite = false
+  mesh.castShadow = false
+  mesh.receiveShadow = false
+}
+
+const applyRockVisualToMesh = (mesh: THREE.Mesh, forceRefresh = false) => {
+  const modelIndex = (mesh.userData.rockModelIndex as number | undefined) ?? 0
+  const template = getRockTemplateForPlacement(modelIndex)
+  if (!template) return
+  if (mesh.userData.outlineTarget && !forceRefresh) return
+  if (forceRefresh) {
+    const existingVisual = mesh.userData.linkedVisual as THREE.Object3D | undefined
+    if (existingVisual) {
+      existingVisual.traverse((node) => {
+        if (!(node instanceof THREE.Mesh)) return
+        node.geometry.dispose()
+        if (Array.isArray(node.material)) {
+          for (const material of node.material) material.dispose()
+        } else {
+          node.material.dispose()
+        }
+      })
+      scene.remove(existingVisual)
+    }
+    delete mesh.userData.linkedVisual
+    delete mesh.userData.outlineTarget
+  }
+  const yawQuarterTurns = (mesh.userData.rockYawQuarterTurns as number | undefined) ?? 0
+  const yaw = yawQuarterTurns * (Math.PI * 0.5)
+  const footprintX = Math.max(1, Number(mesh.userData.rockFootprintX ?? 1))
+  const footprintZ = Math.max(1, Number(mesh.userData.rockFootprintZ ?? 1))
+  const quarterTurns = ((Math.round(yawQuarterTurns) % 4) + 4) % 4
+  const isQuarterTurn = quarterTurns % 2 === 1
+  const visualScaleX = isQuarterTurn ? footprintZ : footprintX
+  const visualScaleZ = isQuarterTurn ? footprintX : footprintZ
+  const verticalScale = Math.max(0.65, Number(mesh.userData.rockVerticalScale ?? 1))
+  const mirrorX = mesh.userData.rockMirrorX === true
+  const mirrorZ = mesh.userData.rockMirrorZ === true
+  const rockVisual = template.template.clone(true)
+  rockVisual.position.copy(mesh.position)
+  rockVisual.position.y = 0
+  rockVisual.scale.set(
+    visualScaleX * (mirrorX ? -1 : 1),
+    verticalScale,
+    visualScaleZ * (mirrorZ ? -1 : 1)
+  )
+  rockVisual.rotation.y = yaw
+  rockVisual.userData.isRockVisual = true
+  scene.add(rockVisual)
+  mesh.userData.outlineTarget = rockVisual
+  mesh.userData.linkedVisual = rockVisual
   mesh.layers.set(HITBOX_LAYER)
   const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial
   hitboxMaterial.transparent = true
@@ -2005,6 +2105,30 @@ gltfLoader.load(
   undefined,
   (error) => {
     console.error('Failed to load tree model:', error)
+  }
+)
+
+gltfLoader.load(
+  rockModelUrl,
+  (gltf) => {
+    registerRockTemplate(rockModelUrl, gltf.scene)
+    refreshAllRockVisuals(hasAllRockTemplates())
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load rock model:', error)
+  }
+)
+
+gltfLoader.load(
+  rock2ModelUrl,
+  (gltf) => {
+    registerRockTemplate(rock2ModelUrl, gltf.scene)
+    refreshAllRockVisuals(hasAllRockTemplates())
+  },
+  undefined,
+  (error) => {
+    console.error('Failed to load secondary rock model:', error)
   }
 )
 
@@ -4374,34 +4498,32 @@ const addMapTree = (center: THREE.Vector3, initialScale = 1) => {
   return true
 }
 
-const getRockBuildSize = (variant: RockVariant) => {
-  if (variant === 'pebble') return new THREE.Vector3(1, 0.45, 1)
-  if (variant === 'small') return new THREE.Vector3(1, 0.8, 1)
-  if (variant === 'medium') return new THREE.Vector3(2, 1.2, 2)
-  return new THREE.Vector3(3, 1.65, 3)
-}
-
-const getRockColor = (variant: RockVariant) => {
-  if (variant === 'pebble') return 0x7d868f
-  if (variant === 'small') return 0x6f7883
-  if (variant === 'medium') return 0x646d79
-  return 0x545d68
-}
-
-const addMapRock = (center: THREE.Vector3, variant: RockVariant) => {
-  const size = getRockBuildSize(variant)
+const addMapRock = (center: THREE.Vector3, placement: RockPlacement) => {
+  const size = new THREE.Vector3(
+    Math.max(1, placement.footprintX),
+    ROCK_BASE_HEIGHT,
+    Math.max(1, placement.footprintZ)
+  )
   const half = size.clone().multiplyScalar(0.5)
   const snapped = snapCenterToBuildGrid(center, size)
   if (!canPlaceAt(snapped, half, staticColliders)) return false
   const colliderCenter = snapped.clone().setY(half.y)
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
-    new THREE.MeshStandardMaterial({ color: getRockColor(variant) })
+    new THREE.MeshStandardMaterial({ color: 0x646d79 })
   )
   mesh.position.copy(colliderCenter)
+  mesh.userData.rockModelIndex = placement.modelIndex
+  mesh.userData.rockYawQuarterTurns = placement.yawQuarterTurns
+  mesh.userData.rockFootprintX = placement.footprintX
+  mesh.userData.rockFootprintZ = placement.footprintZ
+  mesh.userData.rockMirrorX = placement.mirrorX
+  mesh.userData.rockMirrorZ = placement.mirrorZ
+  mesh.userData.rockVerticalScale = placement.verticalScale
   markPersistentMapFeature(mesh)
   mesh.castShadow = true
   mesh.receiveShadow = true
+  applyRockVisualToMesh(mesh)
   scene.add(mesh)
   const nowMs = Date.now()
   structureStore.addRockCollider(colliderCenter, half, mesh, WALL_HP, {
@@ -4413,6 +4535,7 @@ const addMapRock = (center: THREE.Vector3, variant: RockVariant) => {
 }
 
 const populateSeededWorld = () => {
+  rockVisualsNeedFullRefresh = true
   const features = generateSeededWorldFeatures({
     seed: WORLD_SEED,
     worldBounds: WORLD_BOUNDS,
@@ -4422,7 +4545,7 @@ const populateSeededWorld = () => {
     addMapTree(new THREE.Vector3(tree.x, 0, tree.z))
   }
   for (const rock of features.rocks) {
-    addMapRock(new THREE.Vector3(rock.x, 0, rock.z), rock.variant)
+    addMapRock(new THREE.Vector3(rock.x, 0, rock.z), rock)
   }
 }
 
@@ -5095,6 +5218,10 @@ const processCastleCaptures = (now: number) => {
 }
 
 const tick = (now: number, delta: number) => {
+  if (rockVisualsNeedFullRefresh && hasAllRockTemplates()) {
+    refreshAllRockVisuals(true)
+    rockVisualsNeedFullRefresh = false
+  }
   const waterTime = now * 0.001
   waterMesh.position.y = WATER_LEVEL - 0.01 + Math.sin(waterTime * WATER_BOB_SPEED) * WATER_BOB_AMPLITUDE * 0.22
   waterMaterial.uniforms.uTime.value = waterTime

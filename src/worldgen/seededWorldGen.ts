@@ -1,7 +1,5 @@
 import { createMulberry32, deriveSeed } from '../utils/rng'
 
-export type RockVariant = 'pebble' | 'small' | 'medium' | 'large'
-
 export type TreePlacement = {
   x: number
   z: number
@@ -10,7 +8,13 @@ export type TreePlacement = {
 export type RockPlacement = {
   x: number
   z: number
-  variant: RockVariant
+  footprintX: number
+  footprintZ: number
+  yawQuarterTurns: 0 | 1 | 2 | 3
+  modelIndex: 0 | 1
+  mirrorX: boolean
+  mirrorZ: boolean
+  verticalScale: number
 }
 
 export type GeneratedWorldFeatures = {
@@ -106,11 +110,8 @@ const pushTree = (state: WorldGenState, x: number, z: number) => {
   state.trees.push({ x, z })
 }
 
-const pushRock = (state: WorldGenState, x: number, z: number, variant: RockVariant) => {
-  const key = getKey(x, z)
-  if (state.occupied.has(key)) return
-  state.occupied.add(key)
-  state.rocks.push({ x, z, variant })
+const pushRock = (state: WorldGenState, placement: RockPlacement) => {
+  state.rocks.push(placement)
 }
 
 const treeRule: WorldGenRule = {
@@ -140,13 +141,64 @@ const treeRule: WorldGenRule = {
   }
 }
 
-const selectRockVariant = (seed: number, x: number, z: number, centerWeight: number): RockVariant => {
-  const scaleNoise = valueNoise2D(seed, x, z, 0.22)
-  const score = scaleNoise * 0.65 + centerWeight * 0.35
-  if (score > 0.8) return 'large'
-  if (score > 0.62) return 'medium'
-  if (score > 0.45) return 'small'
-  return 'pebble'
+const pickFootprint = (seed: number, x: number, z: number, centerWeight: number): [number, number] => {
+  const roll = hash2(seed, x, z)
+  if (centerWeight > 0.78) {
+    if (roll < 0.015) return [5, 5]
+    if (roll < 0.035) return [5, 4]
+    if (roll < 0.055) return [4, 5]
+    if (roll < 0.085) return [5, 2]
+    if (roll < 0.115) return [2, 5]
+    if (roll < 0.48) return [3, 3]
+    if (roll < 0.8) return [2, 2]
+    if (roll < 0.92) return [1, 2]
+    return [2, 3]
+  }
+  if (centerWeight > 0.58) {
+    if (roll < 0.006) return [5, 5]
+    if (roll < 0.018) return [5, 3]
+    if (roll < 0.03) return [3, 5]
+    if (roll < 0.24) return [3, 3]
+    if (roll < 0.62) return [2, 2]
+    if (roll < 0.84) return [1, 2]
+    return [1, 1]
+  }
+  if (centerWeight > 0.4) {
+    if (roll < 0.008) return [5, 2]
+    if (roll < 0.016) return [2, 5]
+    if (roll < 0.19) return [3, 3]
+    if (roll < 0.55) return [2, 2]
+    if (roll < 0.81) return [1, 2]
+    return [1, 1]
+  }
+  if (roll < 0.0025) return [5, 1]
+  if (roll < 0.005) return [1, 5]
+  if (roll < 0.09) return [2, 2]
+  if (roll < 0.34) return [1, 2]
+  return [1, 1]
+}
+
+const createRockPlacement = (seed: number, x: number, z: number, centerWeight: number): RockPlacement => {
+  const [baseX, baseZ] = pickFootprint(seed ^ 0x6f31f2d9, x, z, centerWeight)
+  const yawQuarterTurns = Math.floor(hash2(seed ^ 0x41c64e6d, x, z) * 4) as 0 | 1 | 2 | 3
+  const rotateSwap = yawQuarterTurns % 2 === 1
+  const footprintX = rotateSwap ? baseZ : baseX
+  const footprintZ = rotateSwap ? baseX : baseZ
+  const modelIndex = (hash2(seed ^ 0x1234abcd, x, z) < 0.5 ? 0 : 1) as 0 | 1
+  const mirrorX = hash2(seed ^ 0x9e3779b9, x, z) > 0.52
+  const mirrorZ = hash2(seed ^ 0x85ebca6b, x, z) > 0.58
+  const verticalScale = 0.88 + hash2(seed ^ 0xc2b2ae35, x, z) * 0.38
+  return {
+    x,
+    z,
+    footprintX,
+    footprintZ,
+    yawQuarterTurns,
+    modelIndex,
+    mirrorX,
+    mirrorZ,
+    verticalScale
+  }
 }
 
 const rockRule: WorldGenRule = {
@@ -172,8 +224,12 @@ const rockRule: WorldGenRule = {
           const centerWeight = Math.max(0, 1 - dist / radius)
           const patchNoise = hash2(patchSeed + patchIndex * 17, x, z)
           if (patchNoise > 0.35 + centerWeight * 0.6) continue
-          const variant = selectRockVariant(shapeSeed, x, z, centerWeight)
-          pushRock(state, x, z, variant)
+          const placement = createRockPlacement(shapeSeed, x, z, centerWeight)
+          const halfX = placement.footprintX * 0.5
+          const halfZ = placement.footprintZ * 0.5
+          if (Math.abs(x) + halfX > context.worldBounds - context.margin) continue
+          if (Math.abs(z) + halfZ > context.worldBounds - context.margin) continue
+          pushRock(state, placement)
         }
       }
     }
