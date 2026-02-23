@@ -6,10 +6,10 @@
     "entrypoints": {
       "default": {
         "inline": true,
-        "entry": "splash.html"
+        "entry": "entrypoints/splash/index.html"
       },
       "game": {
-        "entry": "game.html"
+        "entry": "entrypoints/game/index.html"
       }
     }
   },
