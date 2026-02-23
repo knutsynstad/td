@@ -1482,7 +1482,7 @@ const buildCoastlineLandKeys = () => {
   return landKeys
 }
 
-const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number): WaterDistanceField => {
+const buildWaterDistanceField = (landTileKeys: Set<string>): WaterDistanceField => {
   let minX = -waterOuterEdge
   let maxX = waterOuterEdge
   let minZ = -waterOuterEdge
@@ -1496,42 +1496,37 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
   }
   const sizeX = Math.max(GRID_SIZE * 2, maxX - minX)
   const sizeZ = Math.max(GRID_SIZE * 2, maxZ - minZ)
+  const cellsX = Math.max(2, Math.floor(sizeX / GRID_SIZE) + 1)
+  const cellsZ = Math.max(2, Math.floor(sizeZ / GRID_SIZE) + 1)
   const maxDistCells = 34
-  const dist = new Int16Array(resolution * resolution)
+  const dist = new Int16Array(cellsX * cellsZ)
   dist.fill(-1)
-  const landMask = new Uint8Array(resolution * resolution)
-  const queue = new Int32Array(resolution * resolution)
+  const landMask = new Uint8Array(cellsX * cellsZ)
+  const queue = new Int32Array(cellsX * cellsZ)
   let head = 0
   let tail = 0
-  const indexOf = (tx: number, tz: number) => tz * resolution + tx
-  const toCellX = (x: number) => Math.max(0, Math.min(resolution - 1, Math.floor(((x - minX) / sizeX) * (resolution - 1))))
-  const toCellZ = (z: number) => Math.max(0, Math.min(resolution - 1, Math.floor(((z - minZ) / sizeZ) * (resolution - 1))))
+  const indexOf = (tx: number, tz: number) => tz * cellsX + tx
+  const toCellX = (x: number) => Math.max(0, Math.min(cellsX - 1, Math.round((x - minX) / GRID_SIZE)))
+  const toCellZ = (z: number) => Math.max(0, Math.min(cellsZ - 1, Math.round((z - minZ) / GRID_SIZE)))
 
   for (const key of landTileKeys) {
     const { x, z } = parseGridKey(key)
-    const minTx = toCellX(x - GRID_SIZE * 0.5)
-    const maxTx = toCellX(x + GRID_SIZE * 0.5)
-    const minTz = toCellZ(z - GRID_SIZE * 0.5)
-    const maxTz = toCellZ(z + GRID_SIZE * 0.5)
-    for (let tz = minTz; tz <= maxTz; tz += 1) {
-      for (let tx = minTx; tx <= maxTx; tx += 1) {
-        const idx = indexOf(tx, tz)
-        landMask[idx] = 1
-      }
-    }
+    const idx = indexOf(toCellX(x), toCellZ(z))
+    if (landMask[idx] === 1) continue
+    landMask[idx] = 1
   }
 
   // Seed from shoreline water cells (water cells directly adjacent to land),
   // so every coast emits at the same phase origin.
-  for (let tz = 0; tz < resolution; tz += 1) {
-    for (let tx = 0; tx < resolution; tx += 1) {
+  for (let tz = 0; tz < cellsZ; tz += 1) {
+    for (let tx = 0; tx < cellsX; tx += 1) {
       const idx = indexOf(tx, tz)
       if (landMask[idx] === 1) continue
       let touchesLand = false
       if (tx > 0 && landMask[idx - 1] === 1) touchesLand = true
-      if (tx + 1 < resolution && landMask[idx + 1] === 1) touchesLand = true
-      if (tz > 0 && landMask[idx - resolution] === 1) touchesLand = true
-      if (tz + 1 < resolution && landMask[idx + resolution] === 1) touchesLand = true
+      if (tx + 1 < cellsX && landMask[idx + 1] === 1) touchesLand = true
+      if (tz > 0 && landMask[idx - cellsX] === 1) touchesLand = true
+      if (tz + 1 < cellsZ && landMask[idx + cellsX] === 1) touchesLand = true
       if (!touchesLand) continue
       dist[idx] = 0
       queue[tail] = idx
@@ -1544,8 +1539,8 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
     head += 1
     const baseDist = dist[idx]!
     if (baseDist >= maxDistCells) continue
-    const tx = idx % resolution
-    const tz = (idx - tx) / resolution
+    const tx = idx % cellsX
+    const tz = (idx - tx) / cellsX
     const nextDist = baseDist + 1
     if (tx > 0) {
       const ni = idx - 1
@@ -1555,7 +1550,7 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
         tail += 1
       }
     }
-    if (tx + 1 < resolution) {
+    if (tx + 1 < cellsX) {
       const ni = idx + 1
       if (landMask[ni] === 0 && dist[ni] === -1) {
         dist[ni] = nextDist
@@ -1564,15 +1559,15 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
       }
     }
     if (tz > 0) {
-      const ni = idx - resolution
+      const ni = idx - cellsX
       if (landMask[ni] === 0 && dist[ni] === -1) {
         dist[ni] = nextDist
         queue[tail] = ni
         tail += 1
       }
     }
-    if (tz + 1 < resolution) {
-      const ni = idx + resolution
+    if (tz + 1 < cellsZ) {
+      const ni = idx + cellsX
       if (landMask[ni] === 0 && dist[ni] === -1) {
         dist[ni] = nextDist
         queue[tail] = ni
@@ -1581,7 +1576,7 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
     }
   }
 
-  const data = new Uint8Array(resolution * resolution * 4)
+  const data = new Uint8Array(cellsX * cellsZ * 4)
   for (let i = 0; i < dist.length; i += 1) {
     if (landMask[i] === 1) {
       const diLand = i * 4
@@ -1602,23 +1597,64 @@ const buildWaterDistanceField = (landTileKeys: Set<string>, resolution: number):
     data[di + 3] = 255
   }
 
-  const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat)
+  const texture = new THREE.DataTexture(data, cellsX, cellsZ, THREE.RGBAFormat)
   texture.needsUpdate = true
-  texture.magFilter = THREE.LinearFilter
-  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.NearestFilter
+  texture.minFilter = THREE.NearestFilter
   texture.wrapS = THREE.ClampToEdgeWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
   return { texture, minX, minZ, sizeX, sizeZ }
 }
 
-const waterDistanceResolution = 512
-let waterDistanceField = buildWaterDistanceField(buildCoastlineLandKeys(), waterDistanceResolution)
+const buildWaterSurfaceGeometry = (landTileKeys: Set<string>, field: WaterDistanceField) => {
+  const geometry = new THREE.BufferGeometry()
+  const positions: number[] = []
+  const normals: number[] = []
+  const minX = field.minX
+  const maxX = field.minX + field.sizeX
+  const minZ = field.minZ
+  const maxZ = field.minZ + field.sizeZ
+  const startX = Math.ceil(minX / GRID_SIZE) * GRID_SIZE
+  const endX = Math.floor(maxX / GRID_SIZE) * GRID_SIZE
+  const startZ = Math.ceil(minZ / GRID_SIZE) * GRID_SIZE
+  const endZ = Math.floor(maxZ / GRID_SIZE) * GRID_SIZE
+  for (let x = startX; x <= endX; x += GRID_SIZE) {
+    for (let z = startZ; z <= endZ; z += GRID_SIZE) {
+      if (landTileKeys.has(`${x},${z}`)) continue
+      const x0 = x - GRID_SIZE * 0.5
+      const x1 = x + GRID_SIZE * 0.5
+      const z0 = z - GRID_SIZE * 0.5
+      const z1 = z + GRID_SIZE * 0.5
+      positions.push(
+        x0, 0, z0,
+        x1, 0, z1,
+        x1, 0, z0,
+        x0, 0, z0,
+        x0, 0, z1,
+        x1, 0, z1
+      )
+      normals.push(
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0
+      )
+    }
+  }
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geometry.computeBoundingSphere()
+  return geometry
+}
+const initialWaterLandKeys = buildCoastlineLandKeys()
+let waterDistanceField = buildWaterDistanceField(initialWaterLandKeys)
 const waterMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
     uDistanceTex: { value: waterDistanceField.texture },
     uBounds: { value: new THREE.Vector4(waterDistanceField.minX, waterDistanceField.minZ, waterDistanceField.sizeX, waterDistanceField.sizeZ) },
-    uViewportBounds: { value: new THREE.Vector4(-1, -1, 2, 2) },
     uWaterColor: { value: new THREE.Color(0x3f8fb2) },
     uFoamColor: { value: new THREE.Color(0xc9f3fb) }
   },
@@ -1638,30 +1674,14 @@ const waterMaterial = new THREE.ShaderMaterial({
     uniform float uTime;
     uniform sampler2D uDistanceTex;
     uniform vec4 uBounds;
-    uniform vec4 uViewportBounds;
     uniform vec3 uWaterColor;
     uniform vec3 uFoamColor;
 
     void main() {
-      vec2 viewportMin = uViewportBounds.xy;
-      vec2 viewportMax = uViewportBounds.xy + uViewportBounds.zw;
-      if (
-        vWorldXZ.x < viewportMin.x ||
-        vWorldXZ.x > viewportMax.x ||
-        vWorldXZ.y < viewportMin.y ||
-        vWorldXZ.y > viewportMax.y
-      ) {
-        discard;
-      }
-
       vec2 uv = (vWorldXZ - uBounds.xy) / uBounds.zw;
       uv = clamp(uv, 0.0, 1.0);
       vec4 distanceSample = texture2D(uDistanceTex, uv);
       float distanceToLand = distanceSample.r;
-      float isWater = distanceSample.a;
-      if (isWater < 0.5) {
-        discard;
-      }
 
       vec3 baseColor = uWaterColor;
 
@@ -1692,24 +1712,21 @@ const waterMaterial = new THREE.ShaderMaterial({
   `
 })
 const waterMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(1, 1, 1, 1),
+  buildWaterSurfaceGeometry(initialWaterLandKeys, waterDistanceField),
   waterMaterial
 )
-waterMesh.rotation.x = -Math.PI / 2
-waterMesh.position.y = WATER_LEVEL - 0.01
+waterMesh.position.set(0, WATER_LEVEL - 0.01, 0)
 waterMesh.castShadow = false
 waterMesh.receiveShadow = false
 scene.add(waterMesh)
-const updateWaterFromBounds = (bounds: GroundBounds) => {
-  const width = Math.max(GRID_SIZE, bounds.maxX - bounds.minX)
-  const depth = Math.max(GRID_SIZE, bounds.maxZ - bounds.minZ)
-  waterMesh.scale.set(width, depth, 1)
-  waterMesh.position.set((bounds.minX + bounds.maxX) * 0.5, WATER_LEVEL - 0.01, (bounds.minZ + bounds.maxZ) * 0.5)
-  waterMaterial.uniforms.uViewportBounds.value.set(bounds.minX, bounds.minZ, width, depth)
-}
+const updateWaterFromBounds = (_bounds: GroundBounds) => {}
 
 const rebuildWaterDistanceField = () => {
-  const next = buildWaterDistanceField(buildCoastlineLandKeys(), waterDistanceResolution)
+  const nextLandKeys = buildCoastlineLandKeys()
+  const next = buildWaterDistanceField(nextLandKeys)
+  const nextGeometry = buildWaterSurfaceGeometry(nextLandKeys, next)
+  waterMesh.geometry.dispose()
+  waterMesh.geometry = nextGeometry
   waterDistanceField.texture.dispose()
   waterDistanceField = next
   waterMaterial.uniforms.uDistanceTex.value = next.texture
@@ -5471,7 +5488,8 @@ const tick = (now: number, delta: number) => {
     rockVisualsNeedFullRefresh = false
   }
   const waterTime = now * 0.001
-  waterMesh.position.y = WATER_LEVEL - 0.01 + Math.sin(waterTime * WATER_BOB_SPEED) * WATER_BOB_AMPLITUDE * 0.22
+  const bobOffset = Math.sin(waterTime * WATER_BOB_SPEED) * WATER_BOB_AMPLITUDE * 0.22
+  waterMesh.position.y = WATER_LEVEL - 0.01 + bobOffset
   waterMaterial.uniforms.uTime.value = waterTime
 
   updateMinimapEmbellishAlpha(delta)
