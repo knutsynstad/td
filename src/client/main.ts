@@ -4455,6 +4455,8 @@ const updateSelectionDialog = () => {
   const canWithdraw = isBankSelected && inRange.length > 0 && maxWithdrawable > 0
   const isNatureSelected = selectedType === 'tree' || selectedType === 'rock'
   const selectedIsPlayerBuilt = selectedStructureState?.playerBuilt === true
+  const selectedHpRounded = selectedStructureState ? Math.max(0, Math.ceil(selectedStructureState.hp)) : null
+  const selectedBankTotalRounded = isBankSelected ? Math.floor(gameState.bankEnergy) : null
   const deleteCost = inRange
     .filter(collider => collider.type !== 'bank')
     .reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0)
@@ -4475,11 +4477,15 @@ const updateSelectionDialog = () => {
         canAfford: gameState.energy >= getUpgradeEnergyCost(option.id)
       }))
     : []
-  const repairCost = selectedStructureState && !isNatureSelected && selectedIsPlayerBuilt
-    ? getRepairCost(selectedStructureState)
+  const repairCost = selectedStructureState && selectedHpRounded !== null && !isNatureSelected && selectedIsPlayerBuilt
+    ? getRepairCost({
+        hp: selectedHpRounded,
+        maxHp: selectedStructureState.maxHp,
+        cumulativeBuildCost: selectedStructureState.cumulativeBuildCost
+      })
     : null
-  const repairStatus = selectedStructureState && !isNatureSelected
-    ? getRepairStatus(selectedStructureState.hp, selectedStructureState.maxHp)
+  const repairStatus = selectedStructureState && selectedHpRounded !== null && !isNatureSelected
+    ? getRepairStatus(selectedHpRounded, selectedStructureState.maxHp)
     : null
 
   selectionDialog.update({
@@ -4488,7 +4494,7 @@ const updateSelectionDialog = () => {
     isBankSelected,
     selectedTowerTypeId,
     selectedStructureLabel,
-    bankTotal: isBankSelected ? gameState.bankEnergy : null,
+    bankTotal: selectedBankTotalRounded,
     canBankAdd1: canDeposit,
     canBankAdd10: canDeposit,
     canBankRemove1: canWithdraw,
@@ -4501,10 +4507,11 @@ const updateSelectionDialog = () => {
         }
       : null,
     buildingHealth: selectedStructureState
+      && selectedHpRounded !== null
       && !isNatureSelected
       && !isBankSelected
       ? {
-          hp: selectedStructureState.hp,
+          hp: selectedHpRounded,
           maxHp: selectedStructureState.maxHp
         }
       : null,

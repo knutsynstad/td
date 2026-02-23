@@ -64,8 +64,50 @@ export class SelectionDialog {
     this.actions = actions
     this.root = document.createElement('div')
     this.root.className = 'selection-dialog'
+    this.root.addEventListener('click', this.handleClick)
     parent.appendChild(this.root)
     this.render()
+  }
+
+  private isTowerUpgradeId(value: string): value is TowerUpgradeId {
+    return value === 'range' || value === 'damage' || value === 'speed'
+  }
+
+  private handleClick = (event: MouseEvent) => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    const button = target.closest('button')
+    if (!button || !this.root.contains(button)) return
+
+    const upgradeId = button.getAttribute('data-upgrade')
+    if (upgradeId !== null && this.isTowerUpgradeId(upgradeId)) {
+      this.actions.onUpgrade(upgradeId)
+      return
+    }
+
+    if (button.hasAttribute('data-repair')) {
+      this.actions.onRepair()
+      return
+    }
+    if (button.hasAttribute('data-delete')) {
+      this.actions.onDelete()
+      return
+    }
+    if (button.hasAttribute('data-bank-add-1')) {
+      this.actions.onBankAdd1()
+      return
+    }
+    if (button.hasAttribute('data-bank-add-10')) {
+      this.actions.onBankAdd10()
+      return
+    }
+    if (button.hasAttribute('data-bank-remove-1')) {
+      this.actions.onBankRemove1()
+      return
+    }
+    if (button.hasAttribute('data-bank-remove-10')) {
+      this.actions.onBankRemove10()
+    }
   }
 
   update(state: SelectionDialogState) {
@@ -226,22 +268,5 @@ export class SelectionDialog {
                : ''}
            </div>`}
     `
-
-    for (const btn of Array.from(this.root.querySelectorAll<HTMLButtonElement>('button[data-upgrade]'))) {
-      const id = btn.dataset.upgrade as TowerUpgradeId
-      btn.addEventListener('click', () => this.actions.onUpgrade(id))
-    }
-    const repairBtn = this.root.querySelector<HTMLButtonElement>('button[data-repair]')
-    repairBtn?.addEventListener('click', () => this.actions.onRepair())
-    const deleteBtn = this.root.querySelector<HTMLButtonElement>('button[data-delete]')
-    deleteBtn?.addEventListener('click', () => this.actions.onDelete())
-    const bankAdd1Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-add-1]')
-    bankAdd1Btn?.addEventListener('click', () => this.actions.onBankAdd1())
-    const bankAdd10Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-add-10]')
-    bankAdd10Btn?.addEventListener('click', () => this.actions.onBankAdd10())
-    const bankRemove1Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-remove-1]')
-    bankRemove1Btn?.addEventListener('click', () => this.actions.onBankRemove1())
-    const bankRemove10Btn = this.root.querySelector<HTMLButtonElement>('button[data-bank-remove-10]')
-    bankRemove10Btn?.addEventListener('click', () => this.actions.onBankRemove10())
   }
 }
