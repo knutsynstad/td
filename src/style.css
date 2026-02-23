@@ -79,6 +79,55 @@ canvas {
   pointer-events: auto;
 }
 
+.debug-menu {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  min-width: 220px;
+  background: rgba(17, 23, 30, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: none;
+  gap: 8px;
+  z-index: 2300;
+  pointer-events: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.debug-menu.is-open {
+  display: grid;
+}
+
+.debug-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.debug-menu__hint {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.debug-menu__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  opacity: 0.96;
+  cursor: pointer;
+}
+
+.debug-menu__row input {
+  margin: 0;
+}
+
 .selection-dialog__title {
   font-size: 1.2rem;
   font-weight: 800;

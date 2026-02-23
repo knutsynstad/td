@@ -154,9 +154,17 @@ const COIN_PILE_CYLINDER_MIN = 3
 const COIN_PILE_CYLINDER_MAX = 96
 const COIN_PILE_MAX_RADIUS = 2.1
 const COIN_PILE_CLUSTER_MAX_PER_CORNER = 5
-const SHOW_WORLD_GRID = false
-const SHOW_FLOW_FIELD_DEBUG = false
-const SHOW_PLAYER_SHOOT_RANGE = false
+type DebugViewState = {
+  worldGrid: boolean
+  flowField: boolean
+  playerShootRange: boolean
+}
+
+const debugViewState: DebugViewState = {
+  worldGrid: false,
+  flowField: false,
+  playerShootRange: false
+}
 const STAGING_ISLAND_DISTANCE = 14
 const STAGING_ISLAND_SIZE = 15
 const STAGING_ISLAND_HEIGHT = 1
@@ -624,6 +632,10 @@ class WorldGrid {
       this.group.add(line)
       this.lines.push(line)
     }
+  }
+
+  setVisible(visible: boolean) {
+    this.group.visible = visible
   }
 
   dispose() {
@@ -1117,11 +1129,11 @@ class FlowFieldDebugOverlay {
   }
 }
 
-const worldGrid = SHOW_WORLD_GRID ? new WorldGrid() : null
+const worldGrid = new WorldGrid()
 const worldBorder = new WorldBorder()
 const spawnContainerOverlay = new SpawnContainerOverlay()
 const stagingIslandsOverlay = new StagingIslandsOverlay()
-const flowFieldDebugOverlay = SHOW_FLOW_FIELD_DEBUG ? new FlowFieldDebugOverlay() : null
+const flowFieldDebugOverlay = new FlowFieldDebugOverlay()
 const groundTileLayer = new InstancedModelLayer(scene, 20_000, { receiveShadow: true, castShadow: false })
 const pathCenterTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
 const pathEdgeTileLayer = new InstancedModelLayer(scene, 5_000, { receiveShadow: true, castShadow: false, yOffset: 0.01 })
@@ -2638,8 +2650,8 @@ const getCastleFlowField = () => {
       resolution: GRID_SIZE,
       corridorHalfWidthCells: 1
     })
-    if (SHOW_FLOW_FIELD_DEBUG) {
-      flowFieldDebugOverlay?.upsert(castleFlowField)
+    if (debugViewState.flowField) {
+      flowFieldDebugOverlay.upsert(castleFlowField)
     }
     isCastleFlowFieldDirty = false
   }
@@ -2790,7 +2802,7 @@ const playerShootRangeRing = new THREE.Mesh(
 )
 playerShootRangeRing.rotation.x = -Math.PI / 2
 playerShootRangeRing.position.set(0, 0.02, 0)
-playerShootRangeRing.visible = SHOW_PLAYER_SHOOT_RANGE
+playerShootRangeRing.visible = debugViewState.playerShootRange
 scene.add(playerShootRangeRing)
 
 const raycaster = new THREE.Raycaster()
@@ -4156,6 +4168,72 @@ const selectionDialog = new SelectionDialog(
   }
 )
 
+let isDebugMenuOpen = false
+const debugMenuRoot = document.createElement('div')
+debugMenuRoot.className = 'debug-menu'
+debugMenuRoot.innerHTML = `
+  <div class="debug-menu__header">Debug Views <span class="debug-menu__hint">[&#96;]</span></div>
+  <label class="debug-menu__row">
+    <input type="checkbox" data-debug-toggle="flowField" />
+    <span>Flow Field Debug</span>
+  </label>
+  <label class="debug-menu__row">
+    <input type="checkbox" data-debug-toggle="playerShootRange" />
+    <span>Player Shoot Range</span>
+  </label>
+  <label class="debug-menu__row">
+    <input type="checkbox" data-debug-toggle="worldGrid" />
+    <span>World Grid</span>
+  </label>
+`
+app.appendChild(debugMenuRoot)
+
+const debugFlowFieldInput = debugMenuRoot.querySelector<HTMLInputElement>('input[data-debug-toggle="flowField"]')
+const debugPlayerRangeInput = debugMenuRoot.querySelector<HTMLInputElement>('input[data-debug-toggle="playerShootRange"]')
+const debugWorldGridInput = debugMenuRoot.querySelector<HTMLInputElement>('input[data-debug-toggle="worldGrid"]')
+
+const applyDebugViewState = () => {
+  playerShootRangeRing.visible = debugViewState.playerShootRange
+  worldGrid.setVisible(debugViewState.worldGrid)
+  if (!debugViewState.flowField) {
+    flowFieldDebugOverlay.clear()
+  } else if (castleFlowField) {
+    flowFieldDebugOverlay.upsert(castleFlowField)
+  }
+}
+
+const syncDebugMenuInputs = () => {
+  if (debugFlowFieldInput) debugFlowFieldInput.checked = debugViewState.flowField
+  if (debugPlayerRangeInput) debugPlayerRangeInput.checked = debugViewState.playerShootRange
+  if (debugWorldGridInput) debugWorldGridInput.checked = debugViewState.worldGrid
+}
+
+const setDebugMenuOpen = (open: boolean) => {
+  isDebugMenuOpen = open
+  debugMenuRoot.classList.toggle('is-open', open)
+}
+
+const toggleDebugMenu = () => {
+  setDebugMenuOpen(!isDebugMenuOpen)
+}
+
+debugFlowFieldInput?.addEventListener('change', () => {
+  debugViewState.flowField = debugFlowFieldInput.checked
+  applyDebugViewState()
+})
+debugPlayerRangeInput?.addEventListener('change', () => {
+  debugViewState.playerShootRange = debugPlayerRangeInput.checked
+  applyDebugViewState()
+})
+debugWorldGridInput?.addEventListener('change', () => {
+  debugViewState.worldGrid = debugWorldGridInput.checked
+  applyDebugViewState()
+})
+
+syncDebugMenuInputs()
+applyDebugViewState()
+setDebugMenuOpen(false)
+
 const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size
   const inRange = getSelectedInRange()
@@ -4294,6 +4372,9 @@ window.addEventListener('keydown', (event) => {
   } else if (event.code === 'Escape') {
     event.preventDefault()
     setBuildMode('off')
+  } else if (event.code === 'Backquote') {
+    event.preventDefault()
+    toggleDebugMenu()
   }
 })
 
@@ -5447,7 +5528,7 @@ const tick = (now: number, delta: number) => {
     tower.rangeRing.visible = selectedTower === tower || (collider !== undefined && selectedStructures.has(collider))
   }
   playerShootRangeRing.position.set(player.mesh.position.x, 0.02, player.mesh.position.z)
-  playerShootRangeRing.visible = SHOW_PLAYER_SHOOT_RANGE
+  playerShootRangeRing.visible = debugViewState.playerShootRange
 
   const arrowDir = new THREE.Vector3(
     player.target.x - player.mesh.position.x,
@@ -5519,7 +5600,9 @@ const tick = (now: number, delta: number) => {
   const visibleBounds = getVisibleGroundBounds(camera)
   updateGroundFromBounds(visibleBounds)
   updateWaterFromBounds(visibleBounds)
-  worldGrid?.update(visibleBounds)
+  if (debugViewState.worldGrid) {
+    worldGrid.update(visibleBounds)
+  }
 
   gameState.energyPopTimer = Math.max(0, gameState.energyPopTimer - delta)
   updateHud(
@@ -5601,7 +5684,8 @@ const disposeApp = () => {
   pathEdgeTileLayer.dispose()
   pathInnerCornerTileLayer.dispose()
   pathOuterCornerTileLayer.dispose()
-  worldGrid?.dispose()
+  flowFieldDebugOverlay.clear()
+  worldGrid.dispose()
   worldBorder.dispose()
 
   shaftGeometry.dispose()
