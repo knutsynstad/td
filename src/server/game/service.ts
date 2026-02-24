@@ -188,11 +188,19 @@ const runPendingSimulation = async (
       stalePlayersRemoved: stalePlayers.length,
     };
   } finally {
-    const released = await releaseTickLease(leaseOwnerId, lease.token);
-    if (!released) {
-      console.warn('Tick lease release skipped', {
+    try {
+      const released = await releaseTickLease(leaseOwnerId, lease.token);
+      if (!released) {
+        console.warn('Tick lease release skipped', {
+          source,
+          leaseToken: lease.token,
+        });
+      }
+    } catch (error) {
+      console.error('Tick lease release failed', {
         source,
         leaseToken: lease.token,
+        error,
       });
     }
   }

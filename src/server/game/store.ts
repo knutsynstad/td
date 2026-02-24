@@ -60,7 +60,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const clampCoins = (coins: number): number =>
   Math.max(0, Math.min(ENERGY_CAP, coins));
 const MAX_TX_RETRIES = 5;
+const TX_RETRY_BASE_DELAY_MS = 5;
 const economyKeys = getEconomyRedisKeys();
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const isRedisTransactionFailure = (error: unknown): boolean =>
+  error instanceof Error &&
+  /redis:\s*transaction failed/i.test(error.message);
 
 const parseTickLeaseState = (
   raw: string | undefined
@@ -745,29 +755,45 @@ export const acquireTickLease = async (
 ): Promise<{ ownerId: string; token: number; expiresAtMs: number } | null> => {
   const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(keys.tickLease, keys.tickLeaseToken);
-    const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
-    if (
-      currentLease &&
-      currentLease.expiresAtMs > nowMs &&
-      currentLease.ownerId !== ownerId
-    ) {
-      await tx.unwatch();
-      return null;
-    }
-    const currentToken = Number((await redis.get(keys.tickLeaseToken)) ?? '0');
-    const nextToken = Number.isFinite(currentToken) ? currentToken + 1 : 1;
-    const nextLease: TickLeaseState = {
-      ownerId,
-      token: nextToken,
-      expiresAtMs: nowMs + Math.max(1, leaseMs),
-    };
-    await tx.multi();
-    await tx.set(keys.tickLeaseToken, String(nextToken));
-    await tx.set(keys.tickLease, toJson(nextLease));
-    const result = await tx.exec();
-    if (result !== null) {
-      return nextLease;
+    let tx:
+      | Awaited<ReturnType<typeof redis.watch>>
+      | undefined;
+    try {
+      tx = await redis.watch(keys.tickLease, keys.tickLeaseToken);
+      const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
+      if (
+        currentLease &&
+        currentLease.expiresAtMs > nowMs &&
+        currentLease.ownerId !== ownerId
+      ) {
+        await tx.unwatch();
+        return null;
+      }
+      const currentToken = Number((await redis.get(keys.tickLeaseToken)) ?? '0');
+      const nextToken = Number.isFinite(currentToken) ? currentToken + 1 : 1;
+      const nextLease: TickLeaseState = {
+        ownerId,
+        token: nextToken,
+        expiresAtMs: nowMs + Math.max(1, leaseMs),
+      };
+      await tx.multi();
+      await tx.set(keys.tickLeaseToken, String(nextToken));
+      await tx.set(keys.tickLease, toJson(nextLease));
+      const result = await tx.exec();
+      if (result !== null) {
+        return nextLease;
+      }
+    } catch (error) {
+      if (!isRedisTransactionFailure(error)) {
+        throw error;
+      }
+      try {
+        await tx?.unwatch();
+      } catch {
+        // Best-effort cleanup only.
+      }
+      const backoffMs = TX_RETRY_BASE_DELAY_MS * (attempt + 1);
+      await sleep(backoffMs);
     }
   }
   return null;
@@ -779,21 +805,37 @@ export const releaseTickLease = async (
 ): Promise<boolean> => {
   const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(keys.tickLease);
-    const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
-    if (!currentLease) {
-      await tx.unwatch();
-      return true;
-    }
-    if (currentLease.ownerId !== ownerId || currentLease.token !== token) {
-      await tx.unwatch();
-      return false;
-    }
-    await tx.multi();
-    await tx.del(keys.tickLease);
-    const result = await tx.exec();
-    if (result !== null) {
-      return true;
+    let tx:
+      | Awaited<ReturnType<typeof redis.watch>>
+      | undefined;
+    try {
+      tx = await redis.watch(keys.tickLease);
+      const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
+      if (!currentLease) {
+        await tx.unwatch();
+        return true;
+      }
+      if (currentLease.ownerId !== ownerId || currentLease.token !== token) {
+        await tx.unwatch();
+        return false;
+      }
+      await tx.multi();
+      await tx.del(keys.tickLease);
+      const result = await tx.exec();
+      if (result !== null) {
+        return true;
+      }
+    } catch (error) {
+      if (!isRedisTransactionFailure(error)) {
+        throw error;
+      }
+      try {
+        await tx?.unwatch();
+      } catch {
+        // Best-effort cleanup only.
+      }
+      const backoffMs = TX_RETRY_BASE_DELAY_MS * (attempt + 1);
+      await sleep(backoffMs);
     }
   }
   return false;
