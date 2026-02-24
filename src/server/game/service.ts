@@ -9,7 +9,14 @@ import type {
   ResyncResponse,
 } from "../../shared/game-protocol";
 import type { PlayerState } from "../../shared/game-state";
-import { MAX_BATCH_EVENTS, MAX_PLAYERS, MAX_STEPS_PER_REQUEST, PLAYER_TIMEOUT_MS } from "./config";
+import {
+  ENERGY_COST_TOWER,
+  ENERGY_COST_WALL,
+  MAX_BATCH_EVENTS,
+  MAX_PLAYERS,
+  MAX_STEPS_PER_REQUEST,
+  PLAYER_TIMEOUT_MS,
+} from "./config";
 import { getGameChannelName } from "./keys";
 import { buildPresenceLeaveDelta, runSimulation } from "./simulation";
 import {
@@ -17,10 +24,12 @@ import {
   createDefaultPlayer,
   enqueueCommand,
   enforceStructureCap,
+  getGlobalCoins,
   loadWorldState,
   persistWorldState,
   popPendingCommands,
   removeOldPlayersByLastSeen,
+  spendGlobalCoins,
   touchPlayerPresence,
   trimCommandQueue,
 } from "./store";
@@ -53,7 +62,10 @@ const broadcast = async (postId: string, worldVersion: number, tickSeq: number, 
   }
 };
 
-const runPendingSimulation = async (postId: string, nowMs: number): Promise<{ deltas: GameDelta[]; tickSeq: number; worldVersion: number }> => {
+const runPendingSimulation = async (
+  postId: string,
+  nowMs: number,
+): Promise<{ deltas: GameDelta[]; tickSeq: number; worldVersion: number }> => {
   const world = await loadWorldState(postId);
   const commands = await popPendingCommands(postId, nowMs);
   const result = runSimulation(world, nowMs, commands, MAX_STEPS_PER_REQUEST);
@@ -89,6 +101,8 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
   world.players[playerId] = player;
   await persistWorldState(world);
   await touchPlayerPresence(postId, player);
+  const coins = await getGlobalCoins(nowMs);
+  world.meta.energy = coins;
 
   const joinDelta: GameDelta = {
     type: "presenceDelta",
@@ -138,6 +152,18 @@ export const applyCommand = async (postId: string, envelope: CommandEnvelope): P
         reason: "structure cap reached",
       };
     }
+    const energyCost = envelope.command.structure.type === "tower" ? ENERGY_COST_TOWER : ENERGY_COST_WALL;
+    const spendResult = await spendGlobalCoins(energyCost, nowMs);
+    if (!spendResult.ok) {
+      const world = await loadWorldState(postId);
+      return {
+        type: "commandAck",
+        accepted: false,
+        tickSeq: world.meta.tickSeq,
+        worldVersion: world.meta.worldVersion,
+        reason: "not enough coins",
+      };
+    }
   }
 
   const enqueueResult = await enqueueCommand(postId, nowMs, envelope);
@@ -176,7 +202,6 @@ export const heartbeatGame = async (
       player.position = position;
     }
     await touchPlayerPresence(postId, player);
-    await persistWorldState(world);
   }
 
   const nowMs = Date.now();
@@ -194,8 +219,12 @@ export const heartbeatGame = async (
   };
 };
 
-export const resyncGame = async (postId: string): Promise<ResyncResponse> => {
+export const getCoinBalance = async (): Promise<number> =>
+  getGlobalCoins(Date.now());
+
+export const resyncGame = async (postId: string, _playerId?: string): Promise<ResyncResponse> => {
   const world = await loadWorldState(postId);
+  world.meta.energy = await getGlobalCoins(Date.now());
   return {
     type: "snapshot",
     snapshot: world,

@@ -2,6 +2,8 @@ import { redis } from "@devvit/web/server";
 import type { CommandEnvelope } from "../../shared/game-protocol";
 import type { MobState, PlayerIntent, PlayerState, StructureState, WaveState, WorldMeta, WorldState } from "../../shared/game-state";
 import {
+  ENERGY_CAP,
+  ENERGY_REGEN_PER_SECOND,
   MAX_COMMANDS_PER_BATCH,
   MAX_QUEUE_COMMANDS,
   MAX_RATE_TOKENS,
@@ -17,6 +19,11 @@ type RateLimitState = {
   lastRefillMs: number;
 };
 
+type GlobalCoinState = {
+  coins: number;
+  lastAccruedMs: number;
+};
+
 const toJson = (value: unknown): string => JSON.stringify(value);
 
 const parseJson = (value: string | undefined): unknown => {
@@ -30,6 +37,11 @@ const parseJson = (value: string | undefined): unknown => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+const clampCoins = (coins: number): number => Math.max(0, Math.min(ENERGY_CAP, coins));
+const GLOBAL_COINS_KEY = "coins";
+export const CASTLE_COINS_KEY = "castleCoins";
+const MAX_TX_RETRIES = 5;
 
 const parseVec2 = (value: unknown) => {
   if (!isRecord(value)) return { x: 0, z: 0 };
@@ -229,7 +241,7 @@ export const loadWorldState = async (postId: string): Promise<WorldState> => {
     worldVersion: Number(metaRaw?.worldVersion ?? "0"),
     lastTickMs: Number(metaRaw?.lastTickMs ?? String(now)),
     seed: Number(metaRaw?.seed ?? String(now)),
-    energy: Number(metaRaw?.energy ?? "500"),
+    energy: Math.max(0, Math.min(ENERGY_CAP, Number(metaRaw?.energy ?? String(ENERGY_CAP)))),
     lives: Number(metaRaw?.lives ?? "1"),
   };
 
@@ -327,6 +339,156 @@ export const touchPlayerPresence = async (postId: string, player: PlayerState): 
     redis.hSet(keys.players, { [player.playerId]: toJson(player) }),
     redis.zAdd(keys.lastSeen, { member: player.playerId, score: player.lastSeenMs }),
   ]);
+};
+
+export const getGlobalCoins = async (nowMs: number): Promise<number> => {
+  const raw = await redis.get(GLOBAL_COINS_KEY);
+  const parsed = parseJson(raw ?? undefined);
+  const current: GlobalCoinState = isRecord(parsed)
+    ? {
+        coins: clampCoins(Number(parsed.coins ?? parsed.energy ?? ENERGY_CAP)),
+        lastAccruedMs: Number(parsed.lastAccruedMs ?? nowMs),
+      }
+    : {
+        coins: ENERGY_CAP,
+        lastAccruedMs: nowMs,
+      };
+  const elapsedMs = Math.max(0, nowMs - current.lastAccruedMs);
+  const regenerated = (elapsedMs / 1000) * ENERGY_REGEN_PER_SECOND;
+  return clampCoins(current.coins + regenerated);
+};
+
+const parseGlobalCoinState = (raw: string | undefined, nowMs: number): GlobalCoinState => {
+  const parsed = parseJson(raw ?? undefined);
+  if (!isRecord(parsed)) {
+    return {
+      coins: ENERGY_CAP,
+      lastAccruedMs: nowMs,
+    };
+  }
+  return {
+    coins: clampCoins(Number(parsed.coins ?? parsed.energy ?? ENERGY_CAP)),
+    lastAccruedMs: Number(parsed.lastAccruedMs ?? nowMs),
+  };
+};
+
+const accrueCoins = (state: GlobalCoinState, nowMs: number): number => {
+  const elapsedMs = Math.max(0, nowMs - state.lastAccruedMs);
+  const regenerated = (elapsedMs / 1000) * ENERGY_REGEN_PER_SECOND;
+  return clampCoins(state.coins + regenerated);
+};
+
+const parseCastleCoins = (raw: string | undefined): number => {
+  const numeric = Number(raw ?? 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.floor(numeric));
+};
+
+export const spendGlobalCoins = async (
+  amount: number,
+  nowMs: number,
+): Promise<{ ok: boolean; coins: number }> => {
+  const safeAmount = Math.max(0, amount);
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(GLOBAL_COINS_KEY);
+    const current = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
+    const accrued = accrueCoins(current, nowMs);
+    if (accrued < safeAmount) {
+      await tx.unwatch();
+      return { ok: false, coins: accrued };
+    }
+    const nextCoins = clampCoins(accrued - safeAmount);
+    await tx.multi();
+    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    const result = await tx.exec();
+    if (result !== null) {
+      return { ok: true, coins: nextCoins };
+    }
+  }
+  const fallback = await getGlobalCoins(nowMs);
+  return { ok: false, coins: fallback };
+};
+
+export const addGlobalCoins = async (
+  amount: number,
+  nowMs: number,
+): Promise<{ added: number; coins: number }> => {
+  const safeAmount = Math.max(0, amount);
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(GLOBAL_COINS_KEY);
+    const current = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
+    const accrued = accrueCoins(current, nowMs);
+    const nextCoins = clampCoins(accrued + safeAmount);
+    const added = Math.max(0, nextCoins - accrued);
+    await tx.multi();
+    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    const result = await tx.exec();
+    if (result !== null) {
+      return { added, coins: nextCoins };
+    }
+  }
+  return { added: 0, coins: await getGlobalCoins(nowMs) };
+};
+
+export const getCastleCoins = async (): Promise<number> =>
+  parseCastleCoins(await redis.get(CASTLE_COINS_KEY));
+
+export const depositCoinsToCastle = async (
+  amount: number,
+  nowMs: number,
+): Promise<{ ok: boolean; deposited: number; coins: number; castleCoins: number }> => {
+  const safeAmount = Math.max(0, Math.floor(amount));
+  if (safeAmount <= 0) {
+    return { ok: false, deposited: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
+  }
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(GLOBAL_COINS_KEY, CASTLE_COINS_KEY);
+    const coinState = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
+    const castleCoins = parseCastleCoins(await redis.get(CASTLE_COINS_KEY));
+    const accrued = accrueCoins(coinState, nowMs);
+    if (accrued < safeAmount) {
+      await tx.unwatch();
+      return { ok: false, deposited: 0, coins: accrued, castleCoins };
+    }
+    const nextCoins = clampCoins(accrued - safeAmount);
+    const nextCastleCoins = castleCoins + safeAmount;
+    await tx.multi();
+    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(CASTLE_COINS_KEY, String(nextCastleCoins));
+    const result = await tx.exec();
+    if (result !== null) {
+      return { ok: true, deposited: safeAmount, coins: nextCoins, castleCoins: nextCastleCoins };
+    }
+  }
+  return { ok: false, deposited: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
+};
+
+export const withdrawCoinsFromCastle = async (
+  requested: number,
+  nowMs: number,
+): Promise<{ withdrawn: number; coins: number; castleCoins: number }> => {
+  const safeRequested = Math.max(0, Math.floor(requested));
+  if (safeRequested <= 0) {
+    return { withdrawn: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
+  }
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(GLOBAL_COINS_KEY, CASTLE_COINS_KEY);
+    const coinState = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
+    const castleCoins = parseCastleCoins(await redis.get(CASTLE_COINS_KEY));
+    const accrued = accrueCoins(coinState, nowMs);
+    const maxAddable = Math.max(0, ENERGY_CAP - accrued);
+    const withdrawn = Math.min(safeRequested, castleCoins, Math.floor(maxAddable));
+    const nextCoins = clampCoins(accrued + withdrawn);
+    const nextCastleCoins = Math.max(0, castleCoins - withdrawn);
+    await tx.multi();
+    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(CASTLE_COINS_KEY, String(nextCastleCoins));
+    const result = await tx.exec();
+    if (result !== null) {
+      return { withdrawn, coins: nextCoins, castleCoins: nextCastleCoins };
+    }
+  }
+  return { withdrawn: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
 };
 
 export const setPlayerIntent = async (postId: string, playerId: string, intent: PlayerIntent): Promise<void> => {

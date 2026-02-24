@@ -167,8 +167,14 @@ export type HeartbeatResponse = {
   worldVersion: number;
 };
 
+export type CoinBalanceResponse = {
+  type: "coinBalance";
+  coins: number;
+};
+
 export type ResyncRequest = {
   tickSeq: number;
+  playerId?: string;
 };
 
 export type ResyncResponse = {

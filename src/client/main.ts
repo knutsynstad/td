@@ -134,13 +134,20 @@ import {
 } from './presentation/ballistaRig'
 import { createWaveAndSpawnSystem, type PreparedWave } from './game/systems/WaveAndSpawnSystem'
 import { connectAuthoritativeBridge } from './network/authoritativeBridge'
+import type { EntityDelta, StructureDelta, WaveDelta } from '../shared/game-protocol'
+import type {
+  MobState as SharedMobState,
+  StructureState as SharedStructureState,
+  WaveState as SharedWaveState,
+  WorldState as SharedWorldState
+} from '../shared/game-state'
 import {
   assertEnergyInBounds,
   assertMobSpawnerReferences,
   assertSpawnerCounts,
   assertStructureStoreConsistency
 } from './game/invariants'
-import type { BankBalanceResponse, BankDepositResponse, BankWithdrawResponse } from '../shared/api'
+import type { CastleCoinsBalanceResponse, CastleCoinsDepositResponse, CastleCoinsWithdrawResponse } from '../shared/api'
 import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
 import {
   generateSeededWorldFeatures,
@@ -3141,6 +3148,16 @@ const MOVE_INTENT_MIN_INTERVAL_MS = 100
 const MOVE_INTENT_TARGET_EPSILON = 0.75
 const lastMoveIntentTarget = { x: 0, z: 0 }
 const remotePlayersById = new Map<string, NpcEntity>()
+const serverStructureById = new Map<string, DestructibleCollider>()
+const serverMobsById = new Map<string, MobEntity>()
+const serverMobInterpolationById = new Map<
+  string,
+  { from: THREE.Vector3, to: THREE.Vector3, t0: number, t1: number }
+>()
+let serverWaveActive = false
+let serverLastAckSeq = 0
+const isServerAuthoritative = () => authoritativeBridge !== null
+const toPerfTime = (serverEpochMs: number) => performance.now() + Math.max(0, serverEpochMs - Date.now())
 
 const upsertRemoteNpc = (playerId: string, username: string, position: { x: number, z: number }) => {
   if (playerId === authoritativeSelfPlayerId) return
@@ -3165,10 +3182,227 @@ const removeRemoteNpc = (playerId: string) => {
   remotePlayersById.delete(playerId)
 }
 
+const syncServerMeta = (wave: SharedWaveState, world: SharedWorldState['meta']) => {
+  gameState.wave = wave.wave
+  gameState.lives = world.lives
+  gameState.energy = Math.max(0, Math.min(ENERGY_CAP, world.energy))
+  serverWaveActive = wave.active
+  gameState.nextWaveAt = wave.nextWaveAtMs > 0 ? toPerfTime(wave.nextWaveAtMs) : 0
+}
+
+const removeServerStructure = (structureId: string) => {
+  const collider = serverStructureById.get(structureId)
+  if (!collider) return
+  selectedStructures.delete(collider)
+  structureStore.removeStructureCollider(collider)
+  serverStructureById.delete(structureId)
+}
+
+const upsertServerStructure = (entry: SharedStructureState) => {
+  const existingCollider = serverStructureById.get(entry.structureId)
+  const targetCenter = new THREE.Vector3(entry.center.x, 0, entry.center.z)
+  if (existingCollider) {
+    const state = structureStore.structureStates.get(existingCollider)
+    if (state) {
+      state.hp = entry.hp
+      state.maxHp = entry.maxHp
+      state.mesh.position.set(targetCenter.x, state.mesh.position.y, targetCenter.z)
+      existingCollider.center.set(targetCenter.x, existingCollider.center.y, targetCenter.z)
+    }
+    return
+  }
+
+  if (entry.type === 'wall') {
+    const size = getBuildSizeForMode('wall')
+    const half = size.clone().multiplyScalar(0.5)
+    const center = snapCenterToBuildGrid(targetCenter, size)
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size.x, size.y, size.z),
+      new THREE.MeshStandardMaterial({ color: 0x8b8b8b })
+    )
+    mesh.position.copy(center)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    scene.add(mesh)
+    if (wallModelTemplate) {
+      applyWallVisualToMesh(mesh)
+    }
+    const collider = structureStore.addWallCollider(center, half, mesh, entry.maxHp, {
+      playerBuilt: true,
+      createdAtMs: entry.createdAtMs,
+      lastDecayTickMs: entry.createdAtMs
+    })
+    const state = structureStore.structureStates.get(collider)
+    if (state) {
+      state.hp = entry.hp
+      state.maxHp = entry.maxHp
+    }
+    serverStructureById.set(entry.structureId, collider)
+    return
+  }
+
+  if (entry.type === 'tower') {
+    const size = getBuildSizeForMode('tower')
+    const half = size.clone().multiplyScalar(0.5)
+    const center = snapCenterToBuildGrid(targetCenter, size)
+    const tower = createTowerAt(center, 'base', entry.ownerId || 'Server')
+    const collider = structureStore.addTowerCollider(center, half, tower.mesh, tower, entry.maxHp, {
+      playerBuilt: true,
+      createdAtMs: entry.createdAtMs,
+      lastDecayTickMs: entry.createdAtMs
+    })
+    const state = structureStore.structureStates.get(collider)
+    if (state) {
+      state.hp = entry.hp
+      state.maxHp = entry.maxHp
+    }
+    serverStructureById.set(entry.structureId, collider)
+    return
+  }
+}
+
+const applyServerStructureDelta = (delta: StructureDelta) => {
+  for (const structureId of delta.removes) {
+    removeServerStructure(structureId)
+  }
+  for (const structure of delta.upserts) {
+    upsertServerStructure(structure)
+  }
+  if (delta.requiresPathRefresh) {
+    refreshAllSpawnerPathlines()
+  }
+}
+
+const removeServerMobById = (mobId: string) => {
+  const mob = serverMobsById.get(mobId)
+  if (!mob) return
+  const index = mobs.indexOf(mob)
+  if (index >= 0) {
+    mobs.splice(index, 1)
+  }
+  serverMobsById.delete(mobId)
+  serverMobInterpolationById.delete(mobId)
+}
+
+const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
+  const existing = serverMobsById.get(mobState.mobId)
+  if (existing) {
+    existing.mesh.position.set(mobState.position.x, existing.baseY, mobState.position.z)
+    existing.target.set(mobState.position.x, 0, mobState.position.z)
+    existing.velocity.set(mobState.velocity.x, 0, mobState.velocity.z)
+    existing.hp = mobState.hp
+    existing.maxHp = mobState.maxHp
+    return
+  }
+  const mesh = new THREE.Mesh(mobLogicGeometry, mobLogicMaterial)
+  mesh.position.set(mobState.position.x, MOB_HEIGHT * 0.5, mobState.position.z)
+  const mob: MobEntity = {
+    mesh,
+    radius: MOB_WIDTH * 0.5,
+    speed: MOB_SPEED,
+    velocity: new THREE.Vector3(mobState.velocity.x, 0, mobState.velocity.z),
+    target: new THREE.Vector3(mobState.position.x, 0, mobState.position.z),
+    kind: 'mob',
+    mobId: mobState.mobId,
+    hp: mobState.hp,
+    maxHp: mobState.maxHp,
+    baseY: MOB_HEIGHT * 0.5,
+    staged: false,
+    siegeAttackCooldown: 0,
+    unreachableTime: 0,
+    berserkMode: false,
+    berserkTarget: null,
+    laneBlocked: false
+  }
+  mobs.push(mob)
+  serverMobsById.set(mobState.mobId, mob)
+}
+
+const applyServerMobDelta = (delta: EntityDelta) => {
+  for (const item of delta.mobs) {
+    const existing = serverMobsById.get(item.mobId)
+    if (!existing) {
+      upsertServerMobFromSnapshot({
+        mobId: item.mobId,
+        position: item.interpolation.to,
+        velocity: { x: 0, z: 0 },
+        hp: item.hp,
+        maxHp: item.maxHp,
+        spawnerId: ''
+      })
+      continue
+    }
+    existing.hp = item.hp
+    existing.maxHp = item.maxHp
+    serverMobInterpolationById.set(item.mobId, {
+      from: new THREE.Vector3(item.interpolation.from.x, existing.baseY, item.interpolation.from.z),
+      to: new THREE.Vector3(item.interpolation.to.x, existing.baseY, item.interpolation.to.z),
+      t0: toPerfTime(item.interpolation.t0),
+      t1: toPerfTime(item.interpolation.t1)
+    })
+  }
+  for (const mobId of delta.despawnedMobIds) {
+    removeServerMobById(mobId)
+  }
+}
+
+const applyServerWaveDelta = (delta: WaveDelta) => {
+  gameState.wave = delta.wave.wave
+  serverWaveActive = delta.wave.active
+  gameState.nextWaveAt = delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0
+}
+
+const applyServerSnapshot = (snapshot: SharedWorldState) => {
+  syncServerMeta(snapshot.wave, snapshot.meta)
+
+  const snapshotStructureIds = new Set(Object.keys(snapshot.structures))
+  for (const structureId of Array.from(serverStructureById.keys())) {
+    if (!snapshotStructureIds.has(structureId)) {
+      removeServerStructure(structureId)
+    }
+  }
+  for (const structure of Object.values(snapshot.structures)) {
+    upsertServerStructure(structure)
+  }
+
+  const snapshotMobIds = new Set(Object.keys(snapshot.mobs))
+  for (let i = mobs.length - 1; i >= 0; i -= 1) {
+    const mob = mobs[i]!
+    const mobId = mob.mobId
+    if (mobId && snapshotMobIds.has(mobId)) continue
+    mobs.splice(i, 1)
+  }
+  serverMobsById.clear()
+  serverMobInterpolationById.clear()
+  for (const mob of Object.values(snapshot.mobs)) {
+    upsertServerMobFromSnapshot(mob)
+  }
+}
+
+const updateServerMobInterpolation = (now: number) => {
+  for (const [mobId, entry] of serverMobInterpolationById.entries()) {
+    const mob = serverMobsById.get(mobId)
+    if (!mob) continue
+    const duration = Math.max(1, entry.t1 - entry.t0)
+    const t = THREE.MathUtils.clamp((now - entry.t0) / duration, 0, 1)
+    mob.mesh.position.lerpVectors(entry.from, entry.to, t)
+    mob.target.set(entry.to.x, 0, entry.to.z)
+    const vx = (entry.to.x - entry.from.x) / (duration / 1000)
+    const vz = (entry.to.z - entry.from.z) / (duration / 1000)
+    mob.velocity.set(Number.isFinite(vx) ? vx : 0, 0, Number.isFinite(vz) ? vz : 0)
+    if (t >= 1) {
+      serverMobInterpolationById.delete(mobId)
+    }
+  }
+}
+
 const setupAuthoritativeBridge = async () => {
   if (authoritativeBridge) return
   try {
     authoritativeBridge = await connectAuthoritativeBridge({
+      onSnapshot: (snapshot) => {
+        applyServerSnapshot(snapshot)
+      },
       onSelfReady: (playerId, username, position) => {
         authoritativeSelfPlayerId = playerId
         player.username = username
@@ -3188,9 +3422,30 @@ const setupAuthoritativeBridge = async () => {
           return
         }
         upsertRemoteNpc(playerId, username, next)
+      },
+      onMobDelta: (delta) => {
+        applyServerMobDelta(delta)
+      },
+      onStructureDelta: (delta) => {
+        applyServerStructureDelta(delta)
+      },
+      onWaveDelta: (delta) => {
+        applyServerWaveDelta(delta)
+      },
+      onAck: (_tickSeq, _worldVersion, ackSeq) => {
+        serverLastAckSeq = Math.max(serverLastAckSeq, ackSeq)
+      },
+      onCoinBalance: (coins) => {
+        gameState.energy = Math.max(0, Math.min(ENERGY_CAP, coins))
+      },
+      onResyncRequired: () => {
+        if (!authoritativeBridge) return
+        void authoritativeBridge.resync().catch((error) => {
+          console.error('Failed to resync authoritative snapshot', error)
+        })
       }
     })
-    void syncBankFromServer()
+    void syncCastleCoinsFromServer()
   } catch (error) {
     console.error('Failed to connect authoritative bridge', error)
   }
@@ -3800,6 +4055,7 @@ const getEnergyCounterAnchor = () => {
 }
 
 const addEnergy = (amount: number, withPop = false) => {
+  if (isServerAuthoritative()) return
   gameState.energy = Math.min(ENERGY_CAP, gameState.energy + amount)
   if (withPop) {
     gameState.energyPopTimer = 0.2
@@ -3807,6 +4063,7 @@ const addEnergy = (amount: number, withPop = false) => {
 }
 
 const spendEnergy = (amount: number) => {
+  if (isServerAuthoritative()) return false
   if (gameState.energy < amount) return false
   gameState.energy = Math.max(0, gameState.energy - amount)
   return true
@@ -3931,121 +4188,149 @@ const updateCastleBankPilesVisual = () => {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
-const isBankBalanceResponse = (value: unknown): value is BankBalanceResponse =>
+const isCastleCoinsBalanceResponse = (value: unknown): value is CastleCoinsBalanceResponse =>
   isRecord(value) &&
-  value.type === 'bankBalance' &&
+  value.type === 'castleCoinsBalance' &&
   typeof value.postId === 'string' &&
-  typeof value.bankEnergy === 'number'
-const isBankDepositResponse = (value: unknown): value is BankDepositResponse =>
+  typeof value.castleCoins === 'number'
+const isCastleCoinsDepositResponse = (value: unknown): value is CastleCoinsDepositResponse =>
   isRecord(value) &&
-  value.type === 'bankDeposit' &&
+  value.type === 'castleCoinsDeposit' &&
   typeof value.postId === 'string' &&
   typeof value.deposited === 'number' &&
-  typeof value.bankEnergy === 'number'
-const isBankWithdrawResponse = (value: unknown): value is BankWithdrawResponse =>
+  typeof value.castleCoins === 'number'
+const isCastleCoinsWithdrawResponse = (value: unknown): value is CastleCoinsWithdrawResponse =>
   isRecord(value) &&
-  value.type === 'bankWithdraw' &&
+  value.type === 'castleCoinsWithdraw' &&
   typeof value.postId === 'string' &&
   typeof value.withdrawn === 'number' &&
-  typeof value.bankEnergy === 'number'
+  typeof value.castleCoins === 'number'
 
-const fetchBankBalance = async (): Promise<number | null> => {
+const fetchCastleCoinsBalance = async (): Promise<number | null> => {
   try {
-    const response = await fetch('/api/game/bank')
+    const response = await fetch('/api/castle/coins')
     if (!response.ok) return null
     const payload = await response.json()
-    if (!isBankBalanceResponse(payload)) return null
-    return Number.isFinite(payload.bankEnergy) ? Math.max(0, Math.floor(payload.bankEnergy)) : null
+    if (!isCastleCoinsBalanceResponse(payload)) return null
+    return Number.isFinite(payload.castleCoins) ? Math.max(0, Math.floor(payload.castleCoins)) : null
   } catch {
     return null
   }
 }
 
-const requestBankDeposit = async (amount: number): Promise<number | null> => {
+const requestCastleCoinsDeposit = async (amount: number): Promise<CastleCoinsDepositResponse | null> => {
   try {
-    const response = await fetch('/api/game/bank/deposit', {
+    const response = await fetch('/api/castle/coins/deposit', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ amount })
     })
     if (!response.ok) return null
     const payload = await response.json()
-    if (!isBankDepositResponse(payload)) return null
-    return Number.isFinite(payload.bankEnergy) ? Math.max(0, Math.floor(payload.bankEnergy)) : null
+    if (!isCastleCoinsDepositResponse(payload)) return null
+    return payload
   } catch {
     return null
   }
 }
 
-const requestBankWithdraw = async (amount: number): Promise<number | null> => {
+const requestCastleCoinsWithdraw = async (amount: number): Promise<CastleCoinsWithdrawResponse | null> => {
   try {
-    const response = await fetch('/api/game/bank/withdraw', {
+    const response = await fetch('/api/castle/coins/withdraw', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ amount })
     })
     if (!response.ok) return null
     const payload = await response.json()
-    if (!isBankWithdrawResponse(payload)) return null
-    return Number.isFinite(payload.bankEnergy) ? Math.max(0, Math.floor(payload.bankEnergy)) : null
+    if (!isCastleCoinsWithdrawResponse(payload)) return null
+    return payload
   } catch {
     return null
   }
 }
 
-const syncBankFromServer = async () => {
-  const bankEnergy = await fetchBankBalance()
-  if (bankEnergy === null) return
-  gameState.bankEnergy = bankEnergy
+const syncCastleCoinsFromServer = async () => {
+  const castleCoins = await fetchCastleCoinsBalance()
+  if (castleCoins === null) return
+  gameState.bankEnergy = castleCoins
   updateCastleBankPilesVisual()
 }
 
-const depositToBank = async (requestedAmount: number) => {
-  const transfer = Math.min(Math.max(0, Math.floor(requestedAmount)), Math.max(0, Math.floor(gameState.energy)))
+const depositToCastle = async (requestedAmount: number) => {
+  const authoritative = isServerAuthoritative()
+  const transfer = authoritative
+    ? Math.max(0, Math.floor(requestedAmount))
+    : Math.min(Math.max(0, Math.floor(requestedAmount)), Math.max(0, Math.floor(gameState.energy)))
   if (transfer <= 0) return false
-  const previousBank = gameState.bankEnergy
-  const previousEnergy = gameState.energy
-  gameState.bankEnergy += transfer
-  gameState.energy = Math.max(0, gameState.energy - transfer)
-  updateCastleBankPilesVisual()
-  const persistedBank = await requestBankDeposit(transfer)
-  if (persistedBank === null) {
-    gameState.bankEnergy = previousBank
-    gameState.energy = previousEnergy
+  if (!authoritative) {
+    const previousBank = gameState.bankEnergy
+    const previousEnergy = gameState.energy
+    gameState.bankEnergy += transfer
+    gameState.energy = Math.max(0, gameState.energy - transfer)
     updateCastleBankPilesVisual()
+    const response = await requestCastleCoinsDeposit(transfer)
+    if (response === null) {
+      gameState.bankEnergy = previousBank
+      gameState.energy = previousEnergy
+      updateCastleBankPilesVisual()
+      triggerEventBanner('Deposit failed')
+      return false
+    }
+    gameState.bankEnergy = Number.isFinite(response.castleCoins) ? Math.max(0, Math.floor(response.castleCoins)) : gameState.bankEnergy
+    updateCastleBankPilesVisual()
+    triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`)
+    return true
+  }
+  const response = await requestCastleCoinsDeposit(transfer)
+  if (response === null) {
     triggerEventBanner('Deposit failed')
     return false
   }
-  gameState.bankEnergy = persistedBank
+  gameState.bankEnergy = Number.isFinite(response.castleCoins) ? Math.max(0, Math.floor(response.castleCoins)) : gameState.bankEnergy
   updateCastleBankPilesVisual()
-  triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`)
+  void authoritativeBridge?.heartbeat({ x: player.mesh.position.x, z: player.mesh.position.z })
+  triggerEventBanner(`Deposited ${Math.floor(response.deposited)} coins`)
   return true
 }
 
-const withdrawFromBank = async (requestedAmount: number) => {
+const withdrawFromCastle = async (requestedAmount: number) => {
+  const authoritative = isServerAuthoritative()
   const missing = Math.max(0, ENERGY_CAP - gameState.energy)
   const transfer = Math.min(
     Math.max(0, Math.floor(requestedAmount)),
     Math.max(0, Math.floor(gameState.bankEnergy)),
-    missing
+    authoritative ? Number.POSITIVE_INFINITY : missing
   )
   if (transfer <= 0) return false
-  const previousBank = gameState.bankEnergy
-  const previousEnergy = gameState.energy
-  gameState.bankEnergy = Math.max(0, gameState.bankEnergy - transfer)
-  addEnergy(transfer, true)
-  updateCastleBankPilesVisual()
-  const persistedBank = await requestBankWithdraw(transfer)
-  if (persistedBank === null) {
-    gameState.bankEnergy = previousBank
-    gameState.energy = previousEnergy
+  if (!authoritative) {
+    const previousBank = gameState.bankEnergy
+    const previousEnergy = gameState.energy
+    gameState.bankEnergy = Math.max(0, gameState.bankEnergy - transfer)
+    addEnergy(transfer, true)
     updateCastleBankPilesVisual()
+    const response = await requestCastleCoinsWithdraw(transfer)
+    if (response === null) {
+      gameState.bankEnergy = previousBank
+      gameState.energy = previousEnergy
+      updateCastleBankPilesVisual()
+      triggerEventBanner('Withdraw failed')
+      return false
+    }
+    gameState.bankEnergy = Number.isFinite(response.castleCoins) ? Math.max(0, Math.floor(response.castleCoins)) : gameState.bankEnergy
+    updateCastleBankPilesVisual()
+    triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`)
+    return true
+  }
+  const response = await requestCastleCoinsWithdraw(transfer)
+  if (response === null) {
     triggerEventBanner('Withdraw failed')
     return false
   }
-  gameState.bankEnergy = persistedBank
+  gameState.bankEnergy = Number.isFinite(response.castleCoins) ? Math.max(0, Math.floor(response.castleCoins)) : gameState.bankEnergy
   updateCastleBankPilesVisual()
-  triggerEventBanner(`Withdrew ${Math.floor(transfer)} coins`)
+  void authoritativeBridge?.heartbeat({ x: player.mesh.position.x, z: player.mesh.position.z })
+  triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`)
   return true
 }
 
@@ -4589,19 +4874,19 @@ const selectionDialog = new SelectionDialog(
     },
     onBankAdd1: () => {
       if (!getSelectedBankInRange()) return
-      void depositToBank(1)
+      void depositToCastle(1)
     },
     onBankAdd10: () => {
       if (!getSelectedBankInRange()) return
-      void depositToBank(10)
+      void depositToCastle(10)
     },
     onBankRemove1: () => {
       if (!getSelectedBankInRange()) return
-      void withdrawFromBank(1)
+      void withdrawFromCastle(1)
     },
     onBankRemove10: () => {
       if (!getSelectedBankInRange()) return
-      void withdrawFromBank(10)
+      void withdrawFromCastle(10)
     }
   }
 )
@@ -4919,6 +5204,7 @@ const placeBuilding = (center: THREE.Vector3) => {
       type: gameState.buildMode === 'tower' ? 'tower' : 'wall',
       center: { x: center.x, z: center.z }
     })
+    return true
   }
   const result = placeBuildingAt(center, gameState.buildMode, gameState.energy, {
     staticColliders,
@@ -4951,6 +5237,7 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
       type: 'wall',
       center: { x: center.x, z: center.z }
     })
+    return true
   }
   const placed = placeWallSegment(start, end, gameState.energy, {
     scene,
@@ -4975,6 +5262,7 @@ const placeWallSegments = (positions: THREE.Vector3[]) => {
       type: 'wall',
       center: { x: center.x, z: center.z }
     })
+    return true
   }
   const placed = placeWallSegmentsAt(positions, gameState.energy, {
     scene,
@@ -5241,7 +5529,7 @@ const setMoveTarget = (pos: THREE.Vector3) => {
     const dx = clamped.x - lastMoveIntentTarget.x
     const dz = clamped.z - lastMoveIntentTarget.z
     const targetDelta = Math.hypot(dx, dz)
-    if (nowMs - lastMoveIntentSentAt >= MOVE_INTENT_MIN_INTERVAL_MS || targetDelta >= MOVE_INTENT_TARGET_EPSILON) {
+    if (nowMs - lastMoveIntentSentAt >= MOVE_INTENT_MIN_INTERVAL_MS && targetDelta >= MOVE_INTENT_TARGET_EPSILON) {
       lastMoveIntentSentAt = nowMs
       lastMoveIntentTarget.x = clamped.x
       lastMoveIntentTarget.z = clamped.z
@@ -5482,6 +5770,7 @@ const prepareNextWave = () => {
 const startPreparedWave = () => {
   if (authoritativeBridge) {
     void authoritativeBridge.sendStartWave()
+    return
   }
   if (!pendingWave) return
   pendingGateOpenBySpawnerId.clear()
@@ -5564,6 +5853,7 @@ const spawnTowerArrowProjectile = (
 }
 
 const updateTowerArrowProjectiles = (delta: number) => {
+  const serverAuthoritative = isServerAuthoritative()
   for (let i = activeArrowProjectiles.length - 1; i >= 0; i -= 1) {
     const projectile = activeArrowProjectiles[i]!
     projectile.ttl -= delta
@@ -5615,6 +5905,12 @@ const updateTowerArrowProjectiles = (delta: number) => {
     projectile.position.copy(projectileHitPointScratch)
     placeArrowMeshAtFacing(projectile.mesh, projectile.position)
     setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity)
+    if (serverAuthoritative) {
+      markMobHitFlash(hitMob)
+      scene.remove(projectile.mesh)
+      activeArrowProjectiles.splice(i, 1)
+      continue
+    }
     const attack = rollAttackDamage(projectile.damage)
     const prevHp = hitMob.hp ?? 1
     const nextHp = prevHp - attack.damage
@@ -5649,6 +5945,7 @@ const spawnPlayerArrowProjectile = (launchPos: THREE.Vector3, launchVelocity: TH
 }
 
 const updatePlayerArrowProjectiles = (delta: number) => {
+  const serverAuthoritative = isServerAuthoritative()
   for (let i = activePlayerArrowProjectiles.length - 1; i >= 0; i -= 1) {
     const projectile = activePlayerArrowProjectiles[i]!
     projectile.ttl -= delta
@@ -5700,6 +5997,12 @@ const updatePlayerArrowProjectiles = (delta: number) => {
     projectile.position.copy(projectileHitPointScratch)
     placeArrowMeshAtFacing(projectile.mesh, projectile.position)
     setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity)
+    if (serverAuthoritative) {
+      markMobHitFlash(hitMob)
+      scene.remove(projectile.mesh)
+      activePlayerArrowProjectiles.splice(i, 1)
+      continue
+    }
     const attack = rollAttackDamage(projectile.damage)
     hitMob.hp = (hitMob.hp ?? 0) - attack.damage
     markMobHitFlash(hitMob)
@@ -5819,6 +6122,7 @@ const processCastleCaptures = (now: number) => {
 }
 
 const tick = (now: number, delta: number) => {
+  const serverAuthoritative = isServerAuthoritative()
   if (rockVisualsNeedFullRefresh && hasAllRockTemplates()) {
     refreshAllRockVisuals(true)
     rockVisualsNeedFullRefresh = false
@@ -5832,22 +6136,27 @@ const tick = (now: number, delta: number) => {
   if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlpha) > 0.001) {
     syncMinimapCanvasSize()
   }
-  gameState.energy = Math.min(ENERGY_CAP, gameState.energy + ENERGY_REGEN_RATE * delta)
-  if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
-    setBuildMode('off')
-  }
-  if (gameState.buildMode === 'tower' && gameState.energy < ENERGY_COST_TOWER) {
-    setBuildMode('off')
+  if (!serverAuthoritative) {
+    gameState.energy = Math.min(ENERGY_CAP, gameState.energy + ENERGY_REGEN_RATE * delta)
+    if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
+      setBuildMode('off')
+    }
+    if (gameState.buildMode === 'tower' && gameState.energy < ENERGY_COST_TOWER) {
+      setBuildMode('off')
+    }
   }
   const wallClockNowMs = Date.now()
-  applyStructureDecay(wallClockNowMs)
+  if (!serverAuthoritative) {
+    applyStructureDecay(wallClockNowMs)
+  }
   processTreeRegrowth(wallClockNowMs)
   updateGrowingTrees(wallClockNowMs)
-  processPendingGateOpens(delta)
-
-  waveAndSpawnSystem.emit(pendingWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
-  waveAndSpawnSystem.emit(activeWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
-  processSpawnerPathlineQueue()
+  if (!serverAuthoritative) {
+    processPendingGateOpens(delta)
+    waveAndSpawnSystem.emit(pendingWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
+    waveAndSpawnSystem.emit(activeWaveSpawners, delta, (fromSpawner) => makeMob(fromSpawner))
+    processSpawnerPathlineQueue()
+  }
 
   const keyboardDir = inputController.getKeyboardMoveDirection({
     camera,
@@ -5876,12 +6185,16 @@ const tick = (now: number, delta: number) => {
     updateEntityMotion(npc, delta)
   }
 
-  for (const mob of mobs) {
-    mob.target.set(0, 0, 0)
-    updateEntityMotion(mob, delta)
+  if (serverAuthoritative) {
+    updateServerMobInterpolation(now)
+  } else {
+    for (const mob of mobs) {
+      mob.target.set(0, 0, 0)
+      updateEntityMotion(mob, delta)
+    }
   }
 
-  if (processCastleCaptures(now)) return
+  if (!serverAuthoritative && processCastleCaptures(now)) return
 
   spatialGrid.clear()
   const dynamicEntities = [player, ...npcs, ...mobs]
@@ -5973,39 +6286,45 @@ const tick = (now: number, delta: number) => {
     clampStagedMobToSpawnerIsland(mob)
   }
 
-  for (let i = mobs.length - 1; i >= 0; i -= 1) {
-    const mob = mobs[i]!
-    if ((mob.hp ?? 0) <= 0) {
-      spawnMobDeathVisual(mob)
-      if (mob.lastHitBy === 'player') {
-        spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL)
+  if (!serverAuthoritative) {
+    for (let i = mobs.length - 1; i >= 0; i -= 1) {
+      const mob = mobs[i]!
+      if ((mob.hp ?? 0) <= 0) {
+        spawnMobDeathVisual(mob)
+        if (mob.lastHitBy === 'player') {
+          spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL)
+        }
+        if (mob.spawnerId) {
+          const spawner = spawnerById.get(mob.spawnerId)
+          if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
+        }
+        mobs.splice(i, 1)
       }
-      if (mob.spawnerId) {
-        const spawner = spawnerById.get(mob.spawnerId)
-        if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1)
-      }
-      mobs.splice(i, 1)
     }
   }
 
-  const waveComplete = gameState.wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
-  if (waveComplete && gameState.nextWaveAt === 0) {
-    prepareNextWave()
-    gameState.nextWaveAt = now + 10000
-  }
-  if (waveComplete && now >= gameState.nextWaveAt && gameState.nextWaveAt !== 0) {
-    gameState.nextWaveAt = 0
-    startPreparedWave()
-  }
-  if (gameState.wave === 0 && pendingWave === null) {
-    prepareNextWave()
-    if (gameState.nextWaveAt === 0) {
+  const waveComplete = serverAuthoritative
+    ? gameState.wave > 0 && !serverWaveActive && mobs.length === 0
+    : gameState.wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
+  if (!serverAuthoritative) {
+    if (waveComplete && gameState.nextWaveAt === 0) {
+      prepareNextWave()
       gameState.nextWaveAt = now + 10000
     }
-  }
-  if (gameState.wave === 0 && gameState.nextWaveAt !== 0 && now >= gameState.nextWaveAt) {
-    gameState.nextWaveAt = 0
-    startPreparedWave()
+    if (waveComplete && now >= gameState.nextWaveAt && gameState.nextWaveAt !== 0) {
+      gameState.nextWaveAt = 0
+      startPreparedWave()
+    }
+    if (gameState.wave === 0 && pendingWave === null) {
+      prepareNextWave()
+      if (gameState.nextWaveAt === 0) {
+        gameState.nextWaveAt = now + 10000
+      }
+    }
+    if (gameState.wave === 0 && gameState.nextWaveAt !== 0 && now >= gameState.nextWaveAt) {
+      gameState.nextWaveAt = 0
+      startPreparedWave()
+    }
   }
 
   const selected = pickSelectedMob()
@@ -6182,9 +6501,11 @@ const tick = (now: number, delta: number) => {
     if (gameState.bankEnergy < 0) {
       throw new Error(`Bank invariant violated: bankEnergy=${gameState.bankEnergy}`)
     }
-    assertSpawnerCounts(activeWaveSpawners)
+    if (!serverAuthoritative) {
+      assertSpawnerCounts(activeWaveSpawners)
+      assertMobSpawnerReferences(mobs, new Set([...spawnerById.keys(), ...pendingSpawnerById.keys()]))
+    }
     assertStructureStoreConsistency(structureStore, staticColliders)
-    assertMobSpawnerReferences(mobs, new Set([...spawnerById.keys(), ...pendingSpawnerById.keys()]))
   }
 
   applyStructureDamageVisuals()

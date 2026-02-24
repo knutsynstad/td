@@ -1,18 +1,30 @@
 import { connectRealtime } from "@devvit/web/client";
 import type {
   CommandRequest,
+  CoinBalanceResponse,
   DeltaBatch,
+  EntityDelta,
   GameDelta,
   HeartbeatResponse,
   JoinResponse,
+  ResyncResponse,
+  StructureDelta,
+  WaveDelta,
 } from "../../shared/game-protocol";
-import type { Vec2 } from "../../shared/game-state";
+import type { Vec2, WorldState } from "../../shared/game-state";
 
 type PresenceCallbacks = {
+  onSnapshot: (snapshot: WorldState) => void;
   onSelfReady: (playerId: string, username: string, position: Vec2) => void;
   onRemoteJoin: (playerId: string, username: string, position: Vec2) => void;
   onRemoteLeave: (playerId: string) => void;
   onPlayerMove: (playerId: string, username: string, next: Vec2) => void;
+  onMobDelta: (delta: EntityDelta) => void;
+  onStructureDelta: (delta: StructureDelta) => void;
+  onWaveDelta: (delta: WaveDelta) => void;
+  onAck: (tickSeq: number, worldVersion: number, ackSeq: number) => void;
+  onCoinBalance: (coins: number) => void;
+  onResyncRequired: (reason: string) => void;
 };
 
 type AuthoritativeBridge = {
@@ -24,6 +36,7 @@ type AuthoritativeBridge = {
     type: "wall" | "tower" | "tree" | "rock" | "bank";
     center: Vec2;
   }) => Promise<void>;
+  resync: () => Promise<void>;
   heartbeat: (position: Vec2) => Promise<void>;
   disconnect: () => Promise<void>;
 };
@@ -36,6 +49,14 @@ const postJson = async (url: string, body: unknown): Promise<unknown> => {
     },
     body: JSON.stringify(body),
   });
+  if (!response.ok) {
+    throw new Error(`request failed ${response.status}`);
+  }
+  return response.json();
+};
+
+const getJson = async (url: string): Promise<unknown> => {
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`request failed ${response.status}`);
   }
@@ -65,7 +86,18 @@ const isDeltaBatch = (value: unknown): value is DeltaBatch =>
   typeof value.worldVersion === "number";
 
 const isHeartbeatResponse = (value: unknown): value is HeartbeatResponse =>
-  isRecord(value) && value.type === "heartbeatAck" && typeof value.tickSeq === "number" && typeof value.worldVersion === "number";
+  isRecord(value) &&
+  value.type === "heartbeatAck" &&
+  typeof value.tickSeq === "number" &&
+  typeof value.worldVersion === "number";
+
+const isCoinBalanceResponse = (value: unknown): value is CoinBalanceResponse =>
+  isRecord(value) &&
+  value.type === "coinBalance" &&
+  typeof value.coins === "number";
+
+const isResyncResponse = (value: unknown): value is ResyncResponse =>
+  isRecord(value) && value.type === "snapshot" && isRecord(value.snapshot);
 
 const parseJoinResponse = (value: unknown): JoinResponse => {
   if (!isJoinResponse(value)) {
@@ -88,12 +120,30 @@ const applyDelta = (delta: GameDelta, callbacks: PresenceCallbacks): void => {
     for (const player of delta.players) {
       callbacks.onPlayerMove(player.playerId, player.username, player.interpolation.to);
     }
+    callbacks.onMobDelta(delta);
+    return;
+  }
+  if (delta.type === "structureDelta") {
+    callbacks.onStructureDelta(delta);
+    return;
+  }
+  if (delta.type === "waveDelta") {
+    callbacks.onWaveDelta(delta);
+    return;
+  }
+  if (delta.type === "ack") {
+    callbacks.onAck(delta.tickSeq, delta.worldVersion, delta.ackSeq);
+    return;
+  }
+  if (delta.type === "resyncRequired") {
+    callbacks.onResyncRequired(delta.reason);
   }
 };
 
 export const connectAuthoritativeBridge = async (callbacks: PresenceCallbacks): Promise<AuthoritativeBridge> => {
   const joinPayload = await postJson("/api/game/join", {});
   const joinResponse = parseJoinResponse(joinPayload);
+  callbacks.onSnapshot(joinResponse.snapshot);
 
   for (const player of Object.values(joinResponse.snapshot.players)) {
     if (player.playerId === joinResponse.playerId) {
@@ -135,6 +185,19 @@ export const connectAuthoritativeBridge = async (callbacks: PresenceCallbacks): 
     if (!isHeartbeatResponse(payload)) {
       throw new Error("invalid heartbeat response");
     }
+    const coinPayload = await getJson("/api/game/coins");
+    if (!isCoinBalanceResponse(coinPayload)) {
+      throw new Error("invalid coin response");
+    }
+    callbacks.onCoinBalance(coinPayload.coins);
+  };
+
+  const resync = async (): Promise<void> => {
+    const payload = await postJson("/api/game/resync", { tickSeq: 0, playerId: joinResponse.playerId });
+    if (!isResyncResponse(payload)) {
+      throw new Error("invalid resync response");
+    }
+    callbacks.onSnapshot(payload.snapshot);
   };
 
   return {
@@ -164,6 +227,7 @@ export const connectAuthoritativeBridge = async (callbacks: PresenceCallbacks): 
         structure: payload,
       });
     },
+    resync,
     heartbeat,
     disconnect: async () => {
       await connection.disconnect();

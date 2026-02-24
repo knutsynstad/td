@@ -42,6 +42,7 @@ export type NpcEntity = EntityBase & {
 
 export type MobEntity = EntityBase & {
   kind: 'mob'
+  mobId?: string
   hp: number
   maxHp: number
   staged: boolean

@@ -2,6 +2,7 @@ import { context, redis, reddit } from '@devvit/web/server';
 import { Hono } from 'hono';
 import type {
   CommandResponse,
+  CoinBalanceResponse,
   HeartbeatRequest,
   HeartbeatResponse,
   JoinRequest,
@@ -11,14 +12,15 @@ import type {
 } from '../../shared/game-protocol';
 import { isCommandRequest } from '../../shared/game-protocol';
 import type {
-  BankBalanceResponse,
-  BankDepositResponse,
-  BankWithdrawResponse,
+  CastleCoinsBalanceResponse,
+  CastleCoinsDepositResponse,
+  CastleCoinsWithdrawResponse,
   DecrementResponse,
   IncrementResponse,
   InitResponse
 } from '../../shared/api';
-import { applyCommand, heartbeatGame, joinGame, resyncGame } from '../game/service';
+import { applyCommand, getCoinBalance, heartbeatGame, joinGame, resyncGame } from '../game/service';
+import { depositCoinsToCastle, getCastleCoins, withdrawCoinsFromCastle } from '../game/store';
 
 type ErrorResponse = {
   status: 'error';
@@ -28,7 +30,6 @@ type ErrorResponse = {
 export const api = new Hono();
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-const BANK_ENERGY_KEY = 'game:bankEnergy';
 const parsePositiveInt = (value: unknown): number => {
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -170,31 +171,46 @@ api.post('/game/heartbeat', async (c) => {
   return c.json<HeartbeatResponse>(response);
 });
 
+api.get('/game/coins', async (c) => {
+  const { postId } = context;
+  if (!postId) {
+    return c.json<ErrorResponse>({ status: 'error', message: 'postId is required' }, 400);
+  }
+  const coins = await getCoinBalance();
+  return c.json<CoinBalanceResponse>({
+    type: 'coinBalance',
+    coins
+  });
+});
+
 api.post('/game/resync', async (c) => {
   const { postId } = context;
   if (!postId) {
     return c.json<ErrorResponse>({ status: 'error', message: 'postId is required' }, 400);
   }
-  await c.req.json<ResyncRequest>().catch(() => undefined);
-  const response = await resyncGame(postId);
+  const body = await c.req.json<ResyncRequest>().catch(() => undefined);
+  const request: ResyncRequest = {
+    tickSeq: Number(body?.tickSeq ?? 0),
+    playerId: body?.playerId ? String(body.playerId) : undefined,
+  };
+  const response = await resyncGame(postId, request.playerId);
   return c.json<ResyncResponse>(response);
 });
 
-api.get('/game/bank', async (c) => {
+api.get('/castle/coins', async (c) => {
   const { postId } = context;
   if (!postId) {
     return c.json<ErrorResponse>({ status: 'error', message: 'postId is required' }, 400);
   }
-  const raw = await redis.get(BANK_ENERGY_KEY);
-  const bankEnergy = parsePositiveInt(raw ?? 0);
-  return c.json<BankBalanceResponse>({
-    type: 'bankBalance',
+  const castleCoins = await getCastleCoins();
+  return c.json<CastleCoinsBalanceResponse>({
+    type: 'castleCoinsBalance',
     postId,
-    bankEnergy
+    castleCoins
   });
 });
 
-api.post('/game/bank/deposit', async (c) => {
+api.post('/castle/coins/deposit', async (c) => {
   const { postId } = context;
   if (!postId) {
     return c.json<ErrorResponse>({ status: 'error', message: 'postId is required' }, 400);
@@ -207,16 +223,19 @@ api.post('/game/bank/deposit', async (c) => {
   if (amount <= 0) {
     return c.json<ErrorResponse>({ status: 'error', message: 'amount must be positive' }, 400);
   }
-  const bankEnergy = await redis.incrBy(BANK_ENERGY_KEY, amount);
-  return c.json<BankDepositResponse>({
-    type: 'bankDeposit',
+  const result = await depositCoinsToCastle(amount, Date.now());
+  if (!result.ok) {
+    return c.json<ErrorResponse>({ status: 'error', message: 'insufficient coins' }, 400);
+  }
+  return c.json<CastleCoinsDepositResponse>({
+    type: 'castleCoinsDeposit',
     postId,
-    deposited: amount,
-    bankEnergy
+    deposited: result.deposited,
+    castleCoins: result.castleCoins
   });
 });
 
-api.post('/game/bank/withdraw', async (c) => {
+api.post('/castle/coins/withdraw', async (c) => {
   const { postId } = context;
   if (!postId) {
     return c.json<ErrorResponse>({ status: 'error', message: 'postId is required' }, 400);
@@ -229,13 +248,11 @@ api.post('/game/bank/withdraw', async (c) => {
   if (requested <= 0) {
     return c.json<ErrorResponse>({ status: 'error', message: 'amount must be positive' }, 400);
   }
-  const current = parsePositiveInt((await redis.get(BANK_ENERGY_KEY)) ?? 0);
-  const withdrawn = Math.min(current, requested);
-  const bankEnergy = withdrawn > 0 ? await redis.incrBy(BANK_ENERGY_KEY, -withdrawn) : current;
-  return c.json<BankWithdrawResponse>({
-    type: 'bankWithdraw',
+  const result = await withdrawCoinsFromCastle(requested, Date.now());
+  return c.json<CastleCoinsWithdrawResponse>({
+    type: 'castleCoinsWithdraw',
     postId,
-    withdrawn,
-    bankEnergy
+    withdrawn: result.withdrawn,
+    castleCoins: result.castleCoins
   });
 });

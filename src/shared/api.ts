@@ -17,22 +17,22 @@ export type DecrementResponse = {
   count: number;
 };
 
-export type BankBalanceResponse = {
-  type: 'bankBalance';
+export type CastleCoinsBalanceResponse = {
+  type: 'castleCoinsBalance';
   postId: string;
-  bankEnergy: number;
+  castleCoins: number;
 };
 
-export type BankDepositResponse = {
-  type: 'bankDeposit';
+export type CastleCoinsDepositResponse = {
+  type: 'castleCoinsDeposit';
   postId: string;
   deposited: number;
-  bankEnergy: number;
+  castleCoins: number;
 };
 
-export type BankWithdrawResponse = {
-  type: 'bankWithdraw';
+export type CastleCoinsWithdrawResponse = {
+  type: 'castleCoinsWithdraw';
   postId: string;
   withdrawn: number;
-  bankEnergy: number;
+  castleCoins: number;
 };
