@@ -79,6 +79,8 @@ export type EntityDelta = {
   type: 'entityDelta';
   tickSeq: number;
   worldVersion: number;
+  serverTimeMs: number;
+  tickMs: number;
   players: Array<{
     playerId: string;
     username: string;
@@ -86,7 +88,8 @@ export type EntityDelta = {
   }>;
   mobs: Array<{
     mobId: string;
-    interpolation: EntityInterpolation;
+    position: Vec2;
+    velocity: Vec2;
     hp: number;
     maxHp: number;
   }>;

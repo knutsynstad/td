@@ -52,6 +52,8 @@ const CASTLE_ROUTE_HALF_WIDTH_CELLS = 1;
 const CASTLE_HALF_EXTENT = 4;
 const MOB_ROUTE_REACH_RADIUS = 0.65;
 const MOB_ROUTE_LATERAL_SPREAD = 0.9;
+const SERVER_TOWER_RANGE = 8;
+const SERVER_TOWER_DPS = 16;
 
 type SideId = 'north' | 'east' | 'south' | 'west';
 type SideDef = {
@@ -668,9 +670,9 @@ const updateMobs = (
           tower.center.z,
           mob.position.x,
           mob.position.z
-        ) < 12
+        ) <= SERVER_TOWER_RANGE
       ) {
-        mob.hp -= 12;
+        mob.hp -= SERVER_TOWER_DPS * deltaSeconds;
       }
     }
 
@@ -833,6 +835,8 @@ export const runSimulation = (
       type: 'entityDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion,
+      serverTimeMs: world.meta.lastTickMs,
+      tickMs: SIM_TICK_MS,
       players: commandChanges.movedPlayers.slice(0, MAX_DELTA_PLAYERS),
       mobs: [],
       despawnedMobIds: [],
@@ -863,13 +867,6 @@ export const runSimulation = (
   }
 
   let steps = 0;
-  const interpolationStartMs = world.meta.lastTickMs;
-  const mobStartById = new Map(
-    Object.values(world.mobs).map((mob) => [
-      mob.mobId,
-      { x: mob.position.x, z: mob.position.z },
-    ])
-  );
   let latestMobUpserts: MobState[] = [];
   const despawnedDuringRun = new Set<string>();
   let latestWaveDelta: WaveDelta | null = null;
@@ -906,28 +903,21 @@ export const runSimulation = (
   }
 
   if (steps > 0) {
+    const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);
     const entityDelta: EntityDelta = {
       type: 'entityDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion,
+      serverTimeMs: world.meta.lastTickMs,
+      tickMs: simulatedWindowMs,
       players: [],
-      mobs: latestMobUpserts.slice(0, MAX_DELTA_MOBS).map((mob) => {
-        const from = mobStartById.get(mob.mobId);
-        return {
-          mobId: mob.mobId,
-          interpolation: {
-            from: from ?? {
-              x: mob.position.x - mob.velocity.x * (SIM_TICK_MS / 1000),
-              z: mob.position.z - mob.velocity.z * (SIM_TICK_MS / 1000),
-            },
-            to: { x: mob.position.x, z: mob.position.z },
-            t0: interpolationStartMs,
-            t1: world.meta.lastTickMs,
-          },
-          hp: mob.hp,
-          maxHp: mob.maxHp,
-        };
-      }),
+      mobs: latestMobUpserts.slice(0, MAX_DELTA_MOBS).map((mob) => ({
+        mobId: mob.mobId,
+        position: { x: mob.position.x, z: mob.position.z },
+        velocity: { x: mob.velocity.x, z: mob.velocity.z },
+        hp: mob.hp,
+        maxHp: mob.maxHp,
+      })),
       despawnedMobIds: Array.from(despawnedDuringRun),
     };
     deltas.push(entityDelta);

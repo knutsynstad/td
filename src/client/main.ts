@@ -3512,13 +3512,41 @@ const serverStructureById = new Map<string, DestructibleCollider>();
 const serverMobsById = new Map<string, MobEntity>();
 const serverMobInterpolationById = new Map<
   string,
-  { from: THREE.Vector3; to: THREE.Vector3; t0: number; t1: number }
+  {
+    from: THREE.Vector3;
+    to: THREE.Vector3;
+    velocity: THREE.Vector3;
+    t0: number;
+    t1: number;
+  }
+>();
+const serverMobSampleById = new Map<
+  string,
+  {
+    serverTimeMs: number;
+    position: THREE.Vector3;
+    velocity: THREE.Vector3;
+  }
 >();
 let serverWaveActive = false;
 let serverLastAckSeq = 0;
 const isServerAuthoritative = () => authoritativeBridge !== null;
+const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
+const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
+const SERVER_HEARTBEAT_INTERVAL_MS = 200;
+let serverClockSkewMs = 0;
+let serverClockSkewInitialized = false;
+const syncServerClockSkew = (serverEpochMs: number) => {
+  const sample = serverEpochMs - Date.now();
+  if (!serverClockSkewInitialized) {
+    serverClockSkewMs = sample;
+    serverClockSkewInitialized = true;
+    return;
+  }
+  serverClockSkewMs = serverClockSkewMs * 0.9 + sample * 0.1;
+};
 const toPerfTime = (serverEpochMs: number) =>
-  performance.now() + Math.max(0, serverEpochMs - Date.now());
+  performance.now() + (serverEpochMs - (Date.now() + serverClockSkewMs));
 
 const getDoorPositionForSpawnerId = (spawnerId: string): THREE.Vector3 | null => {
   if (spawnerId.endsWith('-north')) return new THREE.Vector3(0, 0, -WORLD_BOUNDS);
@@ -3882,6 +3910,7 @@ const removeServerMobById = (mobId: string) => {
   }
   serverMobsById.delete(mobId);
   serverMobInterpolationById.delete(mobId);
+  serverMobSampleById.delete(mobId);
 };
 
 const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
@@ -3923,38 +3952,63 @@ const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
 };
 
 const applyServerMobDelta = (delta: EntityDelta) => {
+  syncServerClockSkew(delta.serverTimeMs);
   for (const item of delta.mobs) {
     const existing = serverMobsById.get(item.mobId);
     if (!existing) {
       upsertServerMobFromSnapshot({
         mobId: item.mobId,
-        position: item.interpolation.to,
-        velocity: { x: 0, z: 0 },
+        position: item.position,
+        velocity: item.velocity,
         hp: item.hp,
         maxHp: item.maxHp,
         spawnerId: '',
         routeIndex: 0,
       });
+      serverMobSampleById.set(item.mobId, {
+        serverTimeMs: delta.serverTimeMs,
+        position: new THREE.Vector3(
+          item.position.x,
+          MOB_HEIGHT * 0.5,
+          item.position.z
+        ),
+        velocity: new THREE.Vector3(item.velocity.x, 0, item.velocity.z),
+      });
       continue;
     }
     existing.hp = item.hp;
     existing.maxHp = item.maxHp;
+    const prev = serverMobSampleById.get(item.mobId);
+    const currentPos = new THREE.Vector3(
+      item.position.x,
+      existing.baseY,
+      item.position.z
+    );
+    const currentVel = new THREE.Vector3(item.velocity.x, 0, item.velocity.z);
+    const hasPrev =
+      !!prev && Number.isFinite(prev.serverTimeMs) && delta.serverTimeMs > prev.serverTimeMs;
+    const fromServerMs = hasPrev ? prev.serverTimeMs : delta.serverTimeMs - Math.max(1, delta.tickMs);
+    const toServerMs = delta.serverTimeMs;
+    const from = hasPrev ? prev.position.clone() : currentPos.clone().addScaledVector(currentVel, -delta.tickMs / 1000);
+    const to = currentPos;
     serverMobInterpolationById.set(item.mobId, {
-      from: new THREE.Vector3(
-        item.interpolation.from.x,
-        existing.baseY,
-        item.interpolation.from.z
-      ),
-      to: new THREE.Vector3(
-        item.interpolation.to.x,
-        existing.baseY,
-        item.interpolation.to.z
-      ),
-      t0: toPerfTime(item.interpolation.t0),
-      t1: toPerfTime(item.interpolation.t1),
+      from,
+      to,
+      velocity: currentVel,
+      t0: toPerfTime(fromServerMs),
+      t1: toPerfTime(toServerMs),
+    });
+    serverMobSampleById.set(item.mobId, {
+      serverTimeMs: delta.serverTimeMs,
+      position: currentPos,
+      velocity: currentVel,
     });
   }
   for (const mobId of delta.despawnedMobIds) {
+    const mob = serverMobsById.get(mobId);
+    if (mob) {
+      spawnMobDeathVisual(mob);
+    }
     removeServerMobById(mobId);
   }
 };
@@ -3989,18 +4043,35 @@ const applyServerSnapshot = (snapshot: SharedWorldState) => {
   }
   serverMobsById.clear();
   serverMobInterpolationById.clear();
+  serverMobSampleById.clear();
   for (const mob of Object.values(snapshot.mobs)) {
     upsertServerMobFromSnapshot(mob);
+    serverMobSampleById.set(mob.mobId, {
+      serverTimeMs: snapshot.meta.lastTickMs,
+      position: new THREE.Vector3(mob.position.x, MOB_HEIGHT * 0.5, mob.position.z),
+      velocity: new THREE.Vector3(mob.velocity.x, 0, mob.velocity.z),
+    });
   }
 };
 
 const updateServerMobInterpolation = (now: number) => {
+  const renderNow = now - SERVER_MOB_INTERPOLATION_BACKTIME_MS;
   for (const [mobId, entry] of serverMobInterpolationById.entries()) {
     const mob = serverMobsById.get(mobId);
     if (!mob) continue;
     const duration = Math.max(1, entry.t1 - entry.t0);
-    const t = THREE.MathUtils.clamp((now - entry.t0) / duration, 0, 1);
+    const t = THREE.MathUtils.clamp((renderNow - entry.t0) / duration, 0, 1);
     mob.mesh.position.lerpVectors(entry.from, entry.to, t);
+    if (renderNow > entry.t1) {
+      const extrapolationMs = Math.min(
+        SERVER_MOB_EXTRAPOLATION_MAX_MS,
+        renderNow - entry.t1
+      );
+      if (extrapolationMs > 0) {
+        mob.mesh.position.x += entry.velocity.x * (extrapolationMs / 1000);
+        mob.mesh.position.z += entry.velocity.z * (extrapolationMs / 1000);
+      }
+    }
     mob.target.set(entry.to.x, 0, entry.to.z);
     const vx = (entry.to.x - entry.from.x) / (duration / 1000);
     const vz = (entry.to.z - entry.from.z) / (duration / 1000);
@@ -4009,9 +4080,6 @@ const updateServerMobInterpolation = (now: number) => {
       0,
       Number.isFinite(vz) ? vz : 0
     );
-    if (t >= 1) {
-      serverMobInterpolationById.delete(mobId);
-    }
   }
 };
 
@@ -4023,6 +4091,7 @@ const setupAuthoritativeBridge = async () => {
   try {
     authoritativeBridge = await connectAuthoritativeBridge({
       onSnapshot: (snapshot) => {
+        syncServerClockSkew(snapshot.meta.lastTickMs);
         applyServerSnapshot(snapshot);
         authoritativeInitialDataReady = true;
         startGameWhenReady?.();
@@ -4072,7 +4141,7 @@ const setupAuthoritativeBridge = async () => {
     void syncCastleCoinsFromServer();
   } catch (error) {
     console.error('Failed to connect authoritative bridge', error);
-    authoritativeInitialDataReady = true;
+    authoritativeInitialDataReady = false;
   } finally {
     authoritativeHandshakePending = false;
     startGameWhenReady?.();
@@ -7003,7 +7072,10 @@ const tick = (now: number, delta: number) => {
 
   updateNpcTargets();
   updateEntityMotion(player, delta);
-  if (authoritativeBridge && now - lastNetworkHeartbeatAt >= 1000) {
+  if (
+    authoritativeBridge &&
+    now - lastNetworkHeartbeatAt >= SERVER_HEARTBEAT_INTERVAL_MS
+  ) {
     lastNetworkHeartbeatAt = now;
     void authoritativeBridge.heartbeat({
       x: player.mesh.position.x,
