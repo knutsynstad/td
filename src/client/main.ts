@@ -20,11 +20,11 @@ import rockModelUrl from './assets/models/rock.glb?url'
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url'
 import treeModelUrl from './assets/models/tree.glb?url'
 import wallModelUrl from './assets/models/wall.glb?url'
-import { screenToWorldOnGround } from './utils/coords'
-import { SelectionDialog } from './ui/SelectionDialog'
-import { StructureStore } from './game/structures'
-import { getTowerType, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './game/TowerTypes'
-import type { TowerTypeId, TowerUpgradeId } from './game/TowerTypes'
+import { screenToWorldOnGround } from './domains/world/coords'
+import { SelectionDialog } from './ui/components/selectionDialog'
+import { StructureStore } from './domains/gameplay/structureStore'
+import { getTowerType, getTowerUpgradeDeltaText, getTowerUpgradeOptions } from './domains/gameplay/towers/towerTypes'
+import type { TowerTypeId, TowerUpgradeId } from './domains/gameplay/towers/towerTypes'
 import type {
   ArrowProjectile,
   DestructibleCollider,
@@ -35,18 +35,18 @@ import type {
   StaticCollider,
   Tower,
   WaveSpawner
-} from './game/types'
-import { SpatialGrid } from './utils/SpatialGrid'
-import { createParticleSystem } from './effects/particles'
-import { clamp, distanceToColliderSurface, resolveCircleCircle } from './physics/collision'
-import { createEntityMotionSystem } from './entities/motion'
-import { createGameLoop } from './game/GameLoop'
-import { areWaveSpawnersDone } from './game/spawners'
-import { getAllBorderDoors } from './game/borderDoors'
-import type { LanePathResult } from './pathfinding/laneAStar'
-import { buildCastleFlowField, tracePathFromSpawner, type CorridorFlowField } from './pathfinding/corridorFlowField'
-import { simplifyCollinear } from './pathfinding/pathSimplification'
-import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
+} from './domains/gameplay/types/entities'
+import { SpatialGrid } from './domains/world/spatialGrid'
+import { createParticleSystem } from './rendering/effects/particles'
+import { clamp, distanceToColliderSurface, resolveCircleCircle } from './domains/world/collision'
+import { createEntityMotionSystem } from './domains/entities/systems/motion'
+import { createGameLoop } from './domains/gameplay/gameLoop'
+import { areWaveSpawnersDone } from './domains/gameplay/spawners'
+import { getAllBorderDoors } from './domains/gameplay/borderDoors'
+import type { LanePathResult } from './domains/world/pathfinding/laneAStar'
+import { buildCastleFlowField, tracePathFromSpawner, type CorridorFlowField } from './domains/world/pathfinding/corridorFlowField'
+import { simplifyCollinear } from './domains/world/pathfinding/pathSimplification'
+import { SpawnerPathOverlay } from './rendering/effects/spawnerPathOverlay'
 import {
   canPlace as canPlaceAt,
   getBuildSize as getBuildSizeForMode,
@@ -56,7 +56,7 @@ import {
   placeWallLine as placeWallSegment,
   snapCenterToBuildGrid,
   type BuildMode
-} from './placement/building'
+} from './domains/gameplay/buildingPlacement'
 import {
   clearSelectionState,
   createSelectionState,
@@ -65,7 +65,7 @@ import {
   getSingleSelectedTower as getSingleSelectedTowerFromState,
   isColliderInRange as isColliderInRangeFromState,
   setSelectedStructures as setSelectedStructuresState
-} from './selection/selection'
+} from './domains/selection/state'
 import {
   DECAY_GRACE_MS,
   DECAY_HP_PER_HOUR,
@@ -121,21 +121,21 @@ import {
   WAVE_SPAWNER_BASE_RATE,
   WALL_HP,
   WORLD_BOUNDS
-} from './game/constants'
-import { createGameState } from './game/state/GameState'
-import { createInputController } from './input/InputController'
-import { updateHud } from './presentation/HudPresenter'
-import { renderVisibleMobInstances } from './presentation/RenderCoordinator'
-import { buildCoinCostMarkup } from './ui/coinCost'
+} from './domains/gameplay/constants'
+import { createGameState } from './domains/gameplay/gameState'
+import { createInputController } from './domains/gameplay/inputController'
+import { updateHud } from './rendering/presenters/hudPresenter'
+import { renderVisibleMobInstances } from './rendering/presenters/renderCoordinator'
+import { buildCoinCostMarkup } from './ui/components/coinCost'
 import {
   createBallistaVisualRig,
   getBallistaArrowLaunchTransform,
   updateBallistaRigTracking,
   type BallistaVisualRig
-} from './presentation/ballistaRig'
-import { createWaveAndSpawnSystem, type PreparedWave } from './game/systems/WaveAndSpawnSystem'
-import { connectAuthoritativeBridge } from './network/authoritativeBridge'
-import { fetchCastleCoinsBalance, requestCastleCoinsDeposit, requestCastleCoinsWithdraw } from './network/castleApi'
+} from './rendering/presenters/ballistaRig'
+import { createWaveAndSpawnSystem, type PreparedWave } from './domains/gameplay/waveAndSpawnSystem'
+import { connectAuthoritativeBridge } from './integrations/authoritativeBridge'
+import { fetchCastleCoinsBalance, requestCastleCoinsDeposit, requestCastleCoinsWithdraw } from './integrations/castleApi'
 import type { EntityDelta, StructureDelta, WaveDelta } from '../shared/game-protocol'
 import {
   DEFAULT_PLAYER_SPAWN,
@@ -149,13 +149,13 @@ import {
   assertMobSpawnerReferences,
   assertSpawnerCounts,
   assertStructureStoreConsistency
-} from './game/invariants'
-import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
+} from './domains/gameplay/invariants'
+import { createRandomSource, deriveSeed, hashSeed } from './domains/world/rng'
 import {
   generateSeededWorldFeatures,
   type RockPlacement,
   type TreePlacement
-} from './worldgen/seededWorldGen'
+} from './domains/world/seededWorld'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const WORLD_SEED_INPUT: string | number = 'alpha valley 01'
