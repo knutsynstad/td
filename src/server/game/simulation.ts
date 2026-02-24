@@ -34,30 +34,378 @@ const normalize = (x: number, z: number): { x: number; z: number } => {
   return { x: x / len, z: z / len };
 };
 
-const makeMob = (tickSeq: number, spawnerId: string): MobState => ({
-  mobId: `${spawnerId}-mob-${tickSeq}-${Math.floor(Math.random() * 10_000)}`,
-  position: { x: 40, z: 40 },
-  velocity: { x: 0, z: 0 },
-  hp: 100,
-  maxHp: 100,
-  spawnerId,
-});
+const WORLD_BOUNDS = 64;
+const GRID_SIZE = 1;
+const SPAWNER_ENTRY_INSET_CELLS = 3;
+const STAGING_ISLAND_DISTANCE = 14;
+const CASTLE_CAPTURE_RADIUS = 2;
+const CASTLE_ROUTE_HALF_WIDTH_CELLS = 1;
+const CASTLE_HALF_EXTENT = 4;
+
+type SideId = 'north' | 'east' | 'south' | 'west';
+type SideDef = {
+  id: SideId;
+  door: { x: number; z: number };
+  outward: { x: number; z: number };
+  tangent: { x: number; z: number };
+};
+
+type FlowField = {
+  width: number;
+  height: number;
+  minWX: number;
+  minWZ: number;
+  resolution: number;
+  passable: Uint8Array;
+  distance: Int32Array;
+  goals: Array<{ x: number; z: number }>;
+};
+
+const SIDE_DEFS: SideDef[] = [
+  {
+    id: 'north',
+    door: { x: 0, z: -WORLD_BOUNDS },
+    outward: { x: 0, z: -1 },
+    tangent: { x: 1, z: 0 },
+  },
+  {
+    id: 'east',
+    door: { x: WORLD_BOUNDS, z: 0 },
+    outward: { x: 1, z: 0 },
+    tangent: { x: 0, z: 1 },
+  },
+  {
+    id: 'south',
+    door: { x: 0, z: WORLD_BOUNDS },
+    outward: { x: 0, z: 1 },
+    tangent: { x: 1, z: 0 },
+  },
+  {
+    id: 'west',
+    door: { x: -WORLD_BOUNDS, z: 0 },
+    outward: { x: -1, z: 0 },
+    tangent: { x: 0, z: 1 },
+  },
+];
+
+const CARDINALS: Array<[number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+const toSideDef = (spawnerId: string): SideDef => {
+  for (const side of SIDE_DEFS) {
+    if (spawnerId.endsWith(`-${side.id}`)) return side;
+  }
+  return SIDE_DEFS[0]!;
+};
+
+const getSpawnerEntryPoint = (side: SideDef): { x: number; z: number } => {
+  const inset = GRID_SIZE * SPAWNER_ENTRY_INSET_CELLS;
+  const x = Math.round(side.door.x - side.outward.x * inset);
+  const z = Math.round(side.door.z - side.outward.z * inset);
+  return {
+    x: clamp(x, -WORLD_BOUNDS + inset, WORLD_BOUNDS - inset),
+    z: clamp(z, -WORLD_BOUNDS + inset, WORLD_BOUNDS - inset),
+  };
+};
+
+const getSpawnerSpawnPoint = (side: SideDef): { x: number; z: number } => {
+  const lateralJitter = (Math.random() - 0.5) * 2.8;
+  const alongBridgeJitter = Math.random() * 1.8;
+  const towardMapX = -side.outward.x;
+  const towardMapZ = -side.outward.z;
+  const baseX = side.door.x + side.outward.x * STAGING_ISLAND_DISTANCE;
+  const baseZ = side.door.z + side.outward.z * STAGING_ISLAND_DISTANCE;
+  return {
+    x:
+      baseX +
+      side.tangent.x * lateralJitter +
+      towardMapX * alongBridgeJitter,
+    z:
+      baseZ +
+      side.tangent.z * lateralJitter +
+      towardMapZ * alongBridgeJitter,
+  };
+};
+
+const getCastleEntryGoals = (): Array<{ x: number; z: number }> => {
+  const approachOffset = GRID_SIZE * 3;
+  return [
+    { x: 0, z: CASTLE_HALF_EXTENT + approachOffset },
+    { x: 0, z: -CASTLE_HALF_EXTENT - approachOffset },
+    { x: CASTLE_HALF_EXTENT + approachOffset, z: 0 },
+    { x: -CASTLE_HALF_EXTENT - approachOffset, z: 0 },
+  ];
+};
+
+const shuffle = <T>(values: T[]): T[] => {
+  const out = values.slice();
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = out[i]!;
+    out[i] = out[j]!;
+    out[j] = tmp;
+  }
+  return out;
+};
+
+const splitByWeights = (total: number, count: number): number[] => {
+  if (count <= 0) return [];
+  const weights = Array.from({ length: count }, () => 0.75 + Math.random());
+  const sum = weights.reduce((acc, value) => acc + value, 0);
+  const raw = weights.map((value) => (value / sum) * total);
+  const base = raw.map((value) => Math.floor(value));
+  let remainder = total - base.reduce((acc, value) => acc + value, 0);
+  while (remainder > 0) {
+    let bestIndex = 0;
+    let bestFraction = -1;
+    for (let i = 0; i < raw.length; i += 1) {
+      const fraction = raw[i]! - base[i]!;
+      if (fraction > bestFraction) {
+        bestFraction = fraction;
+        bestIndex = i;
+      }
+    }
+    base[bestIndex] = (base[bestIndex] ?? 0) + 1;
+    remainder -= 1;
+  }
+  return base;
+};
+
+const pickSpawnerSidesForWave = (wave: number): SideDef[] => {
+  const minSpawners = 1;
+  const maxSpawners = 3;
+  const waveCap = Math.min(maxSpawners, minSpawners + Math.floor(wave / 3));
+  const count = clamp(
+    minSpawners + Math.floor(Math.random() * (waveCap - minSpawners + 1)),
+    minSpawners,
+    maxSpawners
+  );
+  return shuffle(SIDE_DEFS).slice(0, count);
+};
+
+const buildFlowField = (
+  structures: Record<string, StructureState>,
+  goals: Array<{ x: number; z: number }>
+): FlowField => {
+  const minWX = -WORLD_BOUNDS;
+  const maxWX = WORLD_BOUNDS;
+  const minWZ = -WORLD_BOUNDS;
+  const maxWZ = WORLD_BOUNDS;
+  const width = Math.max(2, Math.ceil((maxWX - minWX) / GRID_SIZE) + 1);
+  const height = Math.max(2, Math.ceil((maxWZ - minWZ) / GRID_SIZE) + 1);
+  const cellCount = width * height;
+  const passable = new Uint8Array(cellCount);
+  passable.fill(1);
+  const distance = new Int32Array(cellCount);
+  distance.fill(-1);
+
+  const toCellNearest = (x: number, z: number): [number, number] => {
+    const cx = Math.max(0, Math.min(width - 1, Math.round((x - minWX) / GRID_SIZE)));
+    const cz = Math.max(
+      0,
+      Math.min(height - 1, Math.round((z - minWZ) / GRID_SIZE))
+    );
+    return [cx, cz];
+  };
+  const toIdx = (x: number, z: number) => z * width + x;
+  const fromIdx = (idx: number): [number, number] => [
+    idx % width,
+    Math.floor(idx / width),
+  ];
+
+  const markBlockedAabb = (
+    centerX: number,
+    centerZ: number,
+    halfX: number,
+    halfZ: number
+  ) => {
+    const minX = centerX - halfX;
+    const maxX = centerX + halfX;
+    const minZ = centerZ - halfZ;
+    const maxZ = centerZ + halfZ;
+    const sx = Math.max(0, Math.min(width - 1, Math.floor((minX - minWX) / GRID_SIZE)));
+    const sz = Math.max(
+      0,
+      Math.min(height - 1, Math.floor((minZ - minWZ) / GRID_SIZE))
+    );
+    const ex = Math.max(0, Math.min(width - 1, Math.ceil((maxX - minWX) / GRID_SIZE)));
+    const ez = Math.max(0, Math.min(height - 1, Math.ceil((maxZ - minWZ) / GRID_SIZE)));
+    for (let z = sz; z <= ez; z += 1) {
+      for (let x = sx; x <= ex; x += 1) {
+        passable[toIdx(x, z)] = 0;
+      }
+    }
+  };
+
+  for (const structure of Object.values(structures)) {
+    const halfSize =
+      structure.type === 'wall'
+        ? 0.6
+        : structure.type === 'tower'
+          ? 0.8
+          : structure.type === 'bank'
+            ? 1.4
+            : 1.1;
+    const inflate = structure.type === 'wall' ? 0.25 : 0.4;
+    markBlockedAabb(
+      structure.center.x,
+      structure.center.z,
+      halfSize + inflate,
+      halfSize + inflate
+    );
+  }
+
+  const hasClearanceAt = (x: number, z: number, dx: number, dz: number) => {
+    for (
+      let lateral = -CASTLE_ROUTE_HALF_WIDTH_CELLS;
+      lateral <= CASTLE_ROUTE_HALF_WIDTH_CELLS;
+      lateral += 1
+    ) {
+      const cx = dz !== 0 ? x + lateral : x;
+      const cz = dx !== 0 ? z + lateral : z;
+      if (cx < 0 || cz < 0 || cx >= width || cz >= height) return false;
+      if (passable[toIdx(cx, cz)] === 0) return false;
+    }
+    return true;
+  };
+
+  const queue = new Uint32Array(cellCount);
+  let head = 0;
+  let tail = 0;
+  for (const goal of goals) {
+    const [gx, gz] = toCellNearest(goal.x, goal.z);
+    const idx = toIdx(gx, gz);
+    passable[idx] = 1;
+    if (distance[idx] >= 0) continue;
+    distance[idx] = 0;
+    queue[tail] = idx;
+    tail += 1;
+  }
+
+  while (head < tail) {
+    const currentIdx = queue[head]!;
+    head += 1;
+    const [cx, cz] = fromIdx(currentIdx);
+    const baseDist = distance[currentIdx]!;
+    for (const [dx, dz] of CARDINALS) {
+      const nx = cx + dx;
+      const nz = cz + dz;
+      if (nx < 0 || nz < 0 || nx >= width || nz >= height) continue;
+      const nIdx = toIdx(nx, nz);
+      if (distance[nIdx] >= 0) continue;
+      if (!hasClearanceAt(nx, nz, dx, dz)) continue;
+      distance[nIdx] = baseDist + 1;
+      queue[tail] = nIdx;
+      tail += 1;
+    }
+  }
+
+  return {
+    width,
+    height,
+    minWX,
+    minWZ,
+    resolution: GRID_SIZE,
+    passable,
+    distance,
+    goals,
+  };
+};
+
+const pickFlowDirection = (
+  field: FlowField,
+  x: number,
+  z: number
+): { x: number; z: number } => {
+  const toCellNearest = (wx: number, wz: number): [number, number] => {
+    const cx = Math.max(
+      0,
+      Math.min(field.width - 1, Math.round((wx - field.minWX) / field.resolution))
+    );
+    const cz = Math.max(
+      0,
+      Math.min(field.height - 1, Math.round((wz - field.minWZ) / field.resolution))
+    );
+    return [cx, cz];
+  };
+  const toIdx = (cx: number, cz: number) => cz * field.width + cx;
+  const [cx, cz] = toCellNearest(x, z);
+  const currentIdx = toIdx(cx, cz);
+  const currentDist = field.distance[currentIdx]!;
+
+  let bestNx = cx;
+  let bestNz = cz;
+  let bestDist = currentDist;
+  for (const [dx, dz] of CARDINALS) {
+    const nx = cx + dx;
+    const nz = cz + dz;
+    if (nx < 0 || nz < 0 || nx >= field.width || nz >= field.height) continue;
+    const nIdx = toIdx(nx, nz);
+    if (field.passable[nIdx] === 0) continue;
+    const nDist = field.distance[nIdx]!;
+    if (nDist < 0) continue;
+    if (bestDist < 0 || nDist < bestDist) {
+      bestDist = nDist;
+      bestNx = nx;
+      bestNz = nz;
+    }
+  }
+
+  const targetX = field.minWX + bestNx * field.resolution;
+  const targetZ = field.minWZ + bestNz * field.resolution;
+  const dir = normalize(targetX - x, targetZ - z);
+  if (dir.x !== 0 || dir.z !== 0) {
+    return dir;
+  }
+
+  let bestGoal = field.goals[0] ?? { x: 0, z: 0 };
+  let bestGoalDist = distance(x, z, bestGoal.x, bestGoal.z);
+  for (const goal of field.goals) {
+    const d = distance(x, z, goal.x, goal.z);
+    if (d < bestGoalDist) {
+      bestGoalDist = d;
+      bestGoal = goal;
+    }
+  }
+  return normalize(bestGoal.x - x, bestGoal.z - z);
+};
+
+const makeMob = (tickSeq: number, spawnerId: string): MobState => {
+  const side = toSideDef(spawnerId);
+  const spawn = getSpawnerSpawnPoint(side);
+  return {
+    mobId: `${spawnerId}-mob-${tickSeq}-${Math.floor(Math.random() * 10_000)}`,
+    position: spawn,
+    velocity: { x: 0, z: 0 },
+    hp: 100,
+    maxHp: 100,
+    spawnerId,
+  };
+};
 
 const activateWave = (world: WorldState): boolean => {
   if (world.wave.active) return false;
   world.wave.wave += 1;
   world.wave.active = true;
-  world.wave.spawners = [
-    {
-      spawnerId: `wave-${world.wave.wave}-east`,
-      totalCount: (5 + world.wave.wave * 2) * 8,
+  const totalMobCount = (5 + world.wave.wave * 2) * 8;
+  const sides = pickSpawnerSidesForWave(world.wave.wave);
+  const split = splitByWeights(totalMobCount, sides.length);
+  world.wave.spawners = split.map((count, index) => {
+    const side = sides[index]!;
+    return {
+      spawnerId: `wave-${world.wave.wave}-${side.id}`,
+      totalCount: count,
       spawnedCount: 0,
       aliveCount: 0,
-      spawnRatePerSecond: WAVE_SPAWN_BASE + world.wave.wave * 0.2,
+      spawnRatePerSecond: (WAVE_SPAWN_BASE + world.wave.wave * 0.2) * (0.9 + Math.random() * 0.4),
       spawnAccumulator: 0,
       gateOpen: false,
-    },
-  ];
+    };
+  });
   world.wave.nextWaveAtMs = 0;
   return true;
 };
@@ -78,7 +426,8 @@ const maybeActivateScheduledWave = (world: WorldState): boolean => {
 
 const updateMobs = (
   world: WorldState,
-  deltaSeconds: number
+  deltaSeconds: number,
+  field: FlowField
 ): { upserts: MobState[]; despawnedIds: string[] } => {
   const upserts: MobState[] = [];
   const despawnedIds: string[] = [];
@@ -86,10 +435,20 @@ const updateMobs = (
   const towerList = Object.values(world.structures).filter(
     (structure) => structure.type === 'tower'
   );
+  const spawnerById = new Map(
+    world.wave.spawners.map((spawner) => [spawner.spawnerId, spawner])
+  );
   for (const mob of Object.values(world.mobs)) {
-    const toCenter = normalize(-mob.position.x, -mob.position.z);
-    mob.velocity.x = toCenter.x * MOB_SPEED_UNITS_PER_SECOND;
-    mob.velocity.z = toCenter.z * MOB_SPEED_UNITS_PER_SECOND;
+    const side = toSideDef(mob.spawnerId);
+    const entry = getSpawnerEntryPoint(side);
+    const isInMap =
+      Math.abs(mob.position.x) <= WORLD_BOUNDS &&
+      Math.abs(mob.position.z) <= WORLD_BOUNDS;
+    const moveDir = isInMap
+      ? pickFlowDirection(field, mob.position.x, mob.position.z)
+      : normalize(entry.x - mob.position.x, entry.z - mob.position.z);
+    mob.velocity.x = moveDir.x * MOB_SPEED_UNITS_PER_SECOND;
+    mob.velocity.z = moveDir.z * MOB_SPEED_UNITS_PER_SECOND;
     mob.position.x += mob.velocity.x * deltaSeconds;
     mob.position.z += mob.velocity.z * deltaSeconds;
 
@@ -106,9 +465,13 @@ const updateMobs = (
       }
     }
 
-    if (mob.hp <= 0 || distance(0, 0, mob.position.x, mob.position.z) < 2) {
+    if (mob.hp <= 0 || distance(0, 0, mob.position.x, mob.position.z) < CASTLE_CAPTURE_RADIUS) {
       despawnedIds.push(mob.mobId);
       delete world.mobs[mob.mobId];
+      const spawner = spawnerById.get(mob.spawnerId);
+      if (spawner) {
+        spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
+      }
       continue;
     }
     upserts.push({ ...mob });
@@ -282,6 +645,7 @@ export const runSimulation = (
   let steps = 0;
   let latestEntityDelta: EntityDelta | null = null;
   let latestWaveDelta: WaveDelta | null = null;
+  const flowField = buildFlowField(world.structures, getCastleEntryGoals());
   while (world.meta.lastTickMs + SIM_TICK_MS <= nowMs && steps < maxSteps) {
     const fromMs = world.meta.lastTickMs;
     world.meta.lastTickMs += SIM_TICK_MS;
@@ -290,7 +654,7 @@ export const runSimulation = (
     const deltaSeconds = SIM_TICK_MS / 1000;
 
     const waveChanged = updateWave(world, deltaSeconds);
-    const mobResult = updateMobs(world, deltaSeconds);
+    const mobResult = updateMobs(world, deltaSeconds, flowField);
     const entityDelta: EntityDelta = {
       type: 'entityDelta',
       tickSeq: world.meta.tickSeq,

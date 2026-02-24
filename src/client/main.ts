@@ -3089,9 +3089,8 @@ const getForwardWaypointIndex = (
       bestIdx = i;
     }
   }
-  // Prevent backtracking toward waypoints behind current progress.
-  const result = Math.min(bestIdx + 1, waypoints.length - 1);
-  return result;
+  // Keep current forward progress without skipping route corners.
+  return bestIdx;
 };
 
 const getSpawnCandidatePosition = (spawner: WaveSpawner) => {
