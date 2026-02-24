@@ -3320,6 +3320,7 @@ const serverMobSampleById = new Map<
     serverTimeMs: number;
     position: THREE.Vector3;
     velocity: THREE.Vector3;
+    receivedAtPerfMs: number;
   }
 >();
 let serverWaveActive = false;
@@ -3327,6 +3328,8 @@ let serverLastAckSeq = 0;
 const isServerAuthoritative = () => authoritativeBridge !== null;
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
+const SERVER_MOB_DEAD_STALE_REMOVE_MS = 1000;
+const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
 const SERVER_HEARTBEAT_INTERVAL_MS = 200;
 let serverClockSkewMs = 0;
 let serverClockSkewInitialized = false;
@@ -3633,8 +3636,9 @@ const applyServerStructureDelta = (delta: StructureDelta) => {
 
 const removeServerMobById = (mobId: string) => {
   const mob = serverMobsById.get(mobId);
-  if (!mob) return;
-  const index = mobs.indexOf(mob);
+  const index = mob
+    ? mobs.indexOf(mob)
+    : mobs.findIndex((entry) => entry.mobId === mobId);
   if (index >= 0) {
     mobs.splice(index, 1);
   }
@@ -3703,6 +3707,7 @@ const applyServerMobDelta = (delta: EntityDelta) => {
           item.position.z
         ),
         velocity: new THREE.Vector3(item.velocity.x, 0, item.velocity.z),
+        receivedAtPerfMs: performance.now(),
       });
       continue;
     }
@@ -3732,6 +3737,7 @@ const applyServerMobDelta = (delta: EntityDelta) => {
       serverTimeMs: delta.serverTimeMs,
       position: currentPos,
       velocity: currentVel,
+      receivedAtPerfMs: performance.now(),
     });
   }
   for (const mobId of delta.despawnedMobIds) {
@@ -3780,11 +3786,32 @@ const applyServerSnapshot = (snapshot: SharedWorldState) => {
       serverTimeMs: snapshot.meta.lastTickMs,
       position: new THREE.Vector3(mob.position.x, MOB_HEIGHT * 0.5, mob.position.z),
       velocity: new THREE.Vector3(mob.velocity.x, 0, mob.velocity.z),
+      receivedAtPerfMs: performance.now(),
     });
   }
 };
 
 const updateServerMobInterpolation = (now: number) => {
+  const staleMobIds: string[] = [];
+  for (const [mobId, sample] of serverMobSampleById.entries()) {
+    const mob = serverMobsById.get(mobId);
+    if (!mob) {
+      staleMobIds.push(mobId);
+      continue;
+    }
+    const staleMs = now - sample.receivedAtPerfMs;
+    if ((mob.hp ?? 1) <= 0 && staleMs > SERVER_MOB_DEAD_STALE_REMOVE_MS) {
+      staleMobIds.push(mobId);
+      continue;
+    }
+    if (!serverWaveActive && staleMs > SERVER_MOB_POST_WAVE_STALE_REMOVE_MS) {
+      staleMobIds.push(mobId);
+    }
+  }
+  for (const mobId of staleMobIds) {
+    removeServerMobById(mobId);
+  }
+
   const renderNow = now - SERVER_MOB_INTERPOLATION_BACKTIME_MS;
   for (const [mobId, entry] of serverMobInterpolationById.entries()) {
     const mob = serverMobsById.get(mobId);
@@ -5002,6 +5029,40 @@ const updateFloatingDamageTexts = (delta: number) => {
 const updateHealthBars = () => {
   // Clear existing health bars
   healthBarContainer.innerHTML = '';
+  for (const [collider, state] of structureStore.structureStates.entries()) {
+    if (collider.type !== 'wall' && collider.type !== 'tower') continue;
+    if (state.maxHp <= 0 || state.hp >= state.maxHp) continue;
+    const barAnchor = new THREE.Vector3(
+      collider.center.x,
+      collider.center.y + collider.halfSize.y + 0.55,
+      collider.center.z
+    );
+    const screenPos = worldToScreen(barAnchor);
+    if (!screenPos) continue;
+
+    const hpRatio = Math.max(0, Math.min(1, state.hp / state.maxHp));
+    const shell = document.createElement('div');
+    shell.style.position = 'absolute';
+    shell.style.left = `${screenPos.x}px`;
+    shell.style.top = `${screenPos.y}px`;
+    shell.style.transform = 'translate(-50%, -100%)';
+    shell.style.width = '42px';
+    shell.style.height = '6px';
+    shell.style.border = '1px solid rgba(255,255,255,0.85)';
+    shell.style.borderRadius = '999px';
+    shell.style.background = 'rgba(0,0,0,0.55)';
+    shell.style.overflow = 'hidden';
+    shell.style.pointerEvents = 'none';
+
+    const fill = document.createElement('div');
+    fill.style.width = `${Math.max(0, Math.round(hpRatio * 100))}%`;
+    fill.style.height = '100%';
+    fill.style.background =
+      hpRatio < 0.35 ? '#e35a5a' : hpRatio < 0.75 ? '#e0bf50' : '#5dd37a';
+    fill.style.transition = 'width 80ms linear';
+    shell.appendChild(fill);
+    healthBarContainer.appendChild(shell);
+  }
 };
 
 const updateUsernameLabels = () => {
