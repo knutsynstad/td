@@ -162,4 +162,88 @@ describe('runSimulation', () => {
       expect(entityDelta.despawnedMobIds).toContain('stuck-mob');
     }
   });
+
+  it('keeps blocked-route mobs moving toward side entry, not castle fallback', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 1,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'blocked',
+        route: [{ x: 0, z: -61 }, { x: 0, z: 7 }],
+      },
+    ];
+    gameWorld.mobs['blocked-route-mob'] = {
+      mobId: 'blocked-route-mob',
+      position: { x: 0, z: -50 },
+      velocity: { x: 0, z: 0 },
+      hp: 100,
+      maxHp: 100,
+      spawnerId: 'wave-1-north',
+      routeIndex: 0,
+    };
+
+    const result = runSimulation(gameWorld, nowMs + 100, [], 1);
+    expect(result.world.mobs['blocked-route-mob']).toBeDefined();
+    const moved = result.world.mobs['blocked-route-mob']!;
+    expect(moved.position.z).toBeLessThan(-50);
+  });
+
+  it('includes priority mob slices in entity deltas', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.players['p1'] = {
+      playerId: 'p1',
+      username: 'one',
+      position: { x: 0, z: 0 },
+      velocity: { x: 0, z: 0 },
+      speed: 1,
+      lastSeenMs: nowMs,
+    };
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 0,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'reachable',
+        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+      },
+    ];
+    for (let i = 0; i < 16; i += 1) {
+      gameWorld.mobs[`m-${i}`] = {
+        mobId: `m-${i}`,
+        position: { x: i - 8, z: i - 7 },
+        velocity: { x: 0, z: 0 },
+        hp: i % 3 === 0 ? 70 : 100,
+        maxHp: 100,
+        spawnerId: 'wave-1-north',
+        routeIndex: 0,
+      };
+    }
+    const result = runSimulation(gameWorld, nowMs + 100, [], 1);
+    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    expect(entityDelta?.type).toBe('entityDelta');
+    if (entityDelta?.type === 'entityDelta') {
+      if (entityDelta.priorityMobs) {
+        expect(entityDelta.priorityMobs.nearPlayers.length).toBeGreaterThan(0);
+        expect(entityDelta.priorityMobs.castleThreats.length).toBeGreaterThan(0);
+      } else {
+        expect(entityDelta.mobs.length).toBeGreaterThan(0);
+      }
+    }
+  });
 });

@@ -216,6 +216,18 @@ const debugViewState: DebugViewState = {
   flowField: false,
   playerShootRange: false,
 };
+const ENABLE_CLIENT_FRAME_PROFILING = true;
+const FRAME_PROFILE_LOG_INTERVAL_MS = 10_000;
+const FRAME_PROFILE_MAX_SAMPLES = 240;
+const ENABLE_PROJECTILE_BROADPHASE = true;
+const ENABLE_INCREMENTAL_SPATIAL_GRID = true;
+const ENABLE_MOB_RENDER_LOD = true;
+const MOB_LOD_NEAR_DISTANCE = 25;
+const MOB_LOD_FAR_DISTANCE = 48;
+const MOB_LOD_MID_ANIMATION_STEP_MS = 33;
+const MOB_LOD_FAR_ANIMATION_STEP_MS = 90;
+const MOB_LOD_DISABLE_FAR_WIGGLE = true;
+const TOWER_TARGET_REFRESH_INTERVAL_FRAMES = 2;
 const STAGING_ISLAND_DISTANCE = 14;
 const STAGING_ISLAND_SIZE = 15;
 const STAGING_ISLAND_HEIGHT = 1;
@@ -3329,7 +3341,10 @@ const isServerAuthoritative = () => authoritativeBridge !== null;
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
 const SERVER_MOB_DEAD_STALE_REMOVE_MS = 1000;
+const SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS = 8000;
 const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
+const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
+const SERVER_MOB_FROZEN_REMOVE_MS = SERVER_MOB_EXTRAPOLATION_MAX_MS + 350;
 const SERVER_HEARTBEAT_INTERVAL_MS = 200;
 let serverClockSkewMs = 0;
 let serverClockSkewInitialized = false;
@@ -3687,7 +3702,17 @@ const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
 
 const applyServerMobDelta = (delta: EntityDelta) => {
   syncServerClockSkew(delta.serverTimeMs);
-  for (const item of delta.mobs) {
+  const mergedMobUpdates = [...delta.mobs];
+  const priority = delta.priorityMobs;
+  if (priority) {
+    for (const item of priority.nearPlayers) mergedMobUpdates.push(item);
+    for (const item of priority.castleThreats) mergedMobUpdates.push(item);
+    for (const item of priority.recentlyDamaged) mergedMobUpdates.push(item);
+  }
+  const seenUpdateMobIds = new Set<string>();
+  for (const item of mergedMobUpdates) {
+    if (seenUpdateMobIds.has(item.mobId)) continue;
+    seenUpdateMobIds.add(item.mobId);
     const existing = serverMobsById.get(item.mobId);
     if (!existing) {
       upsertServerMobFromSnapshot({
@@ -3739,6 +3764,12 @@ const applyServerMobDelta = (delta: EntityDelta) => {
       velocity: currentVel,
       receivedAtPerfMs: performance.now(),
     });
+  }
+  if (delta.fullMobList) {
+    for (const mobId of Array.from(serverMobsById.keys())) {
+      if (seenUpdateMobIds.has(mobId)) continue;
+      removeServerMobById(mobId);
+    }
   }
   for (const mobId of delta.despawnedMobIds) {
     const mob = serverMobsById.get(mobId);
@@ -3800,7 +3831,30 @@ const updateServerMobInterpolation = (now: number) => {
       continue;
     }
     const staleMs = now - sample.receivedAtPerfMs;
+    const sampleIsFinite =
+      Number.isFinite(sample.position.x) &&
+      Number.isFinite(sample.position.z) &&
+      Number.isFinite(sample.velocity.x) &&
+      Number.isFinite(sample.velocity.z);
+    if (!sampleIsFinite) {
+      staleMobIds.push(mobId);
+      continue;
+    }
+    // If a mob has not received fresh authoritative samples past the
+    // extrapolation horizon, prefer removing it over showing a frozen ghost.
+    if (staleMs > SERVER_MOB_FROZEN_REMOVE_MS) {
+      staleMobIds.push(mobId);
+      continue;
+    }
+    if (staleMs > SERVER_MOB_HARD_STALE_REMOVE_MS) {
+      staleMobIds.push(mobId);
+      continue;
+    }
     if ((mob.hp ?? 1) <= 0 && staleMs > SERVER_MOB_DEAD_STALE_REMOVE_MS) {
+      staleMobIds.push(mobId);
+      continue;
+    }
+    if (serverWaveActive && staleMs > SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS) {
       staleMobIds.push(mobId);
       continue;
     }
@@ -4807,6 +4861,20 @@ const projectileDeltaScratch = new THREE.Vector3();
 const projectileMobCenterScratch = new THREE.Vector3();
 const projectileHitPointScratch = new THREE.Vector3();
 const projectileHitDirectionScratch = new THREE.Vector3();
+const projectileMidpointScratch = new THREE.Vector3();
+const projectileBroadphaseCandidatesScratch: Entity[] = [];
+const frameStageSamples: Array<{
+  totalMs: number;
+  spatialMs: number;
+  targetingMs: number;
+  projectileMs: number;
+  renderMs: number;
+}> = [];
+let nextFrameProfileLogAtMs = 0;
+let tickFrameCounter = 0;
+let cachedSelectedMob: Entity | null = null;
+const cachedTowerTargets = new WeakMap<Tower, Entity | null>();
+const trackedDynamicEntities = new Set<Entity>();
 const MOB_HIT_FLASH_MS = 120;
 const arrowFacingDirectionScratch = new THREE.Vector3();
 const arrowOrientSourceAxisScratch = new THREE.Vector3();
@@ -5321,6 +5389,9 @@ debugMenuRoot.innerHTML = `
     <input type="checkbox" data-debug-toggle="worldGrid" />
     <span>World Grid</span>
   </label>
+  <button type="button" class="debug-menu__action" data-debug-action="resetGame">
+    Reset Game
+  </button>
 `;
 app.appendChild(debugMenuRoot);
 
@@ -5333,6 +5404,33 @@ const debugPlayerRangeInput = debugMenuRoot.querySelector<HTMLInputElement>(
 const debugWorldGridInput = debugMenuRoot.querySelector<HTMLInputElement>(
   'input[data-debug-toggle="worldGrid"]'
 );
+const debugResetGameButton = debugMenuRoot.querySelector<HTMLButtonElement>(
+  'button[data-debug-action="resetGame"]'
+);
+const requestResetGameFromDebugMenu = async (): Promise<string | null> => {
+  const endpoints = ['/api/game/reset', '/internal/menu/reset-game'];
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      if (
+        typeof payload === 'object' &&
+        payload !== null &&
+        typeof payload.showToast === 'string'
+      ) {
+        return payload.showToast;
+      }
+    } catch {
+      // Try the next endpoint before surfacing failure.
+    }
+  }
+  return null;
+};
 
 const applyDebugViewState = () => {
   playerShootRangeRing.visible = debugViewState.playerShootRange;
@@ -5373,6 +5471,21 @@ debugPlayerRangeInput?.addEventListener('change', () => {
 debugWorldGridInput?.addEventListener('change', () => {
   debugViewState.worldGrid = debugWorldGridInput.checked;
   applyDebugViewState();
+});
+debugResetGameButton?.addEventListener('click', () => {
+  if (debugResetGameButton.disabled) return;
+  debugResetGameButton.disabled = true;
+  void requestResetGameFromDebugMenu()
+    .then((toast) => {
+      if (toast) {
+        triggerEventBanner(toast, 3.6);
+        return;
+      }
+      triggerEventBanner('Failed to reset game');
+    })
+    .finally(() => {
+      debugResetGameButton.disabled = false;
+    });
 });
 
 syncDebugMenuInputs();
@@ -6067,6 +6180,27 @@ const pickMobInRange = (center: THREE.Vector3, radius: number) => {
 const pickSelectedMob = () =>
   pickMobInRange(player.mesh.position, PLAYER_SHOOT_RANGE);
 
+const getProjectileMobCandidates = (
+  from: THREE.Vector3,
+  to: THREE.Vector3,
+  radius: number,
+  out: Entity[]
+) => {
+  if (!ENABLE_PROJECTILE_BROADPHASE) {
+    out.length = 0;
+    for (const mob of mobs) out.push(mob);
+    return out;
+  }
+  projectileMidpointScratch.copy(from).add(to).multiplyScalar(0.5);
+  const segmentLength = from.distanceTo(to);
+  const queryRadius = segmentLength * 0.5 + radius + MOB_WIDTH;
+  return spatialGrid.getNearbyInto(
+    projectileMidpointScratch,
+    queryRadius,
+    out
+  );
+};
+
 const getTowerLaunchTransform = (
   tower: Tower,
   rig: BallistaVisualRig | undefined,
@@ -6140,7 +6274,14 @@ const updateTowerArrowProjectiles = (delta: number) => {
     let hitMob: MobEntity | null = null;
     let bestT = Number.POSITIVE_INFINITY;
 
-    for (const mob of mobs) {
+    const projectileCandidates = getProjectileMobCandidates(
+      projectilePrevPosScratch,
+      projectile.position,
+      projectile.radius,
+      projectileBroadphaseCandidatesScratch
+    );
+    for (const mob of projectileCandidates) {
+      if (mob.kind !== 'mob') continue;
       if (mob.staged) continue;
       if ((mob.hp ?? 0) <= 0) continue;
       projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3);
@@ -6251,7 +6392,14 @@ const updatePlayerArrowProjectiles = (delta: number) => {
     let hitMob: MobEntity | null = null;
     let bestT = Number.POSITIVE_INFINITY;
 
-    for (const mob of mobs) {
+    const projectileCandidates = getProjectileMobCandidates(
+      projectilePrevPosScratch,
+      projectile.position,
+      projectile.radius,
+      projectileBroadphaseCandidatesScratch
+    );
+    for (const mob of projectileCandidates) {
+      if (mob.kind !== 'mob') continue;
       if (mob.staged) continue;
       if ((mob.hp ?? 0) <= 0) continue;
       projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3);
@@ -6317,6 +6465,11 @@ const updateMobInstanceRender = (now: number) => {
     nowMs: now,
     maxVisibleMobInstances: MAX_VISIBLE_MOB_INSTANCES,
     mobInstanceCap: MOB_INSTANCE_CAP,
+    lodNearDistance: ENABLE_MOB_RENDER_LOD ? MOB_LOD_NEAR_DISTANCE : 1_000_000,
+    lodFarDistance: ENABLE_MOB_RENDER_LOD ? MOB_LOD_FAR_DISTANCE : 1_000_000,
+    lodMidAnimationStepMs: MOB_LOD_MID_ANIMATION_STEP_MS,
+    lodFarAnimationStepMs: MOB_LOD_FAR_ANIMATION_STEP_MS,
+    disableFarWiggle: ENABLE_MOB_RENDER_LOD && MOB_LOD_DISABLE_FAR_WIGGLE,
   });
 };
 
@@ -6390,6 +6543,12 @@ const updateGrowingTrees = (nowMs: number) => {
 };
 
 const tick = (now: number, delta: number) => {
+  tickFrameCounter += 1;
+  const framePerfStartMs = performance.now();
+  let frameSpatialMs = 0;
+  let frameTargetingMs = 0;
+  let frameProjectileMs = 0;
+  let frameRenderMs = 0;
   const serverAuthoritative = isServerAuthoritative();
   if (rockVisualsNeedFullRefresh && hasAllRockTemplates()) {
     refreshAllRockVisuals(true);
@@ -6468,20 +6627,50 @@ const tick = (now: number, delta: number) => {
     updateServerMobInterpolation(now);
   }
 
-  spatialGrid.clear();
+  const spatialStartedAtMs = performance.now();
   const dynamicEntities = [player, ...npcs, ...mobs];
-  for (const entity of dynamicEntities) {
-    spatialGrid.insert(entity);
+  if (ENABLE_INCREMENTAL_SPATIAL_GRID) {
+    const nextDynamicEntities = new Set(dynamicEntities);
+    for (const entity of dynamicEntities) {
+      if (trackedDynamicEntities.has(entity)) {
+        spatialGrid.updateEntityCell(entity);
+      } else {
+        spatialGrid.insert(entity);
+      }
+    }
+    for (const previous of trackedDynamicEntities) {
+      if (nextDynamicEntities.has(previous)) continue;
+      spatialGrid.remove(previous);
+    }
+    trackedDynamicEntities.clear();
+    for (const entity of nextDynamicEntities) {
+      trackedDynamicEntities.add(entity);
+    }
+  } else {
+    spatialGrid.clear();
+    for (const entity of dynamicEntities) {
+      spatialGrid.insert(entity);
+    }
   }
+  frameSpatialMs += performance.now() - spatialStartedAtMs;
 
   updateParticles(delta);
   updateMobDeathVisuals(delta);
   updateEnergyTrails(delta);
   updateFloatingDamageTexts(delta);
 
+  const targetingStartedAtMs = performance.now();
+  const shouldRefreshTowerTargets =
+    tickFrameCounter % TOWER_TARGET_REFRESH_INTERVAL_FRAMES === 0;
   for (const tower of towers) {
     tower.shootCooldown = Math.max(tower.shootCooldown - delta, 0);
-    const target = pickMobInRange(tower.mesh.position, tower.range);
+    const refreshedTarget = shouldRefreshTowerTargets
+      ? pickMobInRange(tower.mesh.position, tower.range)
+      : undefined;
+    if (refreshedTarget !== undefined) {
+      cachedTowerTargets.set(tower, refreshedTarget);
+    }
+    const target = cachedTowerTargets.get(tower) ?? null;
     const rig = towerBallistaRigs.get(tower);
     let canFire = true;
     if (target) {
@@ -6543,8 +6732,11 @@ const tick = (now: number, delta: number) => {
       updateBallistaRigTracking(rig, tower.mesh.position, null, null, delta);
     }
   }
+  frameTargetingMs += performance.now() - targetingStartedAtMs;
+  const projectileStartedAtMs = performance.now();
   updateTowerArrowProjectiles(delta);
   updatePlayerArrowProjectiles(delta);
+  frameProjectileMs += performance.now() - projectileStartedAtMs;
 
   // Only check collisions between entities in nearby cells
   const processed = new Set<Entity>();
@@ -6566,7 +6758,10 @@ const tick = (now: number, delta: number) => {
 
   const waveComplete = gameState.wave > 0 && !serverWaveActive && mobs.length === 0;
 
-  const selected = pickSelectedMob();
+  if (tickFrameCounter % 2 === 0) {
+    cachedSelectedMob = pickSelectedMob();
+  }
+  const selected = cachedSelectedMob;
   if (selected) {
     // Bounce animation using sine wave
     const bounceOffset = Math.sin(now * 0.005) * 0.3;
@@ -6705,7 +6900,9 @@ const tick = (now: number, delta: number) => {
   camera.lookAt(player.mesh.position);
   camera.updateMatrixWorld();
   updateViewportFogCenter();
+  const renderStartedAtMs = performance.now();
   updateMobInstanceRender(now);
+  frameRenderMs += performance.now() - renderStartedAtMs;
 
   updateHealthBars();
   updateUsernameLabels();
@@ -6786,6 +6983,47 @@ const tick = (now: number, delta: number) => {
   updateCoinHudView(delta);
   composer.render();
   coinTrailRenderer.render(coinTrailScene, coinTrailCamera);
+  if (ENABLE_CLIENT_FRAME_PROFILING) {
+    const frameTotalMs = performance.now() - framePerfStartMs;
+    frameStageSamples.push({
+      totalMs: frameTotalMs,
+      spatialMs: frameSpatialMs,
+      targetingMs: frameTargetingMs,
+      projectileMs: frameProjectileMs,
+      renderMs: frameRenderMs,
+    });
+    if (frameStageSamples.length > FRAME_PROFILE_MAX_SAMPLES) {
+      frameStageSamples.shift();
+    }
+    if (now >= nextFrameProfileLogAtMs) {
+      const sampleCount = Math.max(1, frameStageSamples.length);
+      const avgTotal =
+        frameStageSamples.reduce((sum, sample) => sum + sample.totalMs, 0) /
+        sampleCount;
+      const avgSpatial =
+        frameStageSamples.reduce((sum, sample) => sum + sample.spatialMs, 0) /
+        sampleCount;
+      const avgTargeting =
+        frameStageSamples.reduce((sum, sample) => sum + sample.targetingMs, 0) /
+        sampleCount;
+      const avgProjectile =
+        frameStageSamples.reduce((sum, sample) => sum + sample.projectileMs, 0) /
+        sampleCount;
+      const avgRender =
+        frameStageSamples.reduce((sum, sample) => sum + sample.renderMs, 0) /
+        sampleCount;
+      console.info('Client frame profile', {
+        sampleSize: frameStageSamples.length,
+        avgTotalMs: Number(avgTotal.toFixed(2)),
+        avgSpatialMs: Number(avgSpatial.toFixed(2)),
+        avgTargetingMs: Number(avgTargeting.toFixed(2)),
+        avgProjectileMs: Number(avgProjectile.toFixed(2)),
+        avgRenderMs: Number(avgRender.toFixed(2)),
+        budgetTotalMs: 16,
+      });
+      nextFrameProfileLogAtMs = now + FRAME_PROFILE_LOG_INTERVAL_MS;
+    }
+  }
 };
 
 const gameLoop = createGameLoop(tick);

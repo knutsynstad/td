@@ -104,6 +104,30 @@ export type EntityDelta = {
     hp: number;
     maxHp: number;
   }>;
+  priorityMobs?: {
+    nearPlayers: Array<{
+      mobId: string;
+      position: Vec2;
+      velocity: Vec2;
+      hp: number;
+      maxHp: number;
+    }>;
+    castleThreats: Array<{
+      mobId: string;
+      position: Vec2;
+      velocity: Vec2;
+      hp: number;
+      maxHp: number;
+    }>;
+    recentlyDamaged: Array<{
+      mobId: string;
+      position: Vec2;
+      velocity: Vec2;
+      hp: number;
+      maxHp: number;
+    }>;
+  };
+  fullMobList?: boolean;
   despawnedMobIds: string[];
 };
 

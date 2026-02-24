@@ -13,6 +13,12 @@ import type {
 import {
   AUTO_WAVE_INITIAL_DELAY_MS,
   AUTO_WAVE_INTERMISSION_MS,
+  DELTA_CASTLE_THREAT_MOBS_BUDGET,
+  DELTA_NEAR_MOBS_BUDGET,
+  DELTA_RECENTLY_DAMAGED_MOBS_BUDGET,
+  ENABLE_FULL_MOB_DELTAS,
+  ENABLE_INTEREST_MANAGED_MOB_DELTAS,
+  ENABLE_SERVER_TOWER_SPATIAL_DAMAGE,
   MAX_DELTA_MOBS,
   MAX_DELTA_PLAYERS,
   MAX_MOBS,
@@ -56,6 +62,73 @@ const MOB_STUCK_TIMEOUT_MS = 2 * 60 * 1000;
 const MOB_STUCK_PROGRESS_EPSILON = 0.1;
 const SERVER_TOWER_RANGE = 8;
 const SERVER_TOWER_DPS = 16;
+const SERVER_SPATIAL_CELL_SIZE = SERVER_TOWER_RANGE;
+
+export type SimulationPerfStats = {
+  mobsSimulated: number;
+  towersSimulated: number;
+  towerMobChecks: number;
+  waveSpawnedMobs: number;
+  elapsedMs: number;
+};
+
+type SpatialIndex<T> = {
+  readonly cellSize: number;
+  readonly rows: Map<number, Map<number, T[]>>;
+};
+
+const createSpatialIndex = <T>(cellSize: number): SpatialIndex<T> => ({
+  cellSize,
+  rows: new Map(),
+});
+
+const spatialCell = (value: number, cellSize: number): number =>
+  Math.floor(value / cellSize);
+
+const spatialInsert = <T>(
+  index: SpatialIndex<T>,
+  x: number,
+  z: number,
+  item: T
+): void => {
+  const gx = spatialCell(x, index.cellSize);
+  const gz = spatialCell(z, index.cellSize);
+  let row = index.rows.get(gx);
+  if (!row) {
+    row = new Map();
+    index.rows.set(gx, row);
+  }
+  const cell = row.get(gz);
+  if (cell) {
+    cell.push(item);
+    return;
+  }
+  row.set(gz, [item]);
+};
+
+const spatialQueryInto = <T>(
+  index: SpatialIndex<T>,
+  x: number,
+  z: number,
+  radius: number,
+  out: T[]
+): T[] => {
+  out.length = 0;
+  const minGx = spatialCell(x - radius, index.cellSize);
+  const maxGx = spatialCell(x + radius, index.cellSize);
+  const minGz = spatialCell(z - radius, index.cellSize);
+  const maxGz = spatialCell(z + radius, index.cellSize);
+  for (let gx = minGx; gx <= maxGx; gx += 1) {
+    const row = index.rows.get(gx);
+    if (!row) continue;
+    for (let gz = minGz; gz <= maxGz; gz += 1) {
+      const cell = row.get(gz);
+      if (!cell) continue;
+      for (const item of cell) out.push(item);
+    }
+  }
+  return out;
+};
 
 type SideId = 'north' | 'east' | 'south' | 'west';
 type SideDef = {
@@ -593,7 +666,8 @@ const maybeActivateScheduledWave = (world: WorldState): boolean => {
 
 const updateMobs = (
   world: WorldState,
-  deltaSeconds: number
+  deltaSeconds: number,
+  perf: SimulationPerfStats
 ): { upserts: MobState[]; despawnedIds: string[] } => {
   const upserts: MobState[] = [];
   const despawnedIds: string[] = [];
@@ -601,16 +675,33 @@ const updateMobs = (
   const towerList = Object.values(world.structures).filter(
     (structure) => structure.type === 'tower'
   );
+  perf.towersSimulated += towerList.length;
+  const towerSpatialIndex = createSpatialIndex<StructureState>(
+    SERVER_SPATIAL_CELL_SIZE
+  );
+  if (ENABLE_SERVER_TOWER_SPATIAL_DAMAGE) {
+    for (const tower of towerList) {
+      spatialInsert(
+        towerSpatialIndex,
+        tower.center.x,
+        tower.center.z,
+        tower
+      );
+    }
+  }
+  const towerCandidateScratch: StructureState[] = [];
   const spawnerById = new Map(
     world.wave.spawners.map((spawner) => [spawner.spawnerId, spawner])
   );
   const goals = getCastleEntryGoals();
-  for (const mob of Object.values(world.mobs)) {
+  const mobValues = Object.values(world.mobs);
+  perf.mobsSimulated += mobValues.length;
+  for (const mob of mobValues) {
     const side = toSideDef(mob.spawnerId);
     const entry = getSpawnerEntryPoint(side);
     const spawner = spawnerById.get(mob.spawnerId);
     const route = spawner?.route ?? [];
-    const canUseRoute = route.length > 0;
+    const canUseRoute = spawner?.routeState === 'reachable' && route.length > 0;
     const isInMap =
       Math.abs(mob.position.x) <= WORLD_BOUNDS &&
       Math.abs(mob.position.z) <= WORLD_BOUNDS;
@@ -652,9 +743,8 @@ const updateMobs = (
         z: routedTarget.z + forward.x * laneOffset * lateralScale,
       };
     } else if (isInMap && !canUseRoute) {
-      // Fallback for invalid/blocked routes.
-      const fallbackGoal = goals[0] ?? { x: 0, z: 0 };
-      target = fallbackGoal;
+      // Keep blocked-route mobs staged near their side entry.
+      target = entry;
     }
 
     const moveDir = normalize(
@@ -667,16 +757,40 @@ const updateMobs = (
     mob.position.x += mob.velocity.x * deltaSeconds;
     mob.position.z += mob.velocity.z * deltaSeconds;
 
-    for (const tower of towerList) {
-      if (
-        distance(
-          tower.center.x,
-          tower.center.z,
-          mob.position.x,
-          mob.position.z
-        ) <= SERVER_TOWER_RANGE
-      ) {
-        mob.hp -= SERVER_TOWER_DPS * deltaSeconds;
+    if (ENABLE_SERVER_TOWER_SPATIAL_DAMAGE) {
+      const nearbyTowers = spatialQueryInto(
+        towerSpatialIndex,
+        mob.position.x,
+        mob.position.z,
+        SERVER_TOWER_RANGE,
+        towerCandidateScratch
+      );
+      for (const tower of nearbyTowers) {
+        perf.towerMobChecks += 1;
+        if (
+          distance(
+            tower.center.x,
+            tower.center.z,
+            mob.position.x,
+            mob.position.z
+          ) <= SERVER_TOWER_RANGE
+        ) {
+          mob.hp -= SERVER_TOWER_DPS * deltaSeconds;
+        }
+      }
+    } else {
+      for (const tower of towerList) {
+        perf.towerMobChecks += 1;
+        if (
+          distance(
+            tower.center.x,
+            tower.center.z,
+            mob.position.x,
+            mob.position.z
+          ) <= SERVER_TOWER_RANGE
+        ) {
+          mob.hp -= SERVER_TOWER_DPS * deltaSeconds;
+        }
       }
     }
 
@@ -713,18 +827,23 @@ const updateMobs = (
   return { upserts, despawnedIds };
 };
 
-const updateWave = (world: WorldState, deltaSeconds: number): boolean => {
+const updateWave = (
+  world: WorldState,
+  deltaSeconds: number
+): { changed: boolean; spawned: number } => {
   let changed = false;
+  let spawned = 0;
   if (maybeActivateScheduledWave(world)) {
     changed = true;
   }
-  if (!world.wave.active) return false;
+  if (!world.wave.active) return { changed: false, spawned: 0 };
+  let currentMobCount = Object.keys(world.mobs).length;
   for (const spawner of world.wave.spawners) {
     if (!spawner.gateOpen) spawner.gateOpen = true;
     spawner.spawnAccumulator += spawner.spawnRatePerSecond * deltaSeconds;
     const toSpawn = Math.floor(spawner.spawnAccumulator);
     if (toSpawn <= 0) continue;
-    const roomLeft = Math.max(0, MAX_MOBS - Object.keys(world.mobs).length);
+    const roomLeft = Math.max(0, MAX_MOBS - currentMobCount);
     const spawnCount = Math.min(
       roomLeft,
       toSpawn,
@@ -736,6 +855,8 @@ const updateWave = (world: WorldState, deltaSeconds: number): boolean => {
       spawner.spawnedCount += 1;
       spawner.aliveCount += 1;
       spawner.spawnAccumulator -= 1;
+      spawned += 1;
+      currentMobCount += 1;
       changed = true;
     }
   }
@@ -743,14 +864,14 @@ const updateWave = (world: WorldState, deltaSeconds: number): boolean => {
   const allSpawned = world.wave.spawners.every(
     (spawner) => spawner.spawnedCount >= spawner.totalCount
   );
-  const aliveMobs = Object.keys(world.mobs).length;
+  const aliveMobs = currentMobCount;
   if (allSpawned && aliveMobs === 0) {
     world.wave.active = false;
     prepareUpcomingWave(world);
     world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INTERMISSION_MS;
     changed = true;
   }
-  return changed;
+  return { changed, spawned };
 };
 
 type CommandApplyResult = {
@@ -846,9 +967,56 @@ const applyCommands = (
   return { structureUpserts, structureRemoves, waveChanged, movedPlayers };
 };
 
+const toDeltaMob = (mob: MobState) => ({
+  mobId: mob.mobId,
+  position: { x: mob.position.x, z: mob.position.z },
+  velocity: { x: mob.velocity.x, z: mob.velocity.z },
+  hp: mob.hp,
+  maxHp: mob.maxHp,
+});
+
+const nearestPlayerDistanceSq = (mob: MobState, world: WorldState): number => {
+  let best = Number.POSITIVE_INFINITY;
+  for (const player of Object.values(world.players)) {
+    const dx = mob.position.x - player.position.x;
+    const dz = mob.position.z - player.position.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < best) best = d2;
+  }
+  return best;
+};
+
+const buildPriorityMobSlices = (mobs: MobState[], world: WorldState) => {
+  const nearPlayers = mobs
+    .slice()
+    .sort(
+      (a, b) =>
+        nearestPlayerDistanceSq(a, world) - nearestPlayerDistanceSq(b, world)
+    )
+    .slice(0, DELTA_NEAR_MOBS_BUDGET);
+  const castleThreats = mobs
+    .slice()
+    .sort(
+      (a, b) =>
+        distance(a.position.x, a.position.z, 0, 0) -
+        distance(b.position.x, b.position.z, 0, 0)
+    )
+    .slice(0, DELTA_CASTLE_THREAT_MOBS_BUDGET);
+  const recentlyDamaged = mobs
+    .filter((mob) => mob.hp < mob.maxHp)
+    .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)
+    .slice(0, DELTA_RECENTLY_DAMAGED_MOBS_BUDGET);
+  return {
+    nearPlayers: nearPlayers.map(toDeltaMob),
+    castleThreats: castleThreats.map(toDeltaMob),
+    recentlyDamaged: recentlyDamaged.map(toDeltaMob),
+  };
+};
+
 export type SimulationResult = {
   world: WorldState;
   deltas: GameDelta[];
+  perf: SimulationPerfStats;
 };
 
 export const runSimulation = (
@@ -857,6 +1025,14 @@ export const runSimulation = (
   commands: CommandEnvelope[],
   maxSteps: number
 ): SimulationResult => {
+  const startedAtMs = Date.now();
+  const perf: SimulationPerfStats = {
+    mobsSimulated: 0,
+    towersSimulated: 0,
+    towerMobChecks: 0,
+    waveSpawnedMobs: 0,
+    elapsedMs: 0,
+  };
   const deltas: GameDelta[] = [];
   let waveChanged = ensureInitialWaveSchedule(world);
   const commandChanges = applyCommands(world, commands, nowMs);
@@ -911,14 +1087,15 @@ export const runSimulation = (
     steps += 1;
     const deltaSeconds = SIM_TICK_MS / 1000;
 
-    const waveChanged = updateWave(world, deltaSeconds);
-    const mobResult = updateMobs(world, deltaSeconds);
+    const waveResult = updateWave(world, deltaSeconds);
+    perf.waveSpawnedMobs += waveResult.spawned;
+    const mobResult = updateMobs(world, deltaSeconds, perf);
     latestMobUpserts = mobResult.upserts;
     for (const mobId of mobResult.despawnedIds) {
       despawnedDuringRun.add(mobId);
     }
 
-    if (waveChanged) {
+    if (waveResult.changed) {
       latestWaveDelta = {
         type: 'waveDelta',
         tickSeq: world.meta.tickSeq,
@@ -939,6 +1116,9 @@ export const runSimulation = (
 
   if (steps > 0) {
     const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);
+    const baseMobs = ENABLE_FULL_MOB_DELTAS
+      ? latestMobUpserts.map(toDeltaMob)
+      : latestMobUpserts.slice(0, MAX_DELTA_MOBS).map(toDeltaMob);
     const entityDelta: EntityDelta = {
       type: 'entityDelta',
       tickSeq: world.meta.tickSeq,
@@ -946,13 +1126,12 @@ export const runSimulation = (
       serverTimeMs: world.meta.lastTickMs,
       tickMs: simulatedWindowMs,
       players: [],
-      mobs: latestMobUpserts.slice(0, MAX_DELTA_MOBS).map((mob) => ({
-        mobId: mob.mobId,
-        position: { x: mob.position.x, z: mob.position.z },
-        velocity: { x: mob.velocity.x, z: mob.velocity.z },
-        hp: mob.hp,
-        maxHp: mob.maxHp,
-      })),
+      mobs: baseMobs,
+      priorityMobs:
+        !ENABLE_FULL_MOB_DELTAS && ENABLE_INTEREST_MANAGED_MOB_DELTAS
+        ? buildPriorityMobSlices(latestMobUpserts, world)
+        : undefined,
+      fullMobList: ENABLE_FULL_MOB_DELTAS,
       despawnedMobIds: Array.from(despawnedDuringRun),
     };
     deltas.push(entityDelta);
@@ -961,7 +1140,8 @@ export const runSimulation = (
     deltas.push(latestWaveDelta);
   }
 
-  return { world, deltas };
+  perf.elapsedMs = Date.now() - startedAtMs;
+  return { world, deltas, perf };
 };
 
 export const buildPresenceLeaveDelta = (

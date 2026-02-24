@@ -193,6 +193,28 @@ canvas {
   margin: 0;
 }
 
+.debug-menu__action {
+  margin-top: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 248, 255, 0.95);
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.debug-menu__action:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.debug-menu__action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .selection-dialog__title {
   font-size: 1.2rem;
   font-weight: 800;

@@ -21,6 +21,7 @@ import {
   getCoinBalance,
   heartbeatGame,
   joinGame,
+  resetGame,
   resyncGame,
 } from '../game/service';
 import {
@@ -127,6 +128,22 @@ api.post('/game/resync', async (c) => {
   };
   const response = await resyncGame(request.playerId);
   return c.json<ResyncResponse>(response);
+});
+
+api.post('/game/reset', async (c) => {
+  try {
+    await c.req.json().catch(() => undefined);
+    await resetGame();
+    return c.json({ showToast: 'Game reset. Wave 1 will start after the initial countdown.' });
+  } catch (error) {
+    return c.json<ErrorResponse>(
+      {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to reset game',
+      },
+      500
+    );
+  }
 });
 
 api.get('/castle/coins', async (c) => {

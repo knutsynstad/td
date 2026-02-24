@@ -14,6 +14,7 @@ import {
   type StructureState,
 } from '../../shared/game-state';
 import {
+  ENABLE_SERVER_TICK_PROFILING,
   ENERGY_COST_TOWER,
   ENERGY_COST_WALL,
   LEADER_BROADCAST_WINDOW_MS,
@@ -23,6 +24,8 @@ import {
   MAX_PLAYERS,
   MAX_STRUCTURE_DELTA_UPSERTS,
   PLAYER_TIMEOUT_MS,
+  SERVER_TICK_P95_TARGET_MS,
+  SERVER_TICK_PROFILE_LOG_EVERY_TICKS,
   SIM_TICK_MS,
   SLOW_TICK_LOG_THRESHOLD_MS,
 } from './config';
@@ -86,6 +89,24 @@ const broadcast = async (
 const createOwnerToken = (): string =>
   `leader:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
+type TickProfile = {
+  loadWorldMs: number;
+  simulationMs: number;
+  persistMs: number;
+  broadcastMs: number;
+  totalMs: number;
+};
+
+const percentile = (values: number[], p: number): number => {
+  if (values.length === 0) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.max(
+    0,
+    Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))
+  );
+  return sorted[idx] ?? 0;
+};
+
 const ensureStaticMap = (
   world: { structures: Record<string, StructureState>; meta: { lastTickMs: number; worldVersion: number } }
 ): StructureState[] => {
@@ -115,6 +136,7 @@ export const runLeaderLoop = async (
   const endAt = startedAt + windowMs;
   let nextTick = startedAt;
   let ticksProcessed = 0;
+  const tickProfiles: TickProfile[] = [];
 
   const acquired = await acquireLeaderLock(ownerToken, LEADER_LOCK_TTL_SECONDS);
   if (!acquired) {
@@ -140,6 +162,10 @@ export const runLeaderLoop = async (
 
       const tickStartMs = Date.now();
       const nowMs = tickStartMs;
+      let stageLoadWorldMs = 0;
+      let stageSimulationMs = 0;
+      let stagePersistMs = 0;
+      let stageBroadcastMs = 0;
 
       if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
         const stalePlayers = await removeOldPlayersByLastSeen(
@@ -155,11 +181,15 @@ export const runLeaderLoop = async (
               playerId
             )
           );
+          const staleBroadcastStartedAtMs = Date.now();
           await broadcast(world.meta.worldVersion, world.meta.tickSeq, staleDeltas);
+          stageBroadcastMs += Date.now() - staleBroadcastStartedAtMs;
         }
       }
 
+      const loadStartedAtMs = Date.now();
       const world = await loadWorldState();
+      stageLoadWorldMs += Date.now() - loadStartedAtMs;
       const staticUpserts = ensureStaticMap(world);
 
       if (staticUpserts.length > 0) {
@@ -171,32 +201,87 @@ export const runLeaderLoop = async (
           removes: [],
           requiresPathRefresh: true,
         };
+        const bootstrapBroadcastStartedAtMs = Date.now();
         await broadcast(world.meta.worldVersion, world.meta.tickSeq, [bootstrapDelta]);
+        stageBroadcastMs += Date.now() - bootstrapBroadcastStartedAtMs;
       }
 
       const commands = await popPendingCommands(nowMs);
+      const simulationStartedAtMs = Date.now();
       const result = runSimulation(world, nowMs, commands, 1);
+      stageSimulationMs += Date.now() - simulationStartedAtMs;
 
+      const persistStartedAtMs = Date.now();
       await persistWorldState(result.world);
+      stagePersistMs += Date.now() - persistStartedAtMs;
 
       if (result.deltas.length > 0) {
+        const deltaBroadcastStartedAtMs = Date.now();
         await markTickPublish(result.world.meta.tickSeq);
         await broadcast(
           result.world.meta.worldVersion,
           result.world.meta.tickSeq,
           result.deltas
         );
+        stageBroadcastMs += Date.now() - deltaBroadcastStartedAtMs;
       }
 
       ticksProcessed += 1;
 
       const tickDurationMs = Date.now() - tickStartMs;
+      tickProfiles.push({
+        loadWorldMs: stageLoadWorldMs,
+        simulationMs: stageSimulationMs,
+        persistMs: stagePersistMs,
+        broadcastMs: stageBroadcastMs,
+        totalMs: tickDurationMs,
+      });
+      if (tickProfiles.length > 300) tickProfiles.shift();
       if (tickDurationMs >= SLOW_TICK_LOG_THRESHOLD_MS) {
         console.warn('Slow tick in leader loop', {
           tickDurationMs,
           tickSeq: result.world.meta.tickSeq,
           commandCount: commands.length,
           deltaCount: result.deltas.length,
+          simPerf: result.perf,
+          stageBreakdownMs: {
+            loadWorld: stageLoadWorldMs,
+            simulation: stageSimulationMs,
+            persist: stagePersistMs,
+            broadcast: stageBroadcastMs,
+          },
+        });
+      }
+      if (
+        ENABLE_SERVER_TICK_PROFILING &&
+        ticksProcessed % SERVER_TICK_PROFILE_LOG_EVERY_TICKS === 0
+      ) {
+        const totals = tickProfiles.map((entry) => entry.totalMs);
+        const p95 = percentile(totals, 0.95);
+        const avgTotal =
+          totals.reduce((sum, value) => sum + value, 0) /
+          Math.max(1, totals.length);
+        const avgLoadWorld =
+          tickProfiles.reduce((sum, value) => sum + value.loadWorldMs, 0) /
+          Math.max(1, tickProfiles.length);
+        const avgSimulation =
+          tickProfiles.reduce((sum, value) => sum + value.simulationMs, 0) /
+          Math.max(1, tickProfiles.length);
+        const avgPersist =
+          tickProfiles.reduce((sum, value) => sum + value.persistMs, 0) /
+          Math.max(1, tickProfiles.length);
+        const avgBroadcast =
+          tickProfiles.reduce((sum, value) => sum + value.broadcastMs, 0) /
+          Math.max(1, tickProfiles.length);
+        console.info('Leader tick profile', {
+          sampleSize: tickProfiles.length,
+          avgTotalMs: Number(avgTotal.toFixed(2)),
+          p95TotalMs: Number(p95.toFixed(2)),
+          targetP95Ms: SERVER_TICK_P95_TARGET_MS,
+          avgLoadWorldMs: Number(avgLoadWorld.toFixed(2)),
+          avgSimulationMs: Number(avgSimulation.toFixed(2)),
+          avgPersistMs: Number(avgPersist.toFixed(2)),
+          avgBroadcastMs: Number(avgBroadcast.toFixed(2)),
         });
       }
 
