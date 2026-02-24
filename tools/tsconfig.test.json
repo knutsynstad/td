@@ -5,6 +5,12 @@
     "noEmit": true,
     "customConditions": ["browser"]
   },
-  "include": ["src/client/**/*", "src/shared/**/*", "tests/**/*", "src/client/vite-env.d.ts"],
+  "include": [
+    "src/client/**/*",
+    "src/server/**/*",
+    "src/shared/**/*",
+    "tests/**/*",
+    "src/client/vite-env.d.ts"
+  ],
   "exclude": []
 }

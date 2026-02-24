@@ -1,1 +1,1 @@
-export * from './systems/motion'
+export * from './systems/motion';

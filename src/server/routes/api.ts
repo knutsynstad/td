@@ -1,4 +1,4 @@
-import { context, redis, reddit } from '@devvit/web/server';
+import { context } from '@devvit/web/server';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type {
@@ -16,12 +16,19 @@ import type {
   CastleCoinsBalanceResponse,
   CastleCoinsDepositResponse,
   CastleCoinsWithdrawResponse,
-  DecrementResponse,
-  IncrementResponse,
-  InitResponse
 } from '../../shared/api';
-import { applyCommand, getCoinBalance, heartbeatGame, joinGame, resyncGame } from '../game/service';
-import { depositCastleCoins, getCastleCoins, withdrawCastleCoins } from '../game/store';
+import {
+  applyCommand,
+  getCoinBalance,
+  heartbeatGame,
+  joinGame,
+  resyncGame,
+} from '../game/service';
+import {
+  depositCastleCoins,
+  getCastleCoins,
+  withdrawCastleCoins,
+} from '../game/store';
 
 type ErrorResponse = {
   status: 'error';
@@ -30,20 +37,21 @@ type ErrorResponse = {
 
 export const api = new Hono();
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-const requirePostId = (c: Context): string | Response => {
-  const { postId } = context;
-  if (!postId) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'postId is required' }, 400);
-  }
-  return postId;
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+const DEFAULT_GAME_ID = 'global';
+const requirePostId = (_c: Context): string | Response => {
+  return context.postId ?? DEFAULT_GAME_ID;
 };
 const requireObjectBody = async (
-  c: Context,
+  c: Context
 ): Promise<Record<string, unknown> | Response> => {
   const body = await c.req.json().catch(() => undefined);
   if (!isObject(body)) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'invalid request body' }, 400);
+    return c.json<ErrorResponse>(
+      { status: 'error', message: 'invalid request body' },
+      400
+    );
   }
   return body;
 };
@@ -52,61 +60,6 @@ const parsePositiveInt = (value: unknown): number => {
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.floor(numeric));
 };
-
-api.get('/init', async (c) => {
-  const { postId } = context;
-
-  if (!postId) {
-    console.error('API Init Error: postId not found in devvit context');
-    return c.json<ErrorResponse>(
-      {
-        status: 'error',
-        message: 'postId is required but missing from context',
-      },
-      400
-    );
-  }
-
-  try {
-    const [count, username] = await Promise.all([redis.get('count'), reddit.getCurrentUsername()]);
-
-    return c.json<InitResponse>({
-      type: 'init',
-      postId,
-      count: count ? parseInt(count, 10) : 0,
-      username: username ?? 'anonymous',
-    });
-  } catch (error) {
-    console.error(`API Init Error for post ${postId}:`, error);
-    const errorMessage =
-      error instanceof Error ? `Initialization failed: ${error.message}` : 'Unknown error during initialization';
-    return c.json<ErrorResponse>({ status: 'error', message: errorMessage }, 400);
-  }
-});
-
-api.post('/increment', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
-
-  const count = await redis.incrBy('count', 1);
-  return c.json<IncrementResponse>({
-    count,
-    postId,
-    type: 'increment',
-  });
-});
-
-api.post('/decrement', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
-
-  const count = await redis.incrBy('count', -1);
-  return c.json<DecrementResponse>({
-    count,
-    postId,
-    type: 'decrement',
-  });
-});
 
 api.post('/game/join', async (c) => {
   const postId = requirePostId(c);
@@ -123,7 +76,7 @@ api.post('/game/join', async (c) => {
         status: 'error',
         message: error instanceof Error ? error.message : 'failed to join game',
       },
-      400,
+      400
     );
   }
 });
@@ -134,7 +87,10 @@ api.post('/game/command', async (c) => {
 
   const body = await c.req.json().catch(() => undefined);
   if (!isCommandRequest(body)) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'invalid command payload' }, 400);
+    return c.json<ErrorResponse>(
+      { status: 'error', message: 'invalid command payload' },
+      400
+    );
   }
 
   const response = await applyCommand(postId, body.envelope);
@@ -158,10 +114,17 @@ api.post('/game/heartbeat', async (c) => {
   };
 
   if (!request.playerId) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'playerId is required' }, 400);
+    return c.json<ErrorResponse>(
+      { status: 'error', message: 'playerId is required' },
+      400
+    );
   }
 
-  const response = await heartbeatGame(postId, request.playerId, request.position);
+  const response = await heartbeatGame(
+    postId,
+    request.playerId,
+    request.position
+  );
   return c.json<HeartbeatResponse>(response);
 });
 
@@ -171,7 +134,7 @@ api.get('/game/coins', async (c) => {
   const coins = await getCoinBalance();
   return c.json<CoinBalanceResponse>({
     type: 'coinBalance',
-    coins
+    coins,
   });
 });
 
@@ -194,7 +157,7 @@ api.get('/castle/coins', async (c) => {
   return c.json<CastleCoinsBalanceResponse>({
     type: 'castleCoinsBalance',
     postId,
-    castleCoins
+    castleCoins,
   });
 });
 
@@ -206,17 +169,23 @@ api.post('/castle/coins/deposit', async (c) => {
   const body = bodyResult;
   const amount = parsePositiveInt(body.amount);
   if (amount <= 0) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'amount must be positive' }, 400);
+    return c.json<ErrorResponse>(
+      { status: 'error', message: 'amount must be positive' },
+      400
+    );
   }
   const result = await depositCastleCoins(amount, Date.now());
   if (!result.ok) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'insufficient coins' }, 400);
+    return c.json<ErrorResponse>(
+      { status: 'error', message: 'insufficient coins' },
+      400
+    );
   }
   return c.json<CastleCoinsDepositResponse>({
     type: 'castleCoinsDeposit',
     postId,
     deposited: result.deposited,
-    castleCoins: result.castleCoins
+    castleCoins: result.castleCoins,
   });
 });
 
@@ -228,13 +197,16 @@ api.post('/castle/coins/withdraw', async (c) => {
   const body = bodyResult;
   const requested = parsePositiveInt(body.amount);
   if (requested <= 0) {
-    return c.json<ErrorResponse>({ status: 'error', message: 'amount must be positive' }, 400);
+    return c.json<ErrorResponse>(
+      { status: 'error', message: 'amount must be positive' },
+      400
+    );
   }
   const result = await withdrawCastleCoins(requested, Date.now());
   return c.json<CastleCoinsWithdrawResponse>({
     type: 'castleCoinsWithdraw',
     postId,
     withdrawn: result.withdrawn,
-    castleCoins: result.castleCoins
+    castleCoins: result.castleCoins,
   });
 });

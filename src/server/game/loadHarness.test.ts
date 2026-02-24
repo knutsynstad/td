@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
-import type { WorldState } from "../../shared/game-state";
-import { runLoadHarness } from "./loadHarness";
+import { describe, expect, it } from 'vitest';
+import type { WorldState } from '../../shared/game-state';
+import { runLoadHarness } from './loadHarness';
 
 const baseWorld = (): WorldState => ({
   meta: {
-    postId: "t3_test",
+    postId: 't3_test',
     tickSeq: 0,
     worldVersion: 0,
     lastTickMs: Date.now(),
@@ -24,8 +24,8 @@ const baseWorld = (): WorldState => ({
   },
 });
 
-describe("runLoadHarness", () => {
-  it("simulates 500 players with bounded output", () => {
+describe('runLoadHarness', () => {
+  it('simulates 500 players with bounded output', () => {
     const result = runLoadHarness(baseWorld(), 500, 50);
     expect(result.players).toBe(500);
     expect(result.finalTickSeq).toBeGreaterThan(0);

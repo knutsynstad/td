@@ -1,43 +1,43 @@
-import { defineConfig } from "eslint/config";
-import globals from "globals";
-import js from "@eslint/js";
-import tseslint from "typescript-eslint";
+import { defineConfig } from 'eslint/config';
+import globals from 'globals';
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
 
 export default defineConfig([
   tseslint.configs.recommended,
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["src/server/**/*.{ts,tsx,mjs,cjs,js}"],
+    files: ['src/server/**/*.{ts,tsx,mjs,cjs,js}'],
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.node,
       parserOptions: {
-        project: ["./tools/tsconfig.server.json"],
+        project: ['./src/server/tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
   },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["src/shared/**/*.{ts,tsx,mjs,cjs,js}"],
+    files: ['src/shared/**/*.{ts,tsx,mjs,cjs,js}'],
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.browser,
       parserOptions: {
-        project: ["./tools/tsconfig.shared.json"],
+        project: ['./src/shared/tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
   },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["src/client/**/*.{ts,tsx}"],
-    ignores: ["src/server/**/*.{ts,tsx}"],
+    files: ['src/client/**/*.{ts,tsx}'],
+    ignores: ['src/server/**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.browser,
       parserOptions: {
-        project: ["./tools/tsconfig.client.json"],
+        project: ['./src/client/tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -45,19 +45,19 @@ export default defineConfig([
     rules: {},
   },
   {
-    files: ["**/*.{js,mjs,cjs,ts,tsx}"],
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     rules: {
-      "@typescript-eslint/no-floating-promises": "error",
-      "@typescript-eslint/no-unused-vars": ["off"],
-      "no-unused-vars": ["off"],
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-unused-vars': ['off'],
+      'no-unused-vars': ['off'],
     },
     ignores: [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/build/**",
-      "eslint.config.js",
-      "**/vite.config.ts",
-      "devvit.config.ts",
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/build/**',
+      'eslint.config.js',
+      '**/vite.config.ts',
+      'devvit.config.ts',
     ],
     languageOptions: {
       parserOptions: {
@@ -65,6 +65,6 @@ export default defineConfig([
       },
     },
     plugins: { js },
-    extends: ["js/recommended"],
+    extends: ['js/recommended'],
   },
 ]);

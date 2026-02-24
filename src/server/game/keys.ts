@@ -9,6 +9,10 @@ export type GameRedisKeys = {
   seen: string;
   rate: string;
   snaps: string;
+  tickLease: string;
+  tickLeaseToken: string;
+  lastTickRunMs: string;
+  lastPublishTickSeq: string;
 };
 
 export type EconomyRedisKeys = {
@@ -16,12 +20,16 @@ export type EconomyRedisKeys = {
   castle: string;
 };
 
-const sanitizeChannelId = (value: string): string => value.replace(/[^A-Za-z0-9_]/g, "_");
+const sanitizeChannelId = (value: string): string =>
+  value.replace(/[^A-Za-z0-9_]/g, '_');
 
-export const getGameChannelName = (postId: string): string => `game_${sanitizeChannelId(postId)}`;
+const GLOBAL_GAME_ID = 'global';
 
-export const getGameRedisKeys = (postId: string): GameRedisKeys => {
-  const prefix = `g:${postId}`;
+export const getGameChannelName = (_postId: string): string =>
+  `game_${sanitizeChannelId(GLOBAL_GAME_ID)}`;
+
+export const getGameRedisKeys = (_postId: string): GameRedisKeys => {
+  const prefix = `g:${GLOBAL_GAME_ID}`;
   return {
     meta: `${prefix}:m`,
     players: `${prefix}:p`,
@@ -33,10 +41,14 @@ export const getGameRedisKeys = (postId: string): GameRedisKeys => {
     seen: `${prefix}:ls`,
     rate: `${prefix}:rl`,
     snaps: `${prefix}:sn`,
+    tickLease: `${prefix}:tl`,
+    tickLeaseToken: `${prefix}:tlt`,
+    lastTickRunMs: `${prefix}:ltr`,
+    lastPublishTickSeq: `${prefix}:lpt`,
   };
 };
 
 export const getEconomyRedisKeys = (): EconomyRedisKeys => ({
-  coins: "g:c",
-  castle: "g:cs",
+  coins: 'g:c',
+  castle: 'g:cs',
 });

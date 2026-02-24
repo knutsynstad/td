@@ -1,6 +1,15 @@
-import { redis } from "@devvit/web/server";
-import type { CommandEnvelope } from "../../shared/game-protocol";
-import { DEFAULT_PLAYER_SPAWN, type MobState, type PlayerIntent, type PlayerState, type StructureState, type WaveState, type WorldMeta, type WorldState } from "../../shared/game-state";
+import { redis } from '@devvit/web/server';
+import type { CommandEnvelope } from '../../shared/game-protocol';
+import {
+  DEFAULT_PLAYER_SPAWN,
+  type MobState,
+  type PlayerIntent,
+  type PlayerState,
+  type StructureState,
+  type WaveState,
+  type WorldMeta,
+  type WorldState,
+} from '../../shared/game-state';
 import {
   ENERGY_CAP,
   ENERGY_REGEN_PER_SECOND,
@@ -10,8 +19,8 @@ import {
   MAX_STRUCTURES,
   PLAYER_SPEED_UNITS_PER_SECOND,
   RATE_REFILL_PER_SECOND,
-} from "./config";
-import { getEconomyRedisKeys, getGameRedisKeys } from "./keys";
+} from './config';
+import { getEconomyRedisKeys, getGameRedisKeys } from './keys';
 
 type RateLimitState = {
   tokens: number;
@@ -21,6 +30,17 @@ type RateLimitState = {
 type GlobalCoinState = {
   coins: number;
   lastAccruedMs: number;
+};
+
+type TickLeaseState = {
+  ownerId: string;
+  token: number;
+  expiresAtMs: number;
+};
+
+export type TickHealthState = {
+  lastTickRunMs: number;
+  lastPublishTickSeq: number;
 };
 
 const toJson = (value: unknown): string => JSON.stringify(value);
@@ -35,11 +55,26 @@ const parseJson = (value: string | undefined): unknown => {
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+  typeof value === 'object' && value !== null;
 
-const clampCoins = (coins: number): number => Math.max(0, Math.min(ENERGY_CAP, coins));
+const clampCoins = (coins: number): number =>
+  Math.max(0, Math.min(ENERGY_CAP, coins));
 const MAX_TX_RETRIES = 5;
 const economyKeys = getEconomyRedisKeys();
+
+const parseTickLeaseState = (
+  raw: string | undefined
+): TickLeaseState | undefined => {
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed)) return undefined;
+  const ownerId = String(parsed.ownerId ?? '');
+  const token = Number(parsed.token ?? 0);
+  const expiresAtMs = Number(parsed.expiresAtMs ?? 0);
+  if (!ownerId || !Number.isFinite(token) || !Number.isFinite(expiresAtMs)) {
+    return undefined;
+  }
+  return { ownerId, token, expiresAtMs };
+};
 
 const parseVec2 = (value: unknown) => {
   if (!isRecord(value)) return { x: 0, z: 0 };
@@ -52,8 +87,8 @@ const parseVec2 = (value: unknown) => {
 const parsePlayerState = (value: unknown): PlayerState => {
   if (!isRecord(value)) {
     return {
-      playerId: "",
-      username: "anonymous",
+      playerId: '',
+      username: 'anonymous',
       position: { x: 0, z: 0 },
       velocity: { x: 0, z: 0 },
       speed: PLAYER_SPEED_UNITS_PER_SECOND,
@@ -61,8 +96,8 @@ const parsePlayerState = (value: unknown): PlayerState => {
     };
   }
   return {
-    playerId: String(value.playerId ?? ""),
-    username: String(value.username ?? "anonymous"),
+    playerId: String(value.playerId ?? ''),
+    username: String(value.username ?? 'anonymous'),
     position: parseVec2(value.position),
     velocity: parseVec2(value.velocity),
     speed: Number(value.speed ?? PLAYER_SPEED_UNITS_PER_SECOND),
@@ -85,9 +120,9 @@ const parseIntent = (value: unknown): PlayerIntent => {
 const parseStructure = (value: unknown): StructureState => {
   if (!isRecord(value)) {
     return {
-      structureId: "",
-      ownerId: "",
-      type: "wall",
+      structureId: '',
+      ownerId: '',
+      type: 'wall',
       center: { x: 0, z: 0 },
       hp: 1,
       maxHp: 1,
@@ -95,9 +130,15 @@ const parseStructure = (value: unknown): StructureState => {
     };
   }
   return {
-    structureId: String(value.structureId ?? ""),
-    ownerId: String(value.ownerId ?? ""),
-    type: value.type === "tower" || value.type === "tree" || value.type === "rock" || value.type === "bank" ? value.type : "wall",
+    structureId: String(value.structureId ?? ''),
+    ownerId: String(value.ownerId ?? ''),
+    type:
+      value.type === 'tower' ||
+      value.type === 'tree' ||
+      value.type === 'rock' ||
+      value.type === 'bank'
+        ? value.type
+        : 'wall',
     center: parseVec2(value.center),
     hp: Number(value.hp ?? 1),
     maxHp: Number(value.maxHp ?? 1),
@@ -108,27 +149,27 @@ const parseStructure = (value: unknown): StructureState => {
 const parseMob = (value: unknown): MobState => {
   if (!isRecord(value)) {
     return {
-      mobId: "",
+      mobId: '',
       position: { x: 0, z: 0 },
       velocity: { x: 0, z: 0 },
       hp: 1,
       maxHp: 1,
-      spawnerId: "",
+      spawnerId: '',
     };
   }
   return {
-    mobId: String(value.mobId ?? ""),
+    mobId: String(value.mobId ?? ''),
     position: parseVec2(value.position),
     velocity: parseVec2(value.velocity),
     hp: Number(value.hp ?? 1),
     maxHp: Number(value.maxHp ?? 1),
-    spawnerId: String(value.spawnerId ?? ""),
+    spawnerId: String(value.spawnerId ?? ''),
   };
 };
 
 const parseMapFromHash = <T>(
   value: Record<string, string> | undefined,
-  parser: (entry: unknown) => T,
+  parser: (entry: unknown) => T
 ): Record<string, T> => {
   const out: Record<string, T> = {};
   if (!value) return out;
@@ -143,69 +184,73 @@ const parseCommandEnvelope = (value: unknown): CommandEnvelope | undefined => {
   const seq = Number(value.seq ?? -1);
   const sentAtMs = Number(value.sentAtMs ?? 0);
   if (!isRecord(value.command)) return undefined;
-  const commandType = String(value.command.type ?? "");
-  const playerId = String(value.command.playerId ?? "");
-  if (commandType === "moveIntent") {
+  const commandType = String(value.command.type ?? '');
+  const playerId = String(value.command.playerId ?? '');
+  if (commandType === 'moveIntent') {
     return {
       seq,
       sentAtMs,
       command: {
-        type: "moveIntent",
+        type: 'moveIntent',
         playerId,
         intent: parseIntent(value.command.intent),
-        clientPosition: value.command.clientPosition ? parseVec2(value.command.clientPosition) : undefined,
+        clientPosition: value.command.clientPosition
+          ? parseVec2(value.command.clientPosition)
+          : undefined,
       },
     };
   }
-  if (commandType === "buildStructure") {
-    const structure = isRecord(value.command.structure) ? value.command.structure : {};
+  if (commandType === 'buildStructure') {
+    const structure = isRecord(value.command.structure)
+      ? value.command.structure
+      : {};
     return {
       seq,
       sentAtMs,
       command: {
-        type: "buildStructure",
+        type: 'buildStructure',
         playerId,
         structure: {
-          structureId: String(structure.structureId ?? ""),
+          structureId: String(structure.structureId ?? ''),
           type:
-            structure.type === "tower" ||
-            structure.type === "tree" ||
-            structure.type === "rock" ||
-            structure.type === "bank"
+            structure.type === 'tower' ||
+            structure.type === 'tree' ||
+            structure.type === 'rock' ||
+            structure.type === 'bank'
               ? structure.type
-              : "wall",
+              : 'wall',
           center: parseVec2(structure.center),
         },
       },
     };
   }
-  if (commandType === "removeStructure") {
+  if (commandType === 'removeStructure') {
     return {
       seq,
       sentAtMs,
       command: {
-        type: "removeStructure",
+        type: 'removeStructure',
         playerId,
-        structureId: String(value.command.structureId ?? ""),
+        structureId: String(value.command.structureId ?? ''),
       },
     };
   }
-  if (commandType === "startWave") {
+  if (commandType === 'startWave') {
     return {
       seq,
       sentAtMs,
       command: {
-        type: "startWave",
+        type: 'startWave',
         playerId,
       },
     };
   }
-  if (commandType === "shoot") {
+  if (commandType === 'shoot') {
     return {
       seq,
       sentAtMs,
       command: {
-        type: "shoot",
+        type: 'shoot',
         playerId,
         target: parseVec2(value.command.target),
       },
@@ -223,29 +268,36 @@ const defaultWave = (): WaveState => ({
 
 export const loadWorldState = async (postId: string): Promise<WorldState> => {
   const keys = getGameRedisKeys(postId);
-  const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] = await Promise.all([
-    redis.hGetAll(keys.meta),
-    redis.hGetAll(keys.players),
-    redis.hGetAll(keys.intents),
-    redis.hGetAll(keys.structures),
-    redis.hGetAll(keys.mobs),
-    redis.get(keys.wave),
-  ]);
+  const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
+    await Promise.all([
+      redis.hGetAll(keys.meta),
+      redis.hGetAll(keys.players),
+      redis.hGetAll(keys.intents),
+      redis.hGetAll(keys.structures),
+      redis.hGetAll(keys.mobs),
+      redis.get(keys.wave),
+    ]);
 
   const now = Date.now();
   const meta: WorldMeta = {
     postId,
-    tickSeq: Number(metaRaw?.tickSeq ?? "0"),
-    worldVersion: Number(metaRaw?.worldVersion ?? "0"),
+    tickSeq: Number(metaRaw?.tickSeq ?? '0'),
+    worldVersion: Number(metaRaw?.worldVersion ?? '0'),
     lastTickMs: Number(metaRaw?.lastTickMs ?? String(now)),
     seed: Number(metaRaw?.seed ?? String(now)),
-    energy: Math.max(0, Math.min(ENERGY_CAP, Number(metaRaw?.energy ?? String(ENERGY_CAP)))),
-    lives: Number(metaRaw?.lives ?? "1"),
+    energy: Math.max(
+      0,
+      Math.min(ENERGY_CAP, Number(metaRaw?.energy ?? String(ENERGY_CAP)))
+    ),
+    lives: Number(metaRaw?.lives ?? '1'),
   };
 
   const players = parseMapFromHash<PlayerState>(playersRaw, parsePlayerState);
   const intents = parseMapFromHash<PlayerIntent>(intentsRaw, parseIntent);
-  const structures = parseMapFromHash<StructureState>(structuresRaw, parseStructure);
+  const structures = parseMapFromHash<StructureState>(
+    structuresRaw,
+    parseStructure
+  );
   const mobs = parseMapFromHash<MobState>(mobsRaw, parseMob);
   const parsedWave = parseJson(waveRaw ?? undefined);
   const wave = isRecord(parsedWave)
@@ -257,7 +309,7 @@ export const loadWorldState = async (postId: string): Promise<WorldState> => {
           ? parsedWave.spawners.map((entry) => {
               if (!isRecord(entry)) {
                 return {
-                  spawnerId: "",
+                  spawnerId: '',
                   totalCount: 0,
                   spawnedCount: 0,
                   aliveCount: 0,
@@ -267,7 +319,7 @@ export const loadWorldState = async (postId: string): Promise<WorldState> => {
                 };
               }
               return {
-                spawnerId: String(entry.spawnerId ?? ""),
+                spawnerId: String(entry.spawnerId ?? ''),
                 totalCount: Number(entry.totalCount ?? 0),
                 spawnedCount: Number(entry.spawnedCount ?? 0),
                 aliveCount: Number(entry.aliveCount ?? 0),
@@ -324,18 +376,32 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
   ]);
 
   await Promise.all([
-    Object.keys(playersWrites).length > 0 ? redis.hSet(keys.players, playersWrites) : Promise.resolve(),
-    Object.keys(intentsWrites).length > 0 ? redis.hSet(keys.intents, intentsWrites) : Promise.resolve(),
-    Object.keys(structureWrites).length > 0 ? redis.hSet(keys.structures, structureWrites) : Promise.resolve(),
-    Object.keys(mobWrites).length > 0 ? redis.hSet(keys.mobs, mobWrites) : Promise.resolve(),
+    Object.keys(playersWrites).length > 0
+      ? redis.hSet(keys.players, playersWrites)
+      : Promise.resolve(),
+    Object.keys(intentsWrites).length > 0
+      ? redis.hSet(keys.intents, intentsWrites)
+      : Promise.resolve(),
+    Object.keys(structureWrites).length > 0
+      ? redis.hSet(keys.structures, structureWrites)
+      : Promise.resolve(),
+    Object.keys(mobWrites).length > 0
+      ? redis.hSet(keys.mobs, mobWrites)
+      : Promise.resolve(),
   ]);
 };
 
-export const touchPlayerPresence = async (postId: string, player: PlayerState): Promise<void> => {
+export const touchPlayerPresence = async (
+  postId: string,
+  player: PlayerState
+): Promise<void> => {
   const keys = getGameRedisKeys(postId);
   await Promise.all([
     redis.hSet(keys.players, { [player.playerId]: toJson(player) }),
-    redis.zAdd(keys.seen, { member: player.playerId, score: player.lastSeenMs }),
+    redis.zAdd(keys.seen, {
+      member: player.playerId,
+      score: player.lastSeenMs,
+    }),
   ]);
 };
 
@@ -356,7 +422,10 @@ export const getCoins = async (nowMs: number): Promise<number> => {
   return clampCoins(current.coins + regenerated);
 };
 
-const parseGlobalCoinState = (raw: string | undefined, nowMs: number): GlobalCoinState => {
+const parseGlobalCoinState = (
+  raw: string | undefined,
+  nowMs: number
+): GlobalCoinState => {
   const parsed = parseJson(raw ?? undefined);
   if (!isRecord(parsed)) {
     return {
@@ -384,12 +453,15 @@ const parseCastleCoins = (raw: string | undefined): number => {
 
 export const spendCoins = async (
   amount: number,
-  nowMs: number,
+  nowMs: number
 ): Promise<{ ok: boolean; coins: number }> => {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(economyKeys.coins);
-    const current = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
+    const current = parseGlobalCoinState(
+      await redis.get(economyKeys.coins),
+      nowMs
+    );
     const accrued = accrueCoins(current, nowMs);
     if (accrued < safeAmount) {
       await tx.unwatch();
@@ -397,7 +469,10 @@ export const spendCoins = async (
     }
     const nextCoins = clampCoins(accrued - safeAmount);
     await tx.multi();
-    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(
+      economyKeys.coins,
+      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+    );
     const result = await tx.exec();
     if (result !== null) {
       return { ok: true, coins: nextCoins };
@@ -409,17 +484,23 @@ export const spendCoins = async (
 
 export const addCoins = async (
   amount: number,
-  nowMs: number,
+  nowMs: number
 ): Promise<{ added: number; coins: number }> => {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(economyKeys.coins);
-    const current = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
+    const current = parseGlobalCoinState(
+      await redis.get(economyKeys.coins),
+      nowMs
+    );
     const accrued = accrueCoins(current, nowMs);
     const nextCoins = clampCoins(accrued + safeAmount);
     const added = Math.max(0, nextCoins - accrued);
     await tx.multi();
-    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(
+      economyKeys.coins,
+      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+    );
     const result = await tx.exec();
     if (result !== null) {
       return { added, coins: nextCoins };
@@ -433,15 +514,28 @@ export const getCastleCoins = async (): Promise<number> =>
 
 export const depositCastleCoins = async (
   amount: number,
-  nowMs: number,
-): Promise<{ ok: boolean; deposited: number; coins: number; castleCoins: number }> => {
+  nowMs: number
+): Promise<{
+  ok: boolean;
+  deposited: number;
+  coins: number;
+  castleCoins: number;
+}> => {
   const safeAmount = Math.max(0, Math.floor(amount));
   if (safeAmount <= 0) {
-    return { ok: false, deposited: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
+    return {
+      ok: false,
+      deposited: 0,
+      coins: await getCoins(nowMs),
+      castleCoins: await getCastleCoins(),
+    };
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(economyKeys.coins, economyKeys.castle);
-    const coinState = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
+    const coinState = parseGlobalCoinState(
+      await redis.get(economyKeys.coins),
+      nowMs
+    );
     const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
     const accrued = accrueCoins(coinState, nowMs);
     if (accrued < safeAmount) {
@@ -451,48 +545,79 @@ export const depositCastleCoins = async (
     const nextCoins = clampCoins(accrued - safeAmount);
     const nextCastleCoins = castleCoins + safeAmount;
     await tx.multi();
-    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(
+      economyKeys.coins,
+      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+    );
     await tx.set(economyKeys.castle, String(nextCastleCoins));
     const result = await tx.exec();
     if (result !== null) {
-      return { ok: true, deposited: safeAmount, coins: nextCoins, castleCoins: nextCastleCoins };
+      return {
+        ok: true,
+        deposited: safeAmount,
+        coins: nextCoins,
+        castleCoins: nextCastleCoins,
+      };
     }
   }
-  return { ok: false, deposited: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
+  return {
+    ok: false,
+    deposited: 0,
+    coins: await getCoins(nowMs),
+    castleCoins: await getCastleCoins(),
+  };
 };
 
 export const withdrawCastleCoins = async (
   requested: number,
-  nowMs: number,
+  nowMs: number
 ): Promise<{ withdrawn: number; coins: number; castleCoins: number }> => {
   const safeRequested = Math.max(0, Math.floor(requested));
   if (safeRequested <= 0) {
-    return { withdrawn: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
+    return {
+      withdrawn: 0,
+      coins: await getCoins(nowMs),
+      castleCoins: await getCastleCoins(),
+    };
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(economyKeys.coins, economyKeys.castle);
-    const coinState = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
+    const coinState = parseGlobalCoinState(
+      await redis.get(economyKeys.coins),
+      nowMs
+    );
     const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
     const accrued = accrueCoins(coinState, nowMs);
     const maxAddable = Math.max(0, ENERGY_CAP - accrued);
-    const withdrawn = Math.min(safeRequested, castleCoins, Math.floor(maxAddable));
+    const withdrawn = Math.min(
+      safeRequested,
+      castleCoins,
+      Math.floor(maxAddable)
+    );
     const nextCoins = clampCoins(accrued + withdrawn);
     const nextCastleCoins = Math.max(0, castleCoins - withdrawn);
     await tx.multi();
-    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(
+      economyKeys.coins,
+      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+    );
     await tx.set(economyKeys.castle, String(nextCastleCoins));
     const result = await tx.exec();
     if (result !== null) {
       return { withdrawn, coins: nextCoins, castleCoins: nextCastleCoins };
     }
   }
-  return { withdrawn: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
+  return {
+    withdrawn: 0,
+    coins: await getCoins(nowMs),
+    castleCoins: await getCastleCoins(),
+  };
 };
 
 export const enqueueCommand = async (
   postId: string,
   nowMs: number,
-  envelope: CommandEnvelope,
+  envelope: CommandEnvelope
 ): Promise<{ accepted: boolean; reason?: string }> => {
   const keys = getGameRedisKeys(postId);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
@@ -500,7 +625,7 @@ export const enqueueCommand = async (
     const queueSize = await redis.zCard(keys.queue);
     if (queueSize >= MAX_QUEUE_COMMANDS) {
       await tx.unwatch();
-      return { accepted: false, reason: "command queue is full" };
+      return { accepted: false, reason: 'command queue is full' };
     }
     await tx.multi();
     await tx.zAdd(keys.queue, {
@@ -512,15 +637,18 @@ export const enqueueCommand = async (
       return { accepted: true };
     }
   }
-  return { accepted: false, reason: "queue contention" };
+  return { accepted: false, reason: 'queue contention' };
 };
 
-export const popPendingCommands = async (postId: string, upToMs: number): Promise<CommandEnvelope[]> => {
+export const popPendingCommands = async (
+  postId: string,
+  upToMs: number
+): Promise<CommandEnvelope[]> => {
   const keys = getGameRedisKeys(postId);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.queue);
     const items = await redis.zRange(keys.queue, 0, upToMs, {
-      by: "score",
+      by: 'score',
       limit: { offset: 0, count: MAX_COMMANDS_PER_BATCH },
     });
     if (items.length === 0) {
@@ -562,7 +690,11 @@ export const trimCommandQueue = async (postId: string): Promise<void> => {
   await redis.zRemRangeByRank(keys.queue, 0, overflow - 1);
 };
 
-export const consumeRateLimitToken = async (postId: string, playerId: string, nowMs: number): Promise<boolean> => {
+export const consumeRateLimitToken = async (
+  postId: string,
+  playerId: string,
+  nowMs: number
+): Promise<boolean> => {
   const keys = getGameRedisKeys(postId);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.rate);
@@ -599,7 +731,10 @@ export const consumeRateLimitToken = async (postId: string, playerId: string, no
   return false;
 };
 
-export const removePlayers = async (postId: string, playerIds: string[]): Promise<void> => {
+export const removePlayers = async (
+  postId: string,
+  playerIds: string[]
+): Promise<void> => {
   if (playerIds.length === 0) return;
   const keys = getGameRedisKeys(postId);
   await Promise.all([
@@ -609,10 +744,114 @@ export const removePlayers = async (postId: string, playerIds: string[]): Promis
   ]);
 };
 
-export const removeOldPlayersByLastSeen = async (postId: string, cutoffMs: number, limit = 250): Promise<string[]> => {
+export const acquireTickLease = async (
+  postId: string,
+  ownerId: string,
+  nowMs: number,
+  leaseMs: number
+): Promise<{ ownerId: string; token: number; expiresAtMs: number } | null> => {
+  const keys = getGameRedisKeys(postId);
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(keys.tickLease, keys.tickLeaseToken);
+    const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
+    if (
+      currentLease &&
+      currentLease.expiresAtMs > nowMs &&
+      currentLease.ownerId !== ownerId
+    ) {
+      await tx.unwatch();
+      return null;
+    }
+    const currentToken = Number((await redis.get(keys.tickLeaseToken)) ?? '0');
+    const nextToken = Number.isFinite(currentToken) ? currentToken + 1 : 1;
+    const nextLease: TickLeaseState = {
+      ownerId,
+      token: nextToken,
+      expiresAtMs: nowMs + Math.max(1, leaseMs),
+    };
+    await tx.multi();
+    await tx.set(keys.tickLeaseToken, String(nextToken));
+    await tx.set(keys.tickLease, toJson(nextLease));
+    const result = await tx.exec();
+    if (result !== null) {
+      return nextLease;
+    }
+  }
+  return null;
+};
+
+export const releaseTickLease = async (
+  postId: string,
+  ownerId: string,
+  token: number
+): Promise<boolean> => {
+  const keys = getGameRedisKeys(postId);
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(keys.tickLease);
+    const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
+    if (!currentLease) {
+      await tx.unwatch();
+      return true;
+    }
+    if (currentLease.ownerId !== ownerId || currentLease.token !== token) {
+      await tx.unwatch();
+      return false;
+    }
+    await tx.multi();
+    await tx.del(keys.tickLease);
+    const result = await tx.exec();
+    if (result !== null) {
+      return true;
+    }
+  }
+  return false;
+};
+
+export const markTickRun = async (
+  postId: string,
+  nowMs: number
+): Promise<void> => {
+  const keys = getGameRedisKeys(postId);
+  await redis.set(keys.lastTickRunMs, String(nowMs));
+};
+
+export const markTickPublish = async (
+  postId: string,
+  tickSeq: number
+): Promise<void> => {
+  const keys = getGameRedisKeys(postId);
+  await redis.set(
+    keys.lastPublishTickSeq,
+    String(Math.max(0, Math.floor(tickSeq)))
+  );
+};
+
+export const getTickHealth = async (
+  postId: string
+): Promise<TickHealthState> => {
+  const keys = getGameRedisKeys(postId);
+  const [lastTickRunRaw, lastPublishRaw] = await Promise.all([
+    redis.get(keys.lastTickRunMs),
+    redis.get(keys.lastPublishTickSeq),
+  ]);
+  const lastTickRunMs = Number(lastTickRunRaw ?? '0');
+  const lastPublishTickSeq = Number(lastPublishRaw ?? '0');
+  return {
+    lastTickRunMs: Number.isFinite(lastTickRunMs) ? lastTickRunMs : 0,
+    lastPublishTickSeq: Number.isFinite(lastPublishTickSeq)
+      ? lastPublishTickSeq
+      : 0,
+  };
+};
+
+export const removeOldPlayersByLastSeen = async (
+  postId: string,
+  cutoffMs: number,
+  limit = 250
+): Promise<string[]> => {
   const keys = getGameRedisKeys(postId);
   const stale = await redis.zRange(keys.seen, 0, cutoffMs, {
-    by: "score",
+    by: 'score',
     limit: { offset: 0, count: limit },
   });
   if (stale.length === 0) return [];
@@ -627,7 +866,11 @@ export const enforceStructureCap = async (postId: string): Promise<boolean> => {
   return count < MAX_STRUCTURES;
 };
 
-export const createDefaultPlayer = (playerId: string, username: string, nowMs: number): PlayerState => ({
+export const createDefaultPlayer = (
+  playerId: string,
+  username: string,
+  nowMs: number
+): PlayerState => ({
   playerId,
   username,
   position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },

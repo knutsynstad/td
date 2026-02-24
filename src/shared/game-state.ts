@@ -20,7 +20,7 @@ export type PlayerState = {
   lastSeenMs: number;
 };
 
-export type StructureType = "wall" | "tower" | "tree" | "rock" | "bank";
+export type StructureType = 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
 
 export type StructureState = {
   structureId: string;

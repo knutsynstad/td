@@ -1,6 +1,18 @@
-import type { CommandEnvelope, EntityDelta, GameDelta, StructureDelta, WaveDelta } from "../../shared/game-protocol";
-import type { MobState, StructureState, WorldState } from "../../shared/game-state";
+import type {
+  CommandEnvelope,
+  EntityDelta,
+  GameDelta,
+  StructureDelta,
+  WaveDelta,
+} from '../../shared/game-protocol';
+import type {
+  MobState,
+  StructureState,
+  WorldState,
+} from '../../shared/game-state';
 import {
+  AUTO_WAVE_INITIAL_DELAY_MS,
+  AUTO_WAVE_INTERMISSION_MS,
   MAX_DELTA_MOBS,
   MAX_DELTA_PLAYERS,
   MAX_MOBS,
@@ -9,10 +21,12 @@ import {
   MOB_SPEED_UNITS_PER_SECOND,
   SIM_TICK_MS,
   WAVE_SPAWN_BASE,
-} from "./config";
+} from './config';
 
-const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
-const distance = (ax: number, az: number, bx: number, bz: number): number => Math.hypot(bx - ax, bz - az);
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
+const distance = (ax: number, az: number, bx: number, bz: number): number =>
+  Math.hypot(bx - ax, bz - az);
 
 const normalize = (x: number, z: number): { x: number; z: number } => {
   const len = Math.hypot(x, z);
@@ -29,11 +43,49 @@ const makeMob = (tickSeq: number, spawnerId: string): MobState => ({
   spawnerId,
 });
 
-const updateMobs = (world: WorldState, deltaSeconds: number): { upserts: MobState[]; despawnedIds: string[] } => {
+const activateWave = (world: WorldState): boolean => {
+  if (world.wave.active) return false;
+  world.wave.wave += 1;
+  world.wave.active = true;
+  world.wave.spawners = [
+    {
+      spawnerId: `wave-${world.wave.wave}-east`,
+      totalCount: (5 + world.wave.wave * 2) * 8,
+      spawnedCount: 0,
+      aliveCount: 0,
+      spawnRatePerSecond: WAVE_SPAWN_BASE + world.wave.wave * 0.2,
+      spawnAccumulator: 0,
+      gateOpen: false,
+    },
+  ];
+  world.wave.nextWaveAtMs = 0;
+  return true;
+};
+
+const ensureInitialWaveSchedule = (world: WorldState): boolean => {
+  if (world.wave.wave > 0 || world.wave.active || world.wave.nextWaveAtMs > 0) {
+    return false;
+  }
+  world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INITIAL_DELAY_MS;
+  return true;
+};
+
+const maybeActivateScheduledWave = (world: WorldState): boolean => {
+  if (world.wave.active || world.wave.nextWaveAtMs <= 0) return false;
+  if (world.meta.lastTickMs < world.wave.nextWaveAtMs) return false;
+  return activateWave(world);
+};
+
+const updateMobs = (
+  world: WorldState,
+  deltaSeconds: number
+): { upserts: MobState[]; despawnedIds: string[] } => {
   const upserts: MobState[] = [];
   const despawnedIds: string[] = [];
 
-  const towerList = Object.values(world.structures).filter((structure) => structure.type === "tower");
+  const towerList = Object.values(world.structures).filter(
+    (structure) => structure.type === 'tower'
+  );
   for (const mob of Object.values(world.mobs)) {
     const toCenter = normalize(-mob.position.x, -mob.position.z);
     mob.velocity.x = toCenter.x * MOB_SPEED_UNITS_PER_SECOND;
@@ -42,7 +94,14 @@ const updateMobs = (world: WorldState, deltaSeconds: number): { upserts: MobStat
     mob.position.z += mob.velocity.z * deltaSeconds;
 
     for (const tower of towerList) {
-      if (distance(tower.center.x, tower.center.z, mob.position.x, mob.position.z) < 12) {
+      if (
+        distance(
+          tower.center.x,
+          tower.center.z,
+          mob.position.x,
+          mob.position.z
+        ) < 12
+      ) {
         mob.hp -= 12;
       }
     }
@@ -58,15 +117,22 @@ const updateMobs = (world: WorldState, deltaSeconds: number): { upserts: MobStat
 };
 
 const updateWave = (world: WorldState, deltaSeconds: number): boolean => {
-  if (!world.wave.active) return false;
   let changed = false;
+  if (maybeActivateScheduledWave(world)) {
+    changed = true;
+  }
+  if (!world.wave.active) return false;
   for (const spawner of world.wave.spawners) {
     if (!spawner.gateOpen) spawner.gateOpen = true;
     spawner.spawnAccumulator += spawner.spawnRatePerSecond * deltaSeconds;
     const toSpawn = Math.floor(spawner.spawnAccumulator);
     if (toSpawn <= 0) continue;
     const roomLeft = Math.max(0, MAX_MOBS - Object.keys(world.mobs).length);
-    const spawnCount = Math.min(roomLeft, toSpawn, spawner.totalCount - spawner.spawnedCount);
+    const spawnCount = Math.min(
+      roomLeft,
+      toSpawn,
+      spawner.totalCount - spawner.spawnedCount
+    );
     for (let i = 0; i < spawnCount; i += 1) {
       const mob = makeMob(world.meta.tickSeq, spawner.spawnerId);
       world.mobs[mob.mobId] = mob;
@@ -77,11 +143,13 @@ const updateWave = (world: WorldState, deltaSeconds: number): boolean => {
     }
   }
 
-  const allSpawned = world.wave.spawners.every((spawner) => spawner.spawnedCount >= spawner.totalCount);
+  const allSpawned = world.wave.spawners.every(
+    (spawner) => spawner.spawnedCount >= spawner.totalCount
+  );
   const aliveMobs = Object.keys(world.mobs).length;
   if (allSpawned && aliveMobs === 0) {
     world.wave.active = false;
-    world.wave.nextWaveAtMs = world.meta.lastTickMs + 10_000;
+    world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INTERMISSION_MS;
     changed = true;
   }
   return changed;
@@ -91,18 +159,22 @@ type CommandApplyResult = {
   structureUpserts: StructureState[];
   structureRemoves: string[];
   waveChanged: boolean;
-  movedPlayers: EntityDelta["players"];
+  movedPlayers: EntityDelta['players'];
 };
 
-const applyCommands = (world: WorldState, commands: CommandEnvelope[], nowMs: number): CommandApplyResult => {
+const applyCommands = (
+  world: WorldState,
+  commands: CommandEnvelope[],
+  nowMs: number
+): CommandApplyResult => {
   const structureUpserts: StructureState[] = [];
   const structureRemoves: string[] = [];
-  const movedPlayers: EntityDelta["players"] = [];
+  const movedPlayers: EntityDelta['players'] = [];
   let waveChanged = false;
 
   for (const envelope of commands) {
     const { command } = envelope;
-    if (command.type === "moveIntent") {
+    if (command.type === 'moveIntent') {
       world.intents[command.playerId] = command.intent;
       const player = world.players[command.playerId];
       if (!player) continue;
@@ -132,7 +204,7 @@ const applyCommands = (world: WorldState, commands: CommandEnvelope[], nowMs: nu
       });
       continue;
     }
-    if (command.type === "buildStructure") {
+    if (command.type === 'buildStructure') {
       const structure: StructureState = {
         structureId: command.structure.structureId,
         ownerId: command.playerId,
@@ -146,28 +218,13 @@ const applyCommands = (world: WorldState, commands: CommandEnvelope[], nowMs: nu
       structureUpserts.push(structure);
       continue;
     }
-    if (command.type === "removeStructure") {
+    if (command.type === 'removeStructure') {
       delete world.structures[command.structureId];
       structureRemoves.push(command.structureId);
       continue;
     }
-    if (command.type === "startWave") {
-      if (!world.wave.active) {
-        world.wave.wave += 1;
-        world.wave.active = true;
-        world.wave.spawners = [
-          {
-            spawnerId: `wave-${world.wave.wave}-east`,
-            totalCount: (5 + world.wave.wave * 2) * 8,
-            spawnedCount: 0,
-            aliveCount: 0,
-            spawnRatePerSecond: WAVE_SPAWN_BASE + world.wave.wave * 0.2,
-            spawnAccumulator: 0,
-            gateOpen: false,
-          },
-        ];
-        waveChanged = true;
-      }
+    if (command.type === 'startWave') {
+      waveChanged = activateWave(world) || waveChanged;
       continue;
     }
   }
@@ -184,13 +241,15 @@ export const runSimulation = (
   world: WorldState,
   nowMs: number,
   commands: CommandEnvelope[],
-  maxSteps: number,
+  maxSteps: number
 ): SimulationResult => {
   const deltas: GameDelta[] = [];
+  let waveChanged = ensureInitialWaveSchedule(world);
   const commandChanges = applyCommands(world, commands, nowMs);
+  waveChanged = waveChanged || commandChanges.waveChanged;
   if (commandChanges.movedPlayers.length > 0) {
     deltas.push({
-      type: "entityDelta",
+      type: 'entityDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion,
       players: commandChanges.movedPlayers.slice(0, MAX_DELTA_PLAYERS),
@@ -198,13 +257,22 @@ export const runSimulation = (
       despawnedMobIds: [],
     });
   }
-  if (commandChanges.structureUpserts.length > 0 || commandChanges.structureRemoves.length > 0) {
+  if (
+    commandChanges.structureUpserts.length > 0 ||
+    commandChanges.structureRemoves.length > 0
+  ) {
     const structureDelta: StructureDelta = {
-      type: "structureDelta",
+      type: 'structureDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion + 1,
-      upserts: commandChanges.structureUpserts.slice(0, MAX_STRUCTURE_DELTA_UPSERTS),
-      removes: commandChanges.structureRemoves.slice(0, MAX_STRUCTURE_DELTA_REMOVES),
+      upserts: commandChanges.structureUpserts.slice(
+        0,
+        MAX_STRUCTURE_DELTA_UPSERTS
+      ),
+      removes: commandChanges.structureRemoves.slice(
+        0,
+        MAX_STRUCTURE_DELTA_REMOVES
+      ),
       requiresPathRefresh: true,
     };
     world.meta.worldVersion += 1;
@@ -224,7 +292,7 @@ export const runSimulation = (
     const waveChanged = updateWave(world, deltaSeconds);
     const mobResult = updateMobs(world, deltaSeconds);
     const entityDelta: EntityDelta = {
-      type: "entityDelta",
+      type: 'entityDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion,
       players: [],
@@ -246,14 +314,23 @@ export const runSimulation = (
     };
     latestEntityDelta = entityDelta;
 
-    if (waveChanged || commandChanges.waveChanged) {
+    if (waveChanged) {
       latestWaveDelta = {
-        type: "waveDelta",
+        type: 'waveDelta',
         tickSeq: world.meta.tickSeq,
         worldVersion: world.meta.worldVersion,
         wave: world.wave,
       };
     }
+  }
+
+  if (waveChanged && !latestWaveDelta) {
+    latestWaveDelta = {
+      type: 'waveDelta',
+      tickSeq: world.meta.tickSeq,
+      worldVersion: world.meta.worldVersion,
+      wave: world.wave,
+    };
   }
 
   if (latestEntityDelta) {
@@ -269,13 +346,13 @@ export const runSimulation = (
 export const buildPresenceLeaveDelta = (
   tickSeq: number,
   worldVersion: number,
-  playerId: string,
+  playerId: string
 ): GameDelta => ({
-  type: "presenceDelta",
+  type: 'presenceDelta',
   tickSeq,
   worldVersion,
   left: {
     playerId,
-    reason: "timeout",
+    reason: 'timeout',
   },
 });

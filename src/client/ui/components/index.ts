@@ -1,2 +1,2 @@
-export * from './selectionDialog'
-export * from './coinCost'
+export * from './selectionDialog';
+export * from './coinCost';

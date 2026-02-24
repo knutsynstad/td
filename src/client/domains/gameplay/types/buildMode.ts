@@ -1,1 +1,1 @@
-export type BuildMode = 'off' | 'wall' | 'tower'
+export type BuildMode = 'off' | 'wall' | 'tower';

@@ -1,18 +1,18 @@
-import type { BuildMode } from './types/buildMode'
+import type { BuildMode } from './types/buildMode';
 
 export type GameState = {
-  buildMode: BuildMode
-  isShooting: boolean
-  shootCooldown: number
-  wave: number
-  lives: number
-  nextWaveAt: number
-  energy: number
-  bankEnergy: number
-  eventBannerTimer: number
-  prevMobsCount: number
-  energyPopTimer: number
-}
+  buildMode: BuildMode;
+  isShooting: boolean;
+  shootCooldown: number;
+  wave: number;
+  lives: number;
+  nextWaveAt: number;
+  energy: number;
+  bankEnergy: number;
+  eventBannerTimer: number;
+  prevMobsCount: number;
+  energyPopTimer: number;
+};
 
 export const createGameState = (energyCap: number): GameState => ({
   buildMode: 'off',
@@ -25,5 +25,5 @@ export const createGameState = (energyCap: number): GameState => ({
   bankEnergy: 0,
   eventBannerTimer: 0,
   prevMobsCount: 0,
-  energyPopTimer: 0
-})
+  energyPopTimer: 0,
+});

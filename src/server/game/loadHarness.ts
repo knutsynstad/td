@@ -1,7 +1,7 @@
-import type { CommandEnvelope } from "../../shared/game-protocol";
-import type { WorldState } from "../../shared/game-state";
-import { MAX_STEPS_PER_REQUEST } from "./config";
-import { runSimulation } from "./simulation";
+import type { CommandEnvelope } from '../../shared/game-protocol';
+import type { WorldState } from '../../shared/game-state';
+import { MAX_STEPS_PER_REQUEST } from './config';
+import { runSimulation } from './simulation';
 
 type HarnessResult = {
   players: number;
@@ -12,11 +12,15 @@ type HarnessResult = {
   deltasProduced: number;
 };
 
-const makeMoveCommand = (playerId: string, seq: number, sentAtMs: number): CommandEnvelope => ({
+const makeMoveCommand = (
+  playerId: string,
+  seq: number,
+  sentAtMs: number
+): CommandEnvelope => ({
   seq,
   sentAtMs,
   command: {
-    type: "moveIntent",
+    type: 'moveIntent',
     playerId,
     intent: {
       updatedAtMs: sentAtMs,
@@ -30,10 +34,21 @@ const makeMoveCommand = (playerId: string, seq: number, sentAtMs: number): Comma
 
 const cloneWorld = (world: WorldState): WorldState => ({
   meta: { ...world.meta },
-  players: Object.fromEntries(Object.entries(world.players).map(([id, player]) => [id, { ...player }])),
-  intents: Object.fromEntries(Object.entries(world.intents).map(([id, intent]) => [id, { ...intent }])),
-  structures: Object.fromEntries(Object.entries(world.structures).map(([id, structure]) => [id, { ...structure }])),
-  mobs: Object.fromEntries(Object.entries(world.mobs).map(([id, mob]) => [id, { ...mob }])),
+  players: Object.fromEntries(
+    Object.entries(world.players).map(([id, player]) => [id, { ...player }])
+  ),
+  intents: Object.fromEntries(
+    Object.entries(world.intents).map(([id, intent]) => [id, { ...intent }])
+  ),
+  structures: Object.fromEntries(
+    Object.entries(world.structures).map(([id, structure]) => [
+      id,
+      { ...structure },
+    ])
+  ),
+  mobs: Object.fromEntries(
+    Object.entries(world.mobs).map(([id, mob]) => [id, { ...mob }])
+  ),
   wave: {
     ...world.wave,
     spawners: world.wave.spawners.map((spawner) => ({ ...spawner })),
@@ -43,7 +58,7 @@ const cloneWorld = (world: WorldState): WorldState => ({
 export const runLoadHarness = (
   baseWorld: WorldState,
   targetPlayers = 500,
-  ticks = 200,
+  ticks = 200
 ): HarnessResult => {
   const world = cloneWorld(baseWorld);
   for (let i = 0; i < targetPlayers; i += 1) {
@@ -62,10 +77,12 @@ export const runLoadHarness = (
   let totalDeltas = 0;
   for (let tick = 0; tick < ticks; tick += 1) {
     const nowMs = world.meta.lastTickMs + 100;
-    const commands: CommandEnvelope[] = Object.keys(world.players).map((playerId) => {
-      seq += 1;
-      return makeMoveCommand(playerId, seq, nowMs);
-    });
+    const commands: CommandEnvelope[] = Object.keys(world.players).map(
+      (playerId) => {
+        seq += 1;
+        return makeMoveCommand(playerId, seq, nowMs);
+      }
+    );
     const result = runSimulation(world, nowMs, commands, MAX_STEPS_PER_REQUEST);
     totalDeltas += result.deltas.length;
   }

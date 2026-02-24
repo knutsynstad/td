@@ -1,7 +1,7 @@
-import { requestExpandedMode } from "@devvit/web/client";
-import "./splash.css";
+import { requestExpandedMode } from '@devvit/web/client';
+import './splash.css';
 
-const app = document.querySelector<HTMLDivElement>("#app");
+const app = document.querySelector<HTMLDivElement>('#app');
 
 if (app !== null) {
   app.innerHTML = `
@@ -10,10 +10,10 @@ if (app !== null) {
     </main>
   `;
 
-  const playButton = document.querySelector<HTMLButtonElement>("#playButton");
+  const playButton = document.querySelector<HTMLButtonElement>('#playButton');
   if (playButton !== null) {
-    playButton.addEventListener("click", (event) => {
-      requestExpandedMode(event, "game");
+    playButton.addEventListener('click', (event) => {
+      requestExpandedMode(event, 'game');
     });
   }
 }

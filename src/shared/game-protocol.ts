@@ -1,4 +1,10 @@
-import type { PlayerIntent, StructureState, Vec2, WaveState, WorldState } from "./game-state";
+import type {
+  PlayerIntent,
+  StructureState,
+  Vec2,
+  WaveState,
+  WorldState,
+} from './game-state';
 
 export type EntityInterpolation = {
   from: Vec2;
@@ -8,35 +14,35 @@ export type EntityInterpolation = {
 };
 
 export type MoveIntentCommand = {
-  type: "moveIntent";
+  type: 'moveIntent';
   playerId: string;
   intent: PlayerIntent;
   clientPosition?: Vec2;
 };
 
 export type BuildStructureCommand = {
-  type: "buildStructure";
+  type: 'buildStructure';
   playerId: string;
   structure: {
     structureId: string;
-    type: StructureState["type"];
+    type: StructureState['type'];
     center: Vec2;
   };
 };
 
 export type RemoveStructureCommand = {
-  type: "removeStructure";
+  type: 'removeStructure';
   playerId: string;
   structureId: string;
 };
 
 export type StartWaveCommand = {
-  type: "startWave";
+  type: 'startWave';
   playerId: string;
 };
 
 export type ShootCommand = {
-  type: "shoot";
+  type: 'shoot';
   playerId: string;
   target: Vec2;
 };
@@ -55,7 +61,7 @@ export type CommandEnvelope = {
 };
 
 export type PresenceDelta = {
-  type: "presenceDelta";
+  type: 'presenceDelta';
   tickSeq: number;
   worldVersion: number;
   joined?: {
@@ -65,12 +71,12 @@ export type PresenceDelta = {
   };
   left?: {
     playerId: string;
-    reason: "timeout" | "disconnect";
+    reason: 'timeout' | 'disconnect';
   };
 };
 
 export type EntityDelta = {
-  type: "entityDelta";
+  type: 'entityDelta';
   tickSeq: number;
   worldVersion: number;
   players: Array<{
@@ -88,7 +94,7 @@ export type EntityDelta = {
 };
 
 export type StructureDelta = {
-  type: "structureDelta";
+  type: 'structureDelta';
   tickSeq: number;
   worldVersion: number;
   upserts: StructureState[];
@@ -97,21 +103,21 @@ export type StructureDelta = {
 };
 
 export type WaveDelta = {
-  type: "waveDelta";
+  type: 'waveDelta';
   tickSeq: number;
   worldVersion: number;
   wave: WaveState;
 };
 
 export type AckDelta = {
-  type: "ack";
+  type: 'ack';
   tickSeq: number;
   worldVersion: number;
   ackSeq: number;
 };
 
 export type ResyncRequiredDelta = {
-  type: "resyncRequired";
+  type: 'resyncRequired';
   tickSeq: number;
   worldVersion: number;
   reason: string;
@@ -126,7 +132,7 @@ export type GameDelta =
   | ResyncRequiredDelta;
 
 export type DeltaBatch = {
-  type: "deltaBatch";
+  type: 'deltaBatch';
   tickSeq: number;
   worldVersion: number;
   events: GameDelta[];
@@ -137,7 +143,7 @@ export type JoinRequest = {
 };
 
 export type JoinResponse = {
-  type: "join";
+  type: 'join';
   playerId: string;
   username: string;
   channel: string;
@@ -149,7 +155,7 @@ export type CommandRequest = {
 };
 
 export type CommandResponse = {
-  type: "commandAck";
+  type: 'commandAck';
   accepted: boolean;
   tickSeq: number;
   worldVersion: number;
@@ -162,13 +168,13 @@ export type HeartbeatRequest = {
 };
 
 export type HeartbeatResponse = {
-  type: "heartbeatAck";
+  type: 'heartbeatAck';
   tickSeq: number;
   worldVersion: number;
 };
 
 export type CoinBalanceResponse = {
-  type: "coinBalance";
+  type: 'coinBalance';
   coins: number;
 };
 
@@ -178,15 +184,15 @@ export type ResyncRequest = {
 };
 
 export type ResyncResponse = {
-  type: "snapshot";
+  type: 'snapshot';
   snapshot: WorldState;
 };
 
 export const isCommandRequest = (value: unknown): value is CommandRequest => {
-  if (typeof value !== "object" || value === null) return false;
-  const maybeEnvelope = Reflect.get(value, "envelope");
-  if (typeof maybeEnvelope !== "object" || maybeEnvelope === null) return false;
-  const maybeCommand = Reflect.get(maybeEnvelope, "command");
-  if (typeof maybeCommand !== "object" || maybeCommand === null) return false;
-  return typeof Reflect.get(maybeCommand, "type") === "string";
+  if (typeof value !== 'object' || value === null) return false;
+  const maybeEnvelope = Reflect.get(value, 'envelope');
+  if (typeof maybeEnvelope !== 'object' || maybeEnvelope === null) return false;
+  const maybeCommand = Reflect.get(maybeEnvelope, 'command');
+  if (typeof maybeCommand !== 'object' || maybeCommand === null) return false;
+  return typeof Reflect.get(maybeCommand, 'type') === 'string';
 };
