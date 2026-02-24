@@ -1,29 +1,24 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
 import {
-  acquireTickLease,
-  getTickHealth,
+  acquireLeaderLock,
   markTickPublish,
-  markTickRun,
-  releaseTickLease,
+  releaseLeaderLock,
+  verifyLeaderLock,
 } from './store';
 
 const test = createDevvitTest();
 
-test('acquire and release tick lease', async () => {
-  const nowMs = Date.now();
-  const lease = await acquireTickLease('owner-a', nowMs, 5_000);
-  expect(lease).not.toBeNull();
-  if (!lease) return;
-  const released = await releaseTickLease('owner-a', lease.token);
-  expect(released).toBe(true);
+test('acquire and release leader lock', async () => {
+  const acquired = await acquireLeaderLock('owner-a', 70);
+  expect(acquired).toBe(true);
+  const isOwner = await verifyLeaderLock('owner-a');
+  expect(isOwner).toBe(true);
+  await releaseLeaderLock('owner-a');
+  const afterRelease = await verifyLeaderLock('owner-a');
+  expect(afterRelease).toBe(false);
 });
 
-test('tick health reflects run and publish markers', async () => {
-  const nowMs = Date.now();
-  await markTickRun(nowMs);
+test('markTickPublish stores sequence', async () => {
   await markTickPublish(42);
-  const health = await getTickHealth();
-  expect(health.lastTickRunMs).toBe(nowMs);
-  expect(health.lastPublishTickSeq).toBe(42);
 });

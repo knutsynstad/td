@@ -9,9 +9,7 @@ export type GameRedisKeys = {
   seen: string;
   rate: string;
   snaps: string;
-  tickLease: string;
-  tickLeaseToken: string;
-  lastTickRunMs: string;
+  leaderLock: string;
   lastPublishTickSeq: string;
 };
 
@@ -41,9 +39,7 @@ export const getGameRedisKeys = (): GameRedisKeys => {
     seen: `${prefix}:ls`,
     rate: `${prefix}:rl`,
     snaps: `${prefix}:sn`,
-    tickLease: `${prefix}:tl`,
-    tickLeaseToken: `${prefix}:tlt`,
-    lastTickRunMs: `${prefix}:ltr`,
+    leaderLock: `${prefix}:ll`,
     lastPublishTickSeq: `${prefix}:lpt`,
   };
 };

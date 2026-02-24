@@ -1,21 +1,19 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import { joinGame, resetGame, resyncGame, runSchedulerTick } from './service';
+import { joinGame, resetGame, resyncGame, runLeaderLoop } from './service';
 
 const test = createDevvitTest();
 
-test('runSchedulerTick returns progress fields', async () => {
+test('runLeaderLoop returns result fields', async () => {
   await joinGame();
-  const result = await runSchedulerTick();
-  expect(typeof result.tickSeq).toBe('number');
-  expect(typeof result.worldVersion).toBe('number');
-  expect(typeof result.eventCount).toBe('number');
-  expect(typeof result.remainingSteps).toBe('number');
+  const result = await runLeaderLoop(500);
+  expect(typeof result.ownerToken).toBe('string');
+  expect(typeof result.durationMs).toBe('number');
+  expect(result.ticksProcessed).toBeGreaterThan(0);
 });
 
 test('resetGame resets wave progression without economy tax', async () => {
   await joinGame();
-  await runSchedulerTick();
   await resetGame();
   const snapshot = await resyncGame();
   expect(snapshot.snapshot.wave.wave).toBe(0);

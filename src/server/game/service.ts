@@ -14,42 +14,42 @@ import {
   type StructureState,
 } from '../../shared/game-state';
 import {
-  BACKLOG_RESYNC_STEP_THRESHOLD,
   ENERGY_COST_TOWER,
   ENERGY_COST_WALL,
+  LEADER_BROADCAST_WINDOW_MS,
+  LEADER_LOCK_TTL_SECONDS,
+  LEADER_STALE_PLAYER_INTERVAL,
   MAX_BATCH_EVENTS,
   MAX_PLAYERS,
   MAX_STRUCTURE_DELTA_UPSERTS,
-  MAX_STEPS_PER_REQUEST,
   PLAYER_TIMEOUT_MS,
   SIM_TICK_MS,
   SLOW_TICK_LOG_THRESHOLD_MS,
-  TICK_LEASE_MS,
-  TICK_STALE_RECOVERY_MS,
 } from './config';
 import { getGameChannelName } from './keys';
 import { buildPresenceLeaveDelta, runSimulation } from './simulation';
 import { buildStaticMapStructures, hasStaticMapStructures } from './staticStructures';
 import {
-  acquireTickLease,
+  acquireLeaderLock,
   addCoins,
   consumeRateLimitToken,
   createDefaultPlayer,
   enqueueCommand,
   enforceStructureCap,
-  getTickHealth,
   getCoins,
   loadWorldState,
   markTickPublish,
-  markTickRun,
   persistWorldState,
   popPendingCommands,
-  releaseTickLease,
+  refreshLeaderLock,
+  releaseLeaderLock,
   resetGameState,
   removeOldPlayersByLastSeen,
+  sleep,
   spendCoins,
   touchPlayerPresence,
   trimCommandQueue,
+  verifyLeaderLock,
 } from './store';
 
 const getPlayerId = async (): Promise<string> => {
@@ -83,158 +83,139 @@ const broadcast = async (
   }
 };
 
-type TickSource =
-  | 'command'
-  | 'heartbeat'
-  | 'scheduler'
-  | 'maintenance-recovery';
+const createOwnerToken = (): string =>
+  `leader:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
-type TickResult = {
-  deltas: GameDelta[];
-  tickSeq: number;
-  worldVersion: number;
-  processedSteps: number;
-  remainingSteps: number;
-  stalePlayersRemoved: number;
-};
-
-type TickOptions = {
-  removeStalePlayers?: boolean;
-  staleLimit?: number;
-};
-
-const runPendingSimulation = async (
-  nowMs: number,
-  source: TickSource,
-  options?: TickOptions
-): Promise<TickResult> => {
-  const startedAtMs = Date.now();
-  const leaseOwnerId = `${source}-${nowMs}-${Math.floor(Math.random() * 1_000_000)}`;
-  const lease = await acquireTickLease(leaseOwnerId, nowMs, TICK_LEASE_MS);
-  if (!lease) {
-    const fallback = await loadWorldState();
-    return {
-      deltas: [],
-      tickSeq: fallback.meta.tickSeq,
-      worldVersion: fallback.meta.worldVersion,
-      processedSteps: 0,
-      remainingSteps: 0,
-      stalePlayersRemoved: 0,
-    };
+const ensureStaticMap = (
+  world: { structures: Record<string, StructureState>; meta: { lastTickMs: number; worldVersion: number } }
+): StructureState[] => {
+  if (hasStaticMapStructures(world.structures)) return [];
+  const statics = buildStaticMapStructures(world.meta.lastTickMs);
+  const upserts: StructureState[] = [];
+  for (const [id, structure] of Object.entries(statics)) {
+    world.structures[id] = structure;
+    upserts.push(structure);
   }
+  if (upserts.length > 0) world.meta.worldVersion += 1;
+  return upserts;
+};
+
+export type LeaderLoopResult = {
+  ownerToken: string;
+  durationMs: number;
+  ticksProcessed: number;
+};
+
+export const runLeaderLoop = async (
+  windowMs: number = LEADER_BROADCAST_WINDOW_MS
+): Promise<LeaderLoopResult> => {
+  const ownerToken = createOwnerToken();
+  const channel = getGameChannelName();
+  const startedAt = Date.now();
+  const endAt = startedAt + windowMs;
+  let nextTick = startedAt;
+  let ticksProcessed = 0;
+
+  const acquired = await acquireLeaderLock(ownerToken, LEADER_LOCK_TTL_SECONDS);
+  if (!acquired) {
+    return { ownerToken, durationMs: Date.now() - startedAt, ticksProcessed: 0 };
+  }
+
+  console.info('Leader loop started', { ownerToken, channel });
 
   try {
-    const stalePlayers = options?.removeStalePlayers
-      ? await removeOldPlayersByLastSeen(
+    while (Date.now() < endAt) {
+      const now = Date.now();
+      if (now < nextTick) {
+        await sleep(nextTick - now);
+      }
+
+      const stillOwner = await verifyLeaderLock(ownerToken);
+      if (!stillOwner) {
+        console.warn('Leader lock stolen, exiting loop', { ownerToken });
+        break;
+      }
+
+      await refreshLeaderLock(LEADER_LOCK_TTL_SECONDS);
+
+      const tickStartMs = Date.now();
+      const nowMs = tickStartMs;
+
+      if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
+        const stalePlayers = await removeOldPlayersByLastSeen(
           nowMs - PLAYER_TIMEOUT_MS,
-          options?.staleLimit ?? 250
-        )
-      : [];
-    const world = await loadWorldState();
-    const staticBootstrapUpserts: StructureState[] = [];
-    if (!hasStaticMapStructures(world.structures)) {
-      const staticStructures = buildStaticMapStructures(world.meta.lastTickMs);
-      for (const [structureId, structure] of Object.entries(staticStructures)) {
-        world.structures[structureId] = structure;
-        staticBootstrapUpserts.push(structure);
+          500
+        );
+        if (stalePlayers.length > 0) {
+          const world = await loadWorldState();
+          const staleDeltas = stalePlayers.map((playerId) =>
+            buildPresenceLeaveDelta(
+              world.meta.tickSeq,
+              world.meta.worldVersion,
+              playerId
+            )
+          );
+          await broadcast(world.meta.worldVersion, world.meta.tickSeq, staleDeltas);
+        }
       }
-      if (staticBootstrapUpserts.length > 0) {
-        world.meta.worldVersion += 1;
+
+      const world = await loadWorldState();
+      const staticUpserts = ensureStaticMap(world);
+
+      if (staticUpserts.length > 0) {
+        const bootstrapDelta: GameDelta = {
+          type: 'structureDelta',
+          tickSeq: world.meta.tickSeq,
+          worldVersion: world.meta.worldVersion,
+          upserts: staticUpserts.slice(0, MAX_STRUCTURE_DELTA_UPSERTS),
+          removes: [],
+          requiresPathRefresh: true,
+        };
+        await broadcast(world.meta.worldVersion, world.meta.tickSeq, [bootstrapDelta]);
       }
-    }
-    const simulationStartTickMs = world.meta.lastTickMs;
-    const commands = await popPendingCommands(nowMs);
-    const result = runSimulation(world, nowMs, commands, MAX_STEPS_PER_REQUEST);
-    const simulationEndTickMs = result.world.meta.lastTickMs;
-    const processedSteps = Math.max(
-      0,
-      Math.floor((simulationEndTickMs - simulationStartTickMs) / SIM_TICK_MS)
-    );
-    const remainingSteps = Math.max(
-      0,
-      Math.floor((nowMs - simulationEndTickMs) / SIM_TICK_MS)
-    );
-    const staleDeltas = stalePlayers.map((playerId) =>
-      buildPresenceLeaveDelta(
-        result.world.meta.tickSeq,
-        result.world.meta.worldVersion,
-        playerId
-      )
-    );
-    const bootstrapDeltas: GameDelta[] =
-      staticBootstrapUpserts.length > 0
-        ? [
-            {
-              type: 'structureDelta',
-              tickSeq: result.world.meta.tickSeq,
-              worldVersion: result.world.meta.worldVersion,
-              upserts: staticBootstrapUpserts.slice(
-                0,
-                MAX_STRUCTURE_DELTA_UPSERTS
-              ),
-              removes: [],
-              requiresPathRefresh: true,
-            },
-          ]
-        : [];
-    const deltas = [...bootstrapDeltas, ...staleDeltas, ...result.deltas];
-    if (remainingSteps >= BACKLOG_RESYNC_STEP_THRESHOLD) {
-      deltas.push({
-        type: 'resyncRequired',
-        tickSeq: result.world.meta.tickSeq,
-        worldVersion: result.world.meta.worldVersion,
-        reason: `tick backlog: ${remainingSteps} steps`,
-      });
-    }
-    await persistWorldState(result.world);
-    await markTickRun(nowMs);
-    if (deltas.length > 0) {
-      await markTickPublish(result.world.meta.tickSeq);
-      await broadcast(
-        result.world.meta.worldVersion,
-        result.world.meta.tickSeq,
-        deltas
-      );
-    }
-    const durationMs = Date.now() - startedAtMs;
-    if (durationMs >= SLOW_TICK_LOG_THRESHOLD_MS) {
-      console.warn('Slow tick processed', {
-        source,
-        durationMs,
-        tickSeq: result.world.meta.tickSeq,
-        worldVersion: result.world.meta.worldVersion,
-        processedSteps,
-        remainingSteps,
-        commandCount: commands.length,
-        stalePlayersRemoved: stalePlayers.length,
-        eventCount: deltas.length,
-      });
-    }
-    return {
-      deltas,
-      tickSeq: result.world.meta.tickSeq,
-      worldVersion: result.world.meta.worldVersion,
-      processedSteps,
-      remainingSteps,
-      stalePlayersRemoved: stalePlayers.length,
-    };
-  } finally {
-    try {
-      const released = await releaseTickLease(leaseOwnerId, lease.token);
-      if (!released) {
-        console.warn('Tick lease release skipped', {
-          source,
-          leaseToken: lease.token,
+
+      const commands = await popPendingCommands(nowMs);
+      const result = runSimulation(world, nowMs, commands, 1);
+
+      await persistWorldState(result.world);
+
+      if (result.deltas.length > 0) {
+        await markTickPublish(result.world.meta.tickSeq);
+        await broadcast(
+          result.world.meta.worldVersion,
+          result.world.meta.tickSeq,
+          result.deltas
+        );
+      }
+
+      ticksProcessed += 1;
+
+      const tickDurationMs = Date.now() - tickStartMs;
+      if (tickDurationMs >= SLOW_TICK_LOG_THRESHOLD_MS) {
+        console.warn('Slow tick in leader loop', {
+          tickDurationMs,
+          tickSeq: result.world.meta.tickSeq,
+          commandCount: commands.length,
+          deltaCount: result.deltas.length,
         });
       }
-    } catch (error) {
-      console.error('Tick lease release failed', {
-        source,
-        leaseToken: lease.token,
-        error,
-      });
+
+      const afterSend = Date.now();
+      const intervalsElapsed = Math.max(
+        1,
+        Math.ceil((afterSend - startedAt) / SIM_TICK_MS)
+      );
+      nextTick = startedAt + intervalsElapsed * SIM_TICK_MS;
     }
+  } catch (error) {
+    console.error('Leader loop error', { ownerToken, error });
+  } finally {
+    await releaseLeaderLock(ownerToken);
   }
+
+  const durationMs = Date.now() - startedAt;
+  console.info('Leader loop ended', { ownerToken, durationMs, ticksProcessed });
+  return { ownerToken, durationMs, ticksProcessed };
 };
 
 export const joinGame = async (): Promise<JoinResponse> => {
@@ -258,7 +239,6 @@ export const joinGame = async (): Promise<JoinResponse> => {
   const player: PlayerState =
     existing ?? createDefaultPlayer(playerId, username, nowMs);
   player.username = username;
-  // Always spawn/rejoin at the canonical spawn in front of the castle.
   player.position = { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z };
   player.velocity = { x: 0, z: 0 };
   player.lastSeenMs = nowMs;
@@ -354,13 +334,12 @@ export const applyCommand = async (
     };
   }
 
-  const simulation = await runPendingSimulation(nowMs, 'command');
-
+  const world = await loadWorldState();
   return {
     type: 'commandAck',
     accepted: true,
-    tickSeq: simulation.tickSeq,
-    worldVersion: simulation.worldVersion,
+    tickSeq: world.meta.tickSeq,
+    worldVersion: world.meta.worldVersion,
   };
 };
 
@@ -378,15 +357,11 @@ export const heartbeatGame = async (
     }
     await touchPlayerPresence(player);
   }
-  const simulation = await runPendingSimulation(nowMs, 'heartbeat', {
-    removeStalePlayers: true,
-    staleLimit: 200,
-  });
 
   return {
     type: 'heartbeatAck',
-    tickSeq: simulation.tickSeq,
-    worldVersion: simulation.worldVersion,
+    tickSeq: world.meta.tickSeq,
+    worldVersion: world.meta.worldVersion,
   };
 };
 
@@ -411,31 +386,8 @@ export const runMaintenance = async (): Promise<{ stalePlayers: number }> => {
   await trimCommandQueue();
   const nowMs = Date.now();
   const stale = await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, 500);
-  const health = await getTickHealth();
-  if (nowMs - health.lastTickRunMs >= TICK_STALE_RECOVERY_MS) {
-    await runPendingSimulation(nowMs, 'maintenance-recovery');
-  }
   return {
     stalePlayers: stale.length,
-  };
-};
-
-export const runSchedulerTick = async (): Promise<{
-  tickSeq: number;
-  worldVersion: number;
-  eventCount: number;
-  remainingSteps: number;
-}> => {
-  const nowMs = Date.now();
-  const result = await runPendingSimulation(nowMs, 'scheduler', {
-    removeStalePlayers: true,
-    staleLimit: 500,
-  });
-  return {
-    tickSeq: result.tickSeq,
-    worldVersion: result.worldVersion,
-    eventCount: result.deltas.length,
-    remainingSteps: result.remainingSteps,
   };
 };
 
