@@ -194,6 +194,16 @@ const STAGING_PLATFORM_Y = Math.max(0, STAGING_ISLAND_HEIGHT - 1)
 const STAGING_GATE_OPEN_DURATION = 0.8
 const MOB_STAGING_BOUNDS_PADDING = STAGING_ISLAND_DISTANCE + STAGING_ISLAND_SIZE * 0.5 + 2
 app.innerHTML = `
+  <div id="loadingScreen" class="loading-screen" role="status" aria-live="polite">
+    <div class="loading-screen__panel">
+      <div class="loading-screen__title">Loading world</div>
+      <div class="loading-screen__subtitle">Preparing models and scene</div>
+      <div class="loading-screen__bar" aria-hidden="true">
+        <div id="loadingProgressFill" class="loading-screen__bar-fill"></div>
+      </div>
+      <div id="loadingProgressLabel" class="loading-screen__progress">0%</div>
+    </div>
+  </div>
   <div id="hud" class="hud">
     <div class="hud-corner hud-corner--top-left">
       <div class="hud-status-stack">
@@ -277,6 +287,9 @@ const minimapWrapEl = document.querySelector<HTMLDivElement>('#hudMinimapWrap')!
 const minimapToggleBtn = document.querySelector<HTMLButtonElement>('#hudMinimapToggle')!
 const coinHudCanvasEl = document.querySelector<HTMLCanvasElement>('#coinHudCanvas')!
 const minimapCanvasEl = document.querySelector<HTMLCanvasElement>('#hudMinimap')!
+const loadingScreenEl = document.querySelector<HTMLDivElement>('#loadingScreen')!
+const loadingProgressFillEl = document.querySelector<HTMLDivElement>('#loadingProgressFill')!
+const loadingProgressLabelEl = document.querySelector<HTMLDivElement>('#loadingProgressLabel')!
 const minimapCtx = minimapCanvasEl.getContext('2d')
 const minimapCastleIcon = new Image()
 minimapCastleIcon.src = castleIconUrl
@@ -352,6 +365,7 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFShadowMap
+renderer.domElement.style.visibility = 'hidden'
 app.appendChild(renderer.domElement)
 
 const viewportFogEl = document.createElement('div')
@@ -1843,6 +1857,80 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
 }
 
 const gltfLoader = new GLTFLoader()
+const REQUIRED_MODEL_LOADS = 14
+let completedModelLoads = 0
+let hasFinishedLoadingAssets = false
+let hasRevealedScene = false
+let hasStartedGameLoop = false
+let startGameWhenReady: (() => void) | null = null
+
+const updateLoadingProgress = () => {
+  const clampedProgress = Math.min(
+    1,
+    Math.max(0, completedModelLoads / REQUIRED_MODEL_LOADS)
+  )
+  const progressPercent = Math.round(clampedProgress * 100)
+  loadingProgressFillEl.style.width = `${progressPercent}%`
+  loadingProgressLabelEl.textContent = `${progressPercent}%`
+}
+
+const completeLoadingAndRevealScene = () => {
+  if (hasRevealedScene) return
+  hasRevealedScene = true
+  renderer.domElement.style.visibility = 'visible'
+  loadingScreenEl.classList.add('is-hidden')
+  window.setTimeout(() => {
+    loadingScreenEl.remove()
+  }, 220)
+}
+
+const markModelLoadCompleted = () => {
+  completedModelLoads = Math.min(REQUIRED_MODEL_LOADS, completedModelLoads + 1)
+  updateLoadingProgress()
+  if (completedModelLoads < REQUIRED_MODEL_LOADS) return
+  hasFinishedLoadingAssets = true
+  startGameWhenReady?.()
+}
+
+type ModelLoadSuccessHandler = (gltf: { scene: THREE.Object3D }) => void
+type ModelLoadErrorHandler = (error: unknown) => void
+
+const loadModelWithProgress = (
+  modelUrl: string,
+  onLoad: ModelLoadSuccessHandler,
+  onError?: ModelLoadErrorHandler
+) => {
+  let settled = false
+  const finalize = () => {
+    if (settled) return
+    settled = true
+    markModelLoadCompleted()
+  }
+  gltfLoader.load(
+    modelUrl,
+    (gltf) => {
+      try {
+        onLoad(gltf)
+      } finally {
+        finalize()
+      }
+    },
+    undefined,
+    (error) => {
+      try {
+        if (onError) {
+          onError(error)
+        } else {
+          console.error(`Failed to load model: ${modelUrl}`, error)
+        }
+      } finally {
+        finalize()
+      }
+    }
+  )
+}
+
+updateLoadingProgress()
 let towerModelTemplate: THREE.Object3D | null = null
 let arrowModelTemplate: THREE.Object3D | null = null
 let treeModelTemplate: THREE.Object3D | null = null
@@ -2107,7 +2195,7 @@ const syncHudCoinModel = () => {
   coinHudRoot.add(hudCoin)
 }
 
-gltfLoader.load(
+loadModelWithProgress(
   groundModelUrl,
   (gltf) => {
     groundTileLayer.setTemplate(gltf.scene)
@@ -2119,65 +2207,60 @@ gltfLoader.load(
       updateGroundFromBounds(bounds)
     }
   },
-  undefined,
   (error) => {
     console.error('Failed to load ground model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   pathModelUrl,
   (gltf) => {
     pathCenterTileLayer.setTemplate(gltf.scene)
     stagingIslandsOverlay.setPathTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
-  undefined,
   (error) => {
     console.error('Failed to load path model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   pathEdgeModelUrl,
   (gltf) => {
     pathEdgeTileLayer.setTemplate(gltf.scene)
     stagingIslandsOverlay.setPathEdgeTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
-  undefined,
   (error) => {
     console.error('Failed to load path edge model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   pathCornerInnerModelUrl,
   (gltf) => {
     pathInnerCornerTileLayer.setTemplate(gltf.scene)
     stagingIslandsOverlay.setPathInnerCornerTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
-  undefined,
   (error) => {
     console.error('Failed to load path inner corner model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   pathCornerOuterModelUrl,
   (gltf) => {
     pathOuterCornerTileLayer.setTemplate(gltf.scene)
     stagingIslandsOverlay.setPathOuterCornerTemplate(gltf.scene)
     rebuildPathTileLayer()
   },
-  undefined,
   (error) => {
     console.error('Failed to load path outer corner model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   towerBallistaModelUrl,
   (gltf) => {
     towerModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
@@ -2185,25 +2268,23 @@ gltfLoader.load(
       applyTowerVisualToMesh(tower.mesh, tower)
     }
   },
-  undefined,
   (error) => {
     console.error('Failed to load tower model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   arrowModelUrl,
   (gltf) => {
     arrowModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
     updateArrowFacingFromTemplate(arrowModelTemplate)
   },
-  undefined,
   (error) => {
     console.error('Failed to load arrow model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   treeModelUrl,
   (gltf) => {
     treeModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
@@ -2212,37 +2293,34 @@ gltfLoader.load(
       applyTreeVisualToMesh(state.mesh)
     }
   },
-  undefined,
   (error) => {
     console.error('Failed to load tree model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   rockModelUrl,
   (gltf) => {
     registerRockTemplate(rockModelUrl, gltf.scene)
     refreshAllRockVisuals(hasAllRockTemplates())
   },
-  undefined,
   (error) => {
     console.error('Failed to load rock model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   rock2ModelUrl,
   (gltf) => {
     registerRockTemplate(rock2ModelUrl, gltf.scene)
     refreshAllRockVisuals(hasAllRockTemplates())
   },
-  undefined,
   (error) => {
     console.error('Failed to load secondary rock model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   wallModelUrl,
   (gltf) => {
     wallModelTemplate = prepareStaticModelPreserveScale(gltf.scene)
@@ -2250,37 +2328,34 @@ gltfLoader.load(
       applyWallVisualToMesh(wallMesh)
     }
   },
-  undefined,
   (error) => {
     console.error('Failed to load wall model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   coinModelUrl,
   (gltf) => {
     coinModelTemplate = prepareCoinModel(gltf.scene)
     syncHudCoinModel()
     setCoinParticleTemplate(coinModelTemplate)
   },
-  undefined,
   (error) => {
     console.error('Failed to load coin model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   mobModelUrl,
   (gltf) => {
     applyMobVisualTemplate(gltf.scene)
   },
-  undefined,
   (error) => {
     console.error('Failed to load mob model:', error)
   }
 )
 
-gltfLoader.load(
+loadModelWithProgress(
   castleModelUrl,
   (gltf) => {
     if (castleContentLoaded) return
@@ -2298,7 +2373,6 @@ gltfLoader.load(
     placeCastleGuardTowers()
     refreshAllSpawnerPathlines()
   },
-  undefined,
   (error) => {
     if (castleContentLoaded) return
     castleContentLoaded = true
@@ -5886,6 +5960,12 @@ const tick = (now: number, delta: number) => {
 }
 
 const gameLoop = createGameLoop(tick)
+startGameWhenReady = () => {
+  if (hasStartedGameLoop || !hasFinishedLoadingAssets) return
+  hasStartedGameLoop = true
+  completeLoadingAndRevealScene()
+  gameLoop.start()
+}
 let disposed = false
 const disposeApp = () => {
   if (disposed) return
@@ -5979,4 +6059,4 @@ const disposeApp = () => {
 window.addEventListener('beforeunload', disposeApp)
 syncCoinTrailViewport()
 syncMinimapCanvasSize()
-gameLoop.start()
+startGameWhenReady()

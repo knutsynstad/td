@@ -39,6 +39,60 @@ body {
   height: 100vh;
 }
 
+.loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 30%, rgba(26, 36, 47, 0.98) 0%, rgba(13, 18, 24, 0.99) 62%);
+  transition: opacity 0.2s ease;
+}
+
+.loading-screen.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-screen__panel {
+  width: min(420px, calc(100vw - 48px));
+  display: grid;
+  gap: 10px;
+  text-align: center;
+}
+
+.loading-screen__title {
+  font-size: clamp(1.2rem, 2.2vw, 1.7rem);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.loading-screen__subtitle {
+  font-size: 0.92rem;
+  opacity: 0.72;
+}
+
+.loading-screen__bar {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.loading-screen__bar-fill {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #5fb8ff 0%, #84d1ff 100%);
+  transition: width 0.16s ease;
+}
+
+.loading-screen__progress {
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.86;
+}
+
 .viewport-fog {
   position: fixed;
   inset: 0;
