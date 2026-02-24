@@ -3,7 +3,7 @@ export type Vec2 = {
   z: number;
 };
 
-export const DEFAULT_PLAYER_SPAWN: Vec2 = { x: 0, z: 8 };
+export const DEFAULT_PLAYER_SPAWN: Vec2 = { x: 10, z: 0 };
 
 export type PlayerIntent = {
   desiredDir?: Vec2;

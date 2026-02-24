@@ -8,7 +8,7 @@ import type {
   JoinResponse,
   ResyncResponse,
 } from "../../shared/game-protocol";
-import type { PlayerState } from "../../shared/game-state";
+import { DEFAULT_PLAYER_SPAWN, type PlayerState } from "../../shared/game-state";
 import {
   ENERGY_COST_TOWER,
   ENERGY_COST_WALL,
@@ -98,6 +98,9 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
       nowMs,
     );
   player.username = username;
+  // Always spawn/rejoin at the canonical spawn in front of the castle.
+  player.position = { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z };
+  player.velocity = { x: 0, z: 0 };
   player.lastSeenMs = nowMs;
   world.players[playerId] = player;
   await persistWorldState(world);
