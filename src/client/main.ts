@@ -3043,6 +3043,10 @@ const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector
 scene.add(arrow)
 
 const selectionArrowGroup = new THREE.Group()
+const selectionArrowCameraRightScratch = new THREE.Vector3()
+const selectionArrowCameraUpScratch = new THREE.Vector3()
+const selectionArrowCameraForwardScratch = new THREE.Vector3()
+const selectionArrowBasisMatrixScratch = new THREE.Matrix4()
 const arrowShaftLength = 1.0
 const arrowHeadLength = 0.6
 const arrowHeadRadius = 0.5
@@ -4510,8 +4514,36 @@ syncDebugMenuInputs()
 applyDebugViewState()
 setDebugMenuOpen(false)
 
+const SELECTION_DIALOG_UPDATE_INTERVAL_MS = 100
+let nextSelectionDialogUpdateAt = 0
+
 const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size
+  if (selectedCount === 0) {
+    hudActionsEl.style.display = isMinimapExpanded ? 'none' : ''
+    selectionDialog.update({
+      selectedCount: 0,
+      inRangeCount: 0,
+      isBankSelected: false,
+      selectedTowerTypeId: null,
+      selectedStructureLabel: 'Wall',
+      bankTotal: null,
+      canBankAdd1: false,
+      canBankAdd10: false,
+      canBankRemove1: false,
+      canBankRemove10: false,
+      showRepair: false,
+      buildingCoords: null,
+      buildingHealth: null,
+      upgradeOptions: [],
+      towerDetails: null,
+      canRepair: false,
+      canDelete: false,
+      repairCost: null,
+      repairStatus: null
+    })
+    return
+  }
   const inRange = getSelectedInRange()
   hudActionsEl.style.display = isMinimapExpanded
     ? 'none'
@@ -5753,11 +5785,6 @@ const tick = (now: number, delta: number) => {
     }
   }
 
-  for (const spawner of activeWaveSpawners) {
-    const mobCountForSpawner = mobs.filter((mob) => mob.spawnerId === spawner.id).length
-    spawner.aliveCount = mobCountForSpawner
-  }
-
   const waveComplete = gameState.wave > 0 && areWaveSpawnersDone(activeWaveSpawners)
   if (waveComplete && gameState.nextWaveAt === 0) {
     prepareNextWave()
@@ -5790,15 +5817,17 @@ const tick = (now: number, delta: number) => {
     // Rotate arrow to face camera (billboard effect)
     // Arrow is built pointing down (-Y in local space)
     // Get camera's right and up vectors
-    const cameraRight = new THREE.Vector3(1, 0, 0)
-    const cameraUp = new THREE.Vector3(0, 1, 0)
-    cameraRight.applyQuaternion(camera.quaternion).normalize()
-    cameraUp.applyQuaternion(camera.quaternion).normalize()
+    selectionArrowCameraRightScratch.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize()
+    selectionArrowCameraUpScratch.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
+    selectionArrowCameraForwardScratch.copy(selectionArrowCameraRightScratch).cross(selectionArrowCameraUpScratch).normalize()
     // Make arrow's local X align with camera right, local Z with camera up
     // This makes arrow's Y axis perpendicular to camera view (showing side, not circles)
-    const matrix = new THREE.Matrix4()
-    matrix.makeBasis(cameraRight, cameraUp, cameraRight.clone().cross(cameraUp).normalize())
-    selectionArrow.quaternion.setFromRotationMatrix(matrix)
+    selectionArrowBasisMatrixScratch.makeBasis(
+      selectionArrowCameraRightScratch,
+      selectionArrowCameraUpScratch,
+      selectionArrowCameraForwardScratch
+    )
+    selectionArrow.quaternion.setFromRotationMatrix(selectionArrowBasisMatrixScratch)
     selectionArrow.visible = true
   } else {
     selectionArrow.visible = false
@@ -5806,7 +5835,10 @@ const tick = (now: number, delta: number) => {
   
   // Update shoot button state
   shootButton.disabled = selected === null
-  updateSelectionDialog()
+  if (now >= nextSelectionDialogUpdateAt) {
+    updateSelectionDialog()
+    nextSelectionDialogUpdateAt = now + SELECTION_DIALOG_UPDATE_INTERVAL_MS
+  }
   syncSelectedStructureOutline()
   const outlinePulse = 3.8 + Math.sin(now * 0.01) * 0.5
   structureOutlinePass.edgeStrength = outlinePulse

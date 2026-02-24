@@ -58,6 +58,9 @@ export class SelectionDialog {
   private state: SelectionDialogState
   private actions: SelectionDialogActions
   private lastRenderKey = ''
+  private lastRenderAt = Number.NEGATIVE_INFINITY
+  private isHidden = false
+  private static readonly MIN_RENDER_INTERVAL_MS = 100
 
   constructor(parent: HTMLElement, state: SelectionDialogState, actions: SelectionDialogActions) {
     this.state = state
@@ -111,10 +114,27 @@ export class SelectionDialog {
   }
 
   update(state: SelectionDialogState) {
-    const nextKey = JSON.stringify(state)
-    if (nextKey === this.lastRenderKey) return
+    const shouldHide = state.selectedCount === 0 || state.inRangeCount === 0
+    if (shouldHide) {
+      this.state = state
+      this.lastRenderKey = ''
+      if (!this.isHidden) {
+        this.isHidden = true
+        this.root.style.display = 'none'
+        this.root.innerHTML = ''
+      }
+      return
+    }
+    const now = performance.now()
+    if (now - this.lastRenderAt < SelectionDialog.MIN_RENDER_INTERVAL_MS) {
+      this.state = state
+      return
+    }
     this.state = state
+    const nextKey = JSON.stringify(this.state)
+    if (nextKey === this.lastRenderKey) return
     this.lastRenderKey = nextKey
+    this.lastRenderAt = now
     this.render()
   }
 
@@ -141,10 +161,12 @@ export class SelectionDialog {
       repairStatus
     } = this.state
     if (selectedCount === 0 || inRangeCount === 0) {
+      this.isHidden = true
       this.root.style.display = 'none'
       this.root.innerHTML = ''
       return
     }
+    this.isHidden = false
     this.root.style.display = ''
     const typeLabel = selectedTowerTypeId ? getTowerType(selectedTowerTypeId).label : selectedStructureLabel
     const titleMarkup = buildingCoords
