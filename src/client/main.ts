@@ -45,6 +45,7 @@ import { areWaveSpawnersDone } from './game/spawners'
 import { getAllBorderDoors } from './game/borderDoors'
 import type { LanePathResult } from './pathfinding/laneAStar'
 import { buildCastleFlowField, tracePathFromSpawner, type CorridorFlowField } from './pathfinding/corridorFlowField'
+import { simplifyCollinear } from './pathfinding/pathSimplification'
 import { SpawnerPathOverlay } from './effects/spawnerPathOverlay'
 import {
   canPlace as canPlaceAt,
@@ -134,6 +135,7 @@ import {
 } from './presentation/ballistaRig'
 import { createWaveAndSpawnSystem, type PreparedWave } from './game/systems/WaveAndSpawnSystem'
 import { connectAuthoritativeBridge } from './network/authoritativeBridge'
+import { fetchCastleCoinsBalance, requestCastleCoinsDeposit, requestCastleCoinsWithdraw } from './network/castleApi'
 import type { EntityDelta, StructureDelta, WaveDelta } from '../shared/game-protocol'
 import type {
   MobState as SharedMobState,
@@ -147,7 +149,6 @@ import {
   assertSpawnerCounts,
   assertStructureStoreConsistency
 } from './game/invariants'
-import type { CastleCoinsBalanceResponse, CastleCoinsDepositResponse, CastleCoinsWithdrawResponse } from '../shared/api'
 import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
 import {
   generateSeededWorldFeatures,
@@ -2843,24 +2844,6 @@ const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
   return points.map((point) => point.clone())
 }
 
-const simplifyCollinearPath = (points: THREE.Vector3[], epsilon = 0.01) => {
-  if (points.length <= 2) return points.map((p) => p.clone())
-  const out: THREE.Vector3[] = [points[0]!.clone()]
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const a = out[out.length - 1]!
-    const b = points[i]!
-    const c = points[i + 1]!
-    const abx = b.x - a.x
-    const abz = b.z - a.z
-    const bcx = c.x - b.x
-    const bcz = c.z - b.z
-    const cross = Math.abs(abx * bcz - abz * bcx)
-    if (cross > epsilon) out.push(b.clone())
-  }
-  out.push(points[points.length - 1]!.clone())
-  return out
-}
-
 const extendPathToCastleCenter = (points: THREE.Vector3[]) => {
   const extended = points.map((point) => point.clone())
   if (extended.length === 0) return extended
@@ -2910,7 +2893,7 @@ const extendPathToCastleCenter = (points: THREE.Vector3[]) => {
       }
     }
   }
-  const simplified = simplifyCollinearPath(smoothed)
+  const simplified = simplifyCollinear(smoothed)
   return simplified
 }
 
@@ -4184,69 +4167,6 @@ const updateCastleBankPilesVisual = () => {
       }
       castleBankPiles.add(pile)
     }
-  }
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
-const isCastleCoinsBalanceResponse = (value: unknown): value is CastleCoinsBalanceResponse =>
-  isRecord(value) &&
-  value.type === 'castleCoinsBalance' &&
-  typeof value.postId === 'string' &&
-  typeof value.castleCoins === 'number'
-const isCastleCoinsDepositResponse = (value: unknown): value is CastleCoinsDepositResponse =>
-  isRecord(value) &&
-  value.type === 'castleCoinsDeposit' &&
-  typeof value.postId === 'string' &&
-  typeof value.deposited === 'number' &&
-  typeof value.castleCoins === 'number'
-const isCastleCoinsWithdrawResponse = (value: unknown): value is CastleCoinsWithdrawResponse =>
-  isRecord(value) &&
-  value.type === 'castleCoinsWithdraw' &&
-  typeof value.postId === 'string' &&
-  typeof value.withdrawn === 'number' &&
-  typeof value.castleCoins === 'number'
-
-const fetchCastleCoinsBalance = async (): Promise<number | null> => {
-  try {
-    const response = await fetch('/api/castle/coins')
-    if (!response.ok) return null
-    const payload = await response.json()
-    if (!isCastleCoinsBalanceResponse(payload)) return null
-    return Number.isFinite(payload.castleCoins) ? Math.max(0, Math.floor(payload.castleCoins)) : null
-  } catch {
-    return null
-  }
-}
-
-const requestCastleCoinsDeposit = async (amount: number): Promise<CastleCoinsDepositResponse | null> => {
-  try {
-    const response = await fetch('/api/castle/coins/deposit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ amount })
-    })
-    if (!response.ok) return null
-    const payload = await response.json()
-    if (!isCastleCoinsDepositResponse(payload)) return null
-    return payload
-  } catch {
-    return null
-  }
-}
-
-const requestCastleCoinsWithdraw = async (amount: number): Promise<CastleCoinsWithdrawResponse | null> => {
-  try {
-    const response = await fetch('/api/castle/coins/withdraw', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ amount })
-    })
-    if (!response.ok) return null
-    const payload = await response.json()
-    if (!isCastleCoinsWithdrawResponse(payload)) return null
-    return payload
-  } catch {
-    return null
   }
 }
 

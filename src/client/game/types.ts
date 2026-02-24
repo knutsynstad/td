@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { StructureType } from '../../shared/game-state'
 
 export type ColliderType = 'castle' | 'wall' | 'tower' | 'tree' | 'rock' | 'bank'
 
@@ -14,8 +15,6 @@ export type StaticCollider = NavCollider & {
   center: THREE.Vector3
   halfSize: THREE.Vector3
 }
-
-export type StructureType = Extract<StaticCollider['type'], 'wall' | 'tower' | 'tree' | 'rock' | 'bank'>
 
 export type DestructibleCollider = StaticCollider & {
   type: StructureType
@@ -112,7 +111,7 @@ export type ArrowProjectile = {
   sourceTower: Tower
 }
 
-export type StructureState = {
+export type ClientStructureState = {
   mesh: THREE.Mesh
   hp: number
   maxHp: number

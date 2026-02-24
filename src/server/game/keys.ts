@@ -5,10 +5,15 @@ export type GameRedisKeys = {
   structures: string;
   mobs: string;
   wave: string;
-  pendingCommands: string;
-  lastSeen: string;
-  rateLimits: string;
-  snapshots: string;
+  queue: string;
+  seen: string;
+  rate: string;
+  snaps: string;
+};
+
+export type EconomyRedisKeys = {
+  coins: string;
+  castle: string;
 };
 
 const sanitizeChannelId = (value: string): string => value.replace(/[^A-Za-z0-9_]/g, "_");
@@ -16,17 +21,22 @@ const sanitizeChannelId = (value: string): string => value.replace(/[^A-Za-z0-9_
 export const getGameChannelName = (postId: string): string => `game_${sanitizeChannelId(postId)}`;
 
 export const getGameRedisKeys = (postId: string): GameRedisKeys => {
-  const prefix = `game:${postId}`;
+  const prefix = `g:${postId}`;
   return {
-    meta: `${prefix}:meta`,
-    players: `${prefix}:players`,
-    intents: `${prefix}:intents`,
-    structures: `${prefix}:structures`,
-    mobs: `${prefix}:mobs`,
-    wave: `${prefix}:wave`,
-    pendingCommands: `${prefix}:pendingCommands`,
-    lastSeen: `${prefix}:players:lastSeen`,
-    rateLimits: `${prefix}:rateLimits`,
-    snapshots: `${prefix}:snapshots`,
+    meta: `${prefix}:m`,
+    players: `${prefix}:p`,
+    intents: `${prefix}:i`,
+    structures: `${prefix}:s`,
+    mobs: `${prefix}:mb`,
+    wave: `${prefix}:w`,
+    queue: `${prefix}:q`,
+    seen: `${prefix}:ls`,
+    rate: `${prefix}:rl`,
+    snaps: `${prefix}:sn`,
   };
 };
+
+export const getEconomyRedisKeys = (): EconomyRedisKeys => ({
+  coins: "g:c",
+  castle: "g:cs",
+});

@@ -1,15 +1,15 @@
 import * as THREE from 'three'
-import type { DestructibleCollider, StaticCollider, StructureState, Tower } from './types'
+import type { ClientStructureState, DestructibleCollider, StaticCollider, Tower } from './types'
 
 type RemoveTowerCallback = (tower: Tower) => void
 type ObstacleDeltaCallback = (added: StaticCollider[], removed?: StaticCollider[]) => void
 type StructureMetadata = Pick<
-  StructureState,
+  ClientStructureState,
   'playerBuilt' | 'createdAtMs' | 'lastDecayTickMs' | 'graceUntilMs' | 'cumulativeBuildCost'
 >
 
 export class StructureStore {
-  readonly structureStates = new Map<StaticCollider, StructureState>()
+  readonly structureStates = new Map<StaticCollider, ClientStructureState>()
   readonly structureMeshToCollider = new Map<THREE.Mesh, DestructibleCollider>()
   readonly wallMeshes: THREE.Mesh[] = []
   private readonly scene: THREE.Scene

@@ -20,16 +20,17 @@ import {
 import { getGameChannelName } from "./keys";
 import { buildPresenceLeaveDelta, runSimulation } from "./simulation";
 import {
+  addCoins,
   consumeRateLimitToken,
   createDefaultPlayer,
   enqueueCommand,
   enforceStructureCap,
-  getGlobalCoins,
+  getCoins,
   loadWorldState,
   persistWorldState,
   popPendingCommands,
   removeOldPlayersByLastSeen,
-  spendGlobalCoins,
+  spendCoins,
   touchPlayerPresence,
   trimCommandQueue,
 } from "./store";
@@ -101,7 +102,7 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
   world.players[playerId] = player;
   await persistWorldState(world);
   await touchPlayerPresence(postId, player);
-  const coins = await getGlobalCoins(nowMs);
+  const coins = await getCoins(nowMs);
   world.meta.energy = coins;
 
   const joinDelta: GameDelta = {
@@ -128,6 +129,7 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
 export const applyCommand = async (postId: string, envelope: CommandEnvelope): Promise<CommandResponse> => {
   const nowMs = Date.now();
   const playerId = envelope.command.playerId;
+  let spentBuildCoins = 0;
   const hasToken = await consumeRateLimitToken(postId, playerId, nowMs);
   if (!hasToken) {
     const world = await loadWorldState(postId);
@@ -153,7 +155,7 @@ export const applyCommand = async (postId: string, envelope: CommandEnvelope): P
       };
     }
     const energyCost = envelope.command.structure.type === "tower" ? ENERGY_COST_TOWER : ENERGY_COST_WALL;
-    const spendResult = await spendGlobalCoins(energyCost, nowMs);
+    const spendResult = await spendCoins(energyCost, nowMs);
     if (!spendResult.ok) {
       const world = await loadWorldState(postId);
       return {
@@ -164,10 +166,14 @@ export const applyCommand = async (postId: string, envelope: CommandEnvelope): P
         reason: "not enough coins",
       };
     }
+    spentBuildCoins = energyCost;
   }
 
   const enqueueResult = await enqueueCommand(postId, nowMs, envelope);
   if (!enqueueResult.accepted) {
+    if (spentBuildCoins > 0) {
+      await addCoins(spentBuildCoins, nowMs);
+    }
     const world = await loadWorldState(postId);
     return {
       type: "commandAck",
@@ -220,11 +226,11 @@ export const heartbeatGame = async (
 };
 
 export const getCoinBalance = async (): Promise<number> =>
-  getGlobalCoins(Date.now());
+  getCoins(Date.now());
 
 export const resyncGame = async (postId: string, _playerId?: string): Promise<ResyncResponse> => {
   const world = await loadWorldState(postId);
-  world.meta.energy = await getGlobalCoins(Date.now());
+  world.meta.energy = await getCoins(Date.now());
   return {
     type: "snapshot",
     snapshot: world,

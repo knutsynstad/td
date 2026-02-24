@@ -1,7 +1,6 @@
 export const SIM_TICK_MS = 100;
 export const MAX_STEPS_PER_REQUEST = 25;
 export const PLAYER_TIMEOUT_MS = 10_000;
-export const HEARTBEAT_INTERVAL_MS = 1_000;
 export const PLAYER_SPEED_UNITS_PER_SECOND = 8;
 export const MOB_SPEED_UNITS_PER_SECOND = 3.4;
 export const MAX_PLAYERS = 500;

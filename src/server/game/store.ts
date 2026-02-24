@@ -10,9 +10,8 @@ import {
   MAX_STRUCTURES,
   PLAYER_SPEED_UNITS_PER_SECOND,
   RATE_REFILL_PER_SECOND,
-  SIM_TICK_MS,
 } from "./config";
-import { getGameRedisKeys } from "./keys";
+import { getEconomyRedisKeys, getGameRedisKeys } from "./keys";
 
 type RateLimitState = {
   tokens: number;
@@ -39,9 +38,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const clampCoins = (coins: number): number => Math.max(0, Math.min(ENERGY_CAP, coins));
-const GLOBAL_COINS_KEY = "coins";
-export const CASTLE_COINS_KEY = "castleCoins";
 const MAX_TX_RETRIES = 5;
+const economyKeys = getEconomyRedisKeys();
 
 const parseVec2 = (value: unknown) => {
   if (!isRecord(value)) return { x: 0, z: 0 };
@@ -337,12 +335,12 @@ export const touchPlayerPresence = async (postId: string, player: PlayerState): 
   const keys = getGameRedisKeys(postId);
   await Promise.all([
     redis.hSet(keys.players, { [player.playerId]: toJson(player) }),
-    redis.zAdd(keys.lastSeen, { member: player.playerId, score: player.lastSeenMs }),
+    redis.zAdd(keys.seen, { member: player.playerId, score: player.lastSeenMs }),
   ]);
 };
 
-export const getGlobalCoins = async (nowMs: number): Promise<number> => {
-  const raw = await redis.get(GLOBAL_COINS_KEY);
+export const getCoins = async (nowMs: number): Promise<number> => {
+  const raw = await redis.get(economyKeys.coins);
   const parsed = parseJson(raw ?? undefined);
   const current: GlobalCoinState = isRecord(parsed)
     ? {
@@ -384,14 +382,14 @@ const parseCastleCoins = (raw: string | undefined): number => {
   return Math.max(0, Math.floor(numeric));
 };
 
-export const spendGlobalCoins = async (
+export const spendCoins = async (
   amount: number,
   nowMs: number,
 ): Promise<{ ok: boolean; coins: number }> => {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(GLOBAL_COINS_KEY);
-    const current = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
+    const tx = await redis.watch(economyKeys.coins);
+    const current = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
     const accrued = accrueCoins(current, nowMs);
     if (accrued < safeAmount) {
       await tx.unwatch();
@@ -399,52 +397,52 @@ export const spendGlobalCoins = async (
     }
     const nextCoins = clampCoins(accrued - safeAmount);
     await tx.multi();
-    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
     const result = await tx.exec();
     if (result !== null) {
       return { ok: true, coins: nextCoins };
     }
   }
-  const fallback = await getGlobalCoins(nowMs);
+  const fallback = await getCoins(nowMs);
   return { ok: false, coins: fallback };
 };
 
-export const addGlobalCoins = async (
+export const addCoins = async (
   amount: number,
   nowMs: number,
 ): Promise<{ added: number; coins: number }> => {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(GLOBAL_COINS_KEY);
-    const current = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
+    const tx = await redis.watch(economyKeys.coins);
+    const current = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
     const accrued = accrueCoins(current, nowMs);
     const nextCoins = clampCoins(accrued + safeAmount);
     const added = Math.max(0, nextCoins - accrued);
     await tx.multi();
-    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
     const result = await tx.exec();
     if (result !== null) {
       return { added, coins: nextCoins };
     }
   }
-  return { added: 0, coins: await getGlobalCoins(nowMs) };
+  return { added: 0, coins: await getCoins(nowMs) };
 };
 
 export const getCastleCoins = async (): Promise<number> =>
-  parseCastleCoins(await redis.get(CASTLE_COINS_KEY));
+  parseCastleCoins(await redis.get(economyKeys.castle));
 
-export const depositCoinsToCastle = async (
+export const depositCastleCoins = async (
   amount: number,
   nowMs: number,
 ): Promise<{ ok: boolean; deposited: number; coins: number; castleCoins: number }> => {
   const safeAmount = Math.max(0, Math.floor(amount));
   if (safeAmount <= 0) {
-    return { ok: false, deposited: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
+    return { ok: false, deposited: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(GLOBAL_COINS_KEY, CASTLE_COINS_KEY);
-    const coinState = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
-    const castleCoins = parseCastleCoins(await redis.get(CASTLE_COINS_KEY));
+    const tx = await redis.watch(economyKeys.coins, economyKeys.castle);
+    const coinState = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
+    const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
     const accrued = accrueCoins(coinState, nowMs);
     if (accrued < safeAmount) {
       await tx.unwatch();
@@ -453,47 +451,42 @@ export const depositCoinsToCastle = async (
     const nextCoins = clampCoins(accrued - safeAmount);
     const nextCastleCoins = castleCoins + safeAmount;
     await tx.multi();
-    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
-    await tx.set(CASTLE_COINS_KEY, String(nextCastleCoins));
+    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(economyKeys.castle, String(nextCastleCoins));
     const result = await tx.exec();
     if (result !== null) {
       return { ok: true, deposited: safeAmount, coins: nextCoins, castleCoins: nextCastleCoins };
     }
   }
-  return { ok: false, deposited: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
+  return { ok: false, deposited: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
 };
 
-export const withdrawCoinsFromCastle = async (
+export const withdrawCastleCoins = async (
   requested: number,
   nowMs: number,
 ): Promise<{ withdrawn: number; coins: number; castleCoins: number }> => {
   const safeRequested = Math.max(0, Math.floor(requested));
   if (safeRequested <= 0) {
-    return { withdrawn: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
+    return { withdrawn: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(GLOBAL_COINS_KEY, CASTLE_COINS_KEY);
-    const coinState = parseGlobalCoinState(await redis.get(GLOBAL_COINS_KEY), nowMs);
-    const castleCoins = parseCastleCoins(await redis.get(CASTLE_COINS_KEY));
+    const tx = await redis.watch(economyKeys.coins, economyKeys.castle);
+    const coinState = parseGlobalCoinState(await redis.get(economyKeys.coins), nowMs);
+    const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
     const accrued = accrueCoins(coinState, nowMs);
     const maxAddable = Math.max(0, ENERGY_CAP - accrued);
     const withdrawn = Math.min(safeRequested, castleCoins, Math.floor(maxAddable));
     const nextCoins = clampCoins(accrued + withdrawn);
     const nextCastleCoins = Math.max(0, castleCoins - withdrawn);
     await tx.multi();
-    await tx.set(GLOBAL_COINS_KEY, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
-    await tx.set(CASTLE_COINS_KEY, String(nextCastleCoins));
+    await tx.set(economyKeys.coins, toJson({ coins: nextCoins, lastAccruedMs: nowMs }));
+    await tx.set(economyKeys.castle, String(nextCastleCoins));
     const result = await tx.exec();
     if (result !== null) {
       return { withdrawn, coins: nextCoins, castleCoins: nextCastleCoins };
     }
   }
-  return { withdrawn: 0, coins: await getGlobalCoins(nowMs), castleCoins: await getCastleCoins() };
-};
-
-export const setPlayerIntent = async (postId: string, playerId: string, intent: PlayerIntent): Promise<void> => {
-  const keys = getGameRedisKeys(postId);
-  await redis.hSet(keys.intents, { [playerId]: toJson(intent) });
+  return { withdrawn: 0, coins: await getCoins(nowMs), castleCoins: await getCastleCoins() };
 };
 
 export const enqueueCommand = async (
@@ -502,85 +495,108 @@ export const enqueueCommand = async (
   envelope: CommandEnvelope,
 ): Promise<{ accepted: boolean; reason?: string }> => {
   const keys = getGameRedisKeys(postId);
-  const queueSize = await redis.zCard(keys.pendingCommands);
-  if (queueSize >= MAX_QUEUE_COMMANDS) {
-    return { accepted: false, reason: "command queue is full" };
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(keys.queue);
+    const queueSize = await redis.zCard(keys.queue);
+    if (queueSize >= MAX_QUEUE_COMMANDS) {
+      await tx.unwatch();
+      return { accepted: false, reason: "command queue is full" };
+    }
+    await tx.multi();
+    await tx.zAdd(keys.queue, {
+      member: toJson(envelope),
+      score: nowMs,
+    });
+    const result = await tx.exec();
+    if (result !== null) {
+      return { accepted: true };
+    }
   }
-  await redis.zAdd(keys.pendingCommands, {
-    member: toJson(envelope),
-    score: nowMs,
-  });
-  return { accepted: true };
+  return { accepted: false, reason: "queue contention" };
 };
 
 export const popPendingCommands = async (postId: string, upToMs: number): Promise<CommandEnvelope[]> => {
   const keys = getGameRedisKeys(postId);
-  const items = await redis.zRange(keys.pendingCommands, 0, upToMs, {
-    by: "score",
-    limit: { offset: 0, count: MAX_COMMANDS_PER_BATCH },
-  });
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(keys.queue);
+    const items = await redis.zRange(keys.queue, 0, upToMs, {
+      by: "score",
+      limit: { offset: 0, count: MAX_COMMANDS_PER_BATCH },
+    });
+    if (items.length === 0) {
+      await tx.unwatch();
+      return [];
+    }
 
-  if (items.length === 0) return [];
-
-  const envelopes: CommandEnvelope[] = [];
-  const membersToRemove: string[] = [];
-  for (const item of items) {
-    const parsed = parseJson(item.member);
-    const envelope = parseCommandEnvelope(parsed);
-    if (envelope) {
-      envelopes.push(envelope);
+    const envelopes: CommandEnvelope[] = [];
+    const membersToRemove: string[] = [];
+    for (const item of items) {
+      const parsed = parseJson(item.member);
+      const envelope = parseCommandEnvelope(parsed);
+      if (envelope) {
+        envelopes.push(envelope);
+      }
       membersToRemove.push(item.member);
     }
-  }
 
-  if (membersToRemove.length > 0) {
-    await redis.zRem(keys.pendingCommands, membersToRemove);
+    if (membersToRemove.length === 0) {
+      await tx.unwatch();
+      return [];
+    }
+
+    await tx.multi();
+    await tx.zRem(keys.queue, membersToRemove);
+    const result = await tx.exec();
+    if (result !== null) {
+      return envelopes;
+    }
   }
-  return envelopes;
+  return [];
 };
 
 export const trimCommandQueue = async (postId: string): Promise<void> => {
   const keys = getGameRedisKeys(postId);
-  const count = await redis.zCard(keys.pendingCommands);
+  const count = await redis.zCard(keys.queue);
   if (count <= MAX_QUEUE_COMMANDS) return;
   const overflow = count - MAX_QUEUE_COMMANDS;
-  await redis.zRemRangeByRank(keys.pendingCommands, 0, overflow - 1);
+  await redis.zRemRangeByRank(keys.queue, 0, overflow - 1);
 };
 
 export const consumeRateLimitToken = async (postId: string, playerId: string, nowMs: number): Promise<boolean> => {
   const keys = getGameRedisKeys(postId);
-  const raw = await redis.hGet(keys.rateLimits, playerId);
-  const parsed = parseJson(raw ?? undefined);
-  const current: RateLimitState = isRecord(parsed)
-    ? {
-        tokens: Number(parsed.tokens ?? MAX_RATE_TOKENS),
-        lastRefillMs: Number(parsed.lastRefillMs ?? nowMs),
-      }
-    : {
-        tokens: MAX_RATE_TOKENS,
-        lastRefillMs: nowMs,
-      };
+  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
+    const tx = await redis.watch(keys.rate);
+    const raw = await redis.hGet(keys.rate, playerId);
+    const parsed = parseJson(raw ?? undefined);
+    const current: RateLimitState = isRecord(parsed)
+      ? {
+          tokens: Number(parsed.tokens ?? MAX_RATE_TOKENS),
+          lastRefillMs: Number(parsed.lastRefillMs ?? nowMs),
+        }
+      : {
+          tokens: MAX_RATE_TOKENS,
+          lastRefillMs: nowMs,
+        };
 
-  const elapsed = Math.max(0, nowMs - current.lastRefillMs);
-  const refill = (elapsed / 1000) * RATE_REFILL_PER_SECOND;
-  const tokens = Math.min(MAX_RATE_TOKENS, current.tokens + refill);
-  if (tokens < 1) {
-    await redis.hSet(keys.rateLimits, {
+    const elapsed = Math.max(0, nowMs - current.lastRefillMs);
+    const refill = (elapsed / 1000) * RATE_REFILL_PER_SECOND;
+    const tokens = Math.min(MAX_RATE_TOKENS, current.tokens + refill);
+    const hasToken = tokens >= 1;
+    const nextTokens = hasToken ? tokens - 1 : tokens;
+
+    await tx.multi();
+    await tx.hSet(keys.rate, {
       [playerId]: toJson({
-        tokens,
+        tokens: nextTokens,
         lastRefillMs: nowMs,
       }),
     });
-    return false;
+    const result = await tx.exec();
+    if (result !== null) {
+      return hasToken;
+    }
   }
-
-  await redis.hSet(keys.rateLimits, {
-    [playerId]: toJson({
-      tokens: tokens - 1,
-      lastRefillMs: nowMs,
-    }),
-  });
-  return true;
+  return false;
 };
 
 export const removePlayers = async (postId: string, playerIds: string[]): Promise<void> => {
@@ -589,13 +605,13 @@ export const removePlayers = async (postId: string, playerIds: string[]): Promis
   await Promise.all([
     redis.hDel(keys.players, playerIds),
     redis.hDel(keys.intents, playerIds),
-    redis.zRem(keys.lastSeen, playerIds),
+    redis.zRem(keys.seen, playerIds),
   ]);
 };
 
 export const removeOldPlayersByLastSeen = async (postId: string, cutoffMs: number, limit = 250): Promise<string[]> => {
   const keys = getGameRedisKeys(postId);
-  const stale = await redis.zRange(keys.lastSeen, 0, cutoffMs, {
+  const stale = await redis.zRange(keys.seen, 0, cutoffMs, {
     by: "score",
     limit: { offset: 0, count: limit },
   });
@@ -619,5 +635,3 @@ export const createDefaultPlayer = (playerId: string, username: string, nowMs: n
   speed: PLAYER_SPEED_UNITS_PER_SECOND,
   lastSeenMs: nowMs,
 });
-
-export const nextTickBoundary = (lastTickMs: number): number => lastTickMs + SIM_TICK_MS;
