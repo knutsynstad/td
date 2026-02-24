@@ -11,6 +11,7 @@ import type {
 import {
   DEFAULT_PLAYER_SPAWN,
   type PlayerState,
+  type StructureState,
 } from '../../shared/game-state';
 import {
   BACKLOG_RESYNC_STEP_THRESHOLD,
@@ -18,6 +19,7 @@ import {
   ENERGY_COST_WALL,
   MAX_BATCH_EVENTS,
   MAX_PLAYERS,
+  MAX_STRUCTURE_DELTA_UPSERTS,
   MAX_STEPS_PER_REQUEST,
   PLAYER_TIMEOUT_MS,
   SIM_TICK_MS,
@@ -27,6 +29,7 @@ import {
 } from './config';
 import { getGameChannelName } from './keys';
 import { buildPresenceLeaveDelta, runSimulation } from './simulation';
+import { buildStaticMapStructures, hasStaticMapStructures } from './staticStructures';
 import {
   acquireTickLease,
   addCoins,
@@ -128,6 +131,17 @@ const runPendingSimulation = async (
         )
       : [];
     const world = await loadWorldState();
+    const staticBootstrapUpserts: StructureState[] = [];
+    if (!hasStaticMapStructures(world.structures)) {
+      const staticStructures = buildStaticMapStructures(world.meta.lastTickMs);
+      for (const [structureId, structure] of Object.entries(staticStructures)) {
+        world.structures[structureId] = structure;
+        staticBootstrapUpserts.push(structure);
+      }
+      if (staticBootstrapUpserts.length > 0) {
+        world.meta.worldVersion += 1;
+      }
+    }
     const simulationStartTickMs = world.meta.lastTickMs;
     const commands = await popPendingCommands(nowMs);
     const result = runSimulation(world, nowMs, commands, MAX_STEPS_PER_REQUEST);
@@ -147,7 +161,23 @@ const runPendingSimulation = async (
         playerId
       )
     );
-    const deltas = [...staleDeltas, ...result.deltas];
+    const bootstrapDeltas: GameDelta[] =
+      staticBootstrapUpserts.length > 0
+        ? [
+            {
+              type: 'structureDelta',
+              tickSeq: result.world.meta.tickSeq,
+              worldVersion: result.world.meta.worldVersion,
+              upserts: staticBootstrapUpserts.slice(
+                0,
+                MAX_STRUCTURE_DELTA_UPSERTS
+              ),
+              removes: [],
+              requiresPathRefresh: true,
+            },
+          ]
+        : [];
+    const deltas = [...bootstrapDeltas, ...staleDeltas, ...result.deltas];
     if (remainingSteps >= BACKLOG_RESYNC_STEP_THRESHOLD) {
       deltas.push({
         type: 'resyncRequired',
@@ -211,6 +241,12 @@ export const joinGame = async (): Promise<JoinResponse> => {
   const nowMs = Date.now();
   await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
   const world = await loadWorldState();
+  if (!hasStaticMapStructures(world.structures)) {
+    const staticStructures = buildStaticMapStructures(world.meta.lastTickMs);
+    for (const [structureId, structure] of Object.entries(staticStructures)) {
+      world.structures[structureId] = structure;
+    }
+  }
   const playerCount = Object.keys(world.players).length;
   if (playerCount >= MAX_PLAYERS) {
     throw new Error('game is full');
@@ -358,6 +394,12 @@ export const getCoinBalance = async (): Promise<number> => getCoins(Date.now());
 
 export const resyncGame = async (_playerId?: string): Promise<ResyncResponse> => {
   const world = await loadWorldState();
+  if (!hasStaticMapStructures(world.structures)) {
+    const staticStructures = buildStaticMapStructures(world.meta.lastTickMs);
+    for (const [structureId, structure] of Object.entries(staticStructures)) {
+      world.structures[structureId] = structure;
+    }
+  }
   world.meta.energy = await getCoins(Date.now());
   return {
     type: 'snapshot',

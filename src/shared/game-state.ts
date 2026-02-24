@@ -22,6 +22,19 @@ export type PlayerState = {
 
 export type StructureType = 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
 
+export type StructureMetadata = {
+  treeFootprint?: 1 | 2 | 3 | 4;
+  rock?: {
+    footprintX: number;
+    footprintZ: number;
+    yawQuarterTurns: 0 | 1 | 2 | 3;
+    modelIndex: 0 | 1;
+    mirrorX: boolean;
+    mirrorZ: boolean;
+    verticalScale: number;
+  };
+};
+
 export type StructureState = {
   structureId: string;
   ownerId: string;
@@ -30,6 +43,7 @@ export type StructureState = {
   hp: number;
   maxHp: number;
   createdAtMs: number;
+  metadata?: StructureMetadata;
 };
 
 export type MobState = {
@@ -39,6 +53,7 @@ export type MobState = {
   hp: number;
   maxHp: number;
   spawnerId: string;
+  routeIndex: number;
 };
 
 export type SpawnerState = {
@@ -49,6 +64,8 @@ export type SpawnerState = {
   spawnRatePerSecond: number;
   spawnAccumulator: number;
   gateOpen: boolean;
+  routeState: 'reachable' | 'unstable' | 'blocked';
+  route: Vec2[];
 };
 
 export type WaveState = {

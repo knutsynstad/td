@@ -126,7 +126,6 @@ import {
   TREE_GROWTH_MS,
   TREE_REGROW_MS,
   TOWER_HEIGHT,
-  TOWER_HP,
   WATER_BOB_AMPLITUDE,
   WATER_BOB_SPEED,
   WATER_LEVEL,
@@ -177,11 +176,6 @@ import {
   assertStructureStoreConsistency,
 } from './domains/gameplay/invariants';
 import { createRandomSource, deriveSeed, hashSeed } from './domains/world/rng';
-import {
-  generateSeededWorldFeatures,
-  type RockPlacement,
-  type TreePlacement,
-} from './domains/world/seededWorld';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const WORLD_SEED_INPUT: string | number = 'alpha valley 01';
@@ -191,7 +185,18 @@ const random = () => randomSource.next();
 const HITBOX_LAYER = 1;
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower');
 const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2);
-type TreeFootprint = TreePlacement['footprint'];
+type TreeFootprint = 1 | 2 | 3 | 4;
+type RockPlacement = {
+  x: number;
+  z: number;
+  footprintX: number;
+  footprintZ: number;
+  yawQuarterTurns: 0 | 1 | 2 | 3;
+  modelIndex: 0 | 1;
+  mirrorX: boolean;
+  mirrorZ: boolean;
+  verticalScale: number;
+};
 const DEFAULT_TREE_FOOTPRINT: TreeFootprint = 2;
 const clampTreeFootprint = (value: number): TreeFootprint => {
   if (value <= 1) return 1;
@@ -2742,7 +2747,6 @@ loadModelWithProgress(
     replaceCastleContent(model);
     updateCastleColliderFromObject(model);
     updateCastleBankPilesVisual();
-    placeCastleGuardTowers();
     refreshAllSpawnerPathlines();
   },
   (error) => {
@@ -2760,7 +2764,6 @@ loadModelWithProgress(
     replaceCastleContent(fallback);
     updateCastleColliderFromObject(fallback);
     updateCastleBankPilesVisual();
-    placeCastleGuardTowers();
     refreshAllSpawnerPathlines();
   }
 );
@@ -3613,6 +3616,8 @@ const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
 let authoritativeBridge: Awaited<
   ReturnType<typeof connectAuthoritativeBridge>
 > | null = null;
+let authoritativeHandshakePending = true;
+let authoritativeInitialDataReady = false;
 let authoritativeSelfPlayerId = '';
 let lastNetworkHeartbeatAt = 0;
 let lastMoveIntentSentAt = 0;
@@ -3631,6 +3636,115 @@ let serverLastAckSeq = 0;
 const isServerAuthoritative = () => authoritativeBridge !== null;
 const toPerfTime = (serverEpochMs: number) =>
   performance.now() + Math.max(0, serverEpochMs - Date.now());
+
+const getDoorPositionForSpawnerId = (spawnerId: string): THREE.Vector3 | null => {
+  if (spawnerId.endsWith('-north')) return new THREE.Vector3(0, 0, -WORLD_BOUNDS);
+  if (spawnerId.endsWith('-east')) return new THREE.Vector3(WORLD_BOUNDS, 0, 0);
+  if (spawnerId.endsWith('-south')) return new THREE.Vector3(0, 0, WORLD_BOUNDS);
+  if (spawnerId.endsWith('-west')) return new THREE.Vector3(-WORLD_BOUNDS, 0, 0);
+  return null;
+};
+
+const syncAuthoritativeWaveSpawners = (wave: SharedWaveState) => {
+  // Drop any local-only wave state once server authority is active.
+  pendingWave = null;
+  pendingWaveSpawners.length = 0;
+  pendingSpawnerById.clear();
+  pendingGateOpenBySpawnerId.clear();
+
+  const nextSpawnerIds = new Set(wave.spawners.map((entry) => entry.spawnerId));
+  let topologyChanged = nextSpawnerIds.size !== spawnerById.size;
+  if (!topologyChanged) {
+    for (const spawnerId of nextSpawnerIds) {
+      if (!spawnerById.has(spawnerId)) {
+        topologyChanged = true;
+        break;
+      }
+    }
+  }
+
+  if (topologyChanged) {
+    clearWaveOverlays();
+    activeWaveSpawners.length = 0;
+    spawnerById.clear();
+  }
+
+  for (const entry of wave.spawners) {
+    let spawner = spawnerById.get(entry.spawnerId);
+    if (!spawner) {
+      const position = getDoorPositionForSpawnerId(entry.spawnerId);
+      if (!position) continue;
+      spawner = {
+        id: entry.spawnerId,
+        position,
+        gateOpen: entry.gateOpen,
+        totalCount: entry.totalCount,
+        spawnedCount: entry.spawnedCount,
+        aliveCount: entry.aliveCount,
+        spawnRatePerSecond: entry.spawnRatePerSecond,
+        spawnAccumulator: entry.spawnAccumulator,
+        routeState: 'reachable',
+      };
+      activeWaveSpawners.push(spawner);
+      spawnerById.set(spawner.id, spawner);
+    }
+
+    spawner.gateOpen = entry.gateOpen;
+    spawner.totalCount = entry.totalCount;
+    spawner.spawnedCount = entry.spawnedCount;
+    spawner.aliveCount = entry.aliveCount;
+    spawner.spawnRatePerSecond = entry.spawnRatePerSecond;
+    spawner.spawnAccumulator = entry.spawnAccumulator;
+
+    const routePoints = entry.route.map(
+      (point) => new THREE.Vector3(point.x, 0, point.z)
+    );
+    const stagingPreviewPoints = [
+      getStagingIslandCenter(spawner.position),
+      getSpawnerGatePoint(spawner.position),
+      getSpawnerBridgeExitPoint(spawner.position),
+    ];
+    const fullDisplayPoints = [...stagingPreviewPoints, ...routePoints];
+    const connector = buildPathTilesFromPoints(
+      [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
+      staticColliders,
+      WORLD_BOUNDS,
+      CASTLE_ROUTE_HALF_WIDTH_CELLS
+    );
+    const corridor = buildPathTilesFromPoints(
+      routePoints,
+      staticColliders,
+      WORLD_BOUNDS,
+      CASTLE_ROUTE_HALF_WIDTH_CELLS
+    );
+    spawner.routeState = entry.routeState;
+    spawnerPathlineCache.set(spawner.id, {
+      points: routePoints,
+      state: entry.routeState,
+    });
+    if (entry.routeState === 'reachable') {
+      const merged = new Map<string, THREE.Vector3>();
+      for (const tile of connector.tiles) merged.set(`${tile.x},${tile.z}`, tile);
+      for (const tile of corridor.tiles) merged.set(`${tile.x},${tile.z}`, tile);
+      pathTilePositions.set(spawner.id, Array.from(merged.values()));
+    } else {
+      pathTilePositions.set(spawner.id, []);
+    }
+    spawnerRouteOverlay.upsert(spawner.id, fullDisplayPoints, entry.routeState);
+    spawnContainerOverlay.upsert(
+      spawner.id,
+      getSpawnContainerCorners(spawner.position)
+    );
+    stagingIslandsOverlay.upsert(
+      getSpawnerAnchorId(spawner.position),
+      getStagingIslandCenter(spawner.position),
+      getSpawnerOutwardNormal(spawner.position),
+      spawner.gateOpen,
+      spawner.totalCount > 0
+    );
+  }
+  rebuildPathTileLayer();
+};
 
 const upsertRemoteNpc = (
   playerId: string,
@@ -3673,6 +3787,7 @@ const syncServerMeta = (
   serverWaveActive = wave.active;
   gameState.nextWaveAt =
     wave.nextWaveAtMs > 0 ? toPerfTime(wave.nextWaveAtMs) : 0;
+  syncAuthoritativeWaveSpawners(wave);
 };
 
 const removeServerStructure = (structureId: string) => {
@@ -3765,6 +3880,102 @@ const upsertServerStructure = (entry: SharedStructureState) => {
     serverStructureById.set(entry.structureId, collider);
     return;
   }
+
+  if (entry.type === 'tree') {
+    const treeFootprint = clampTreeFootprint(entry.metadata?.treeFootprint ?? 2);
+    const size = getTreeBuildSizeForFootprint(treeFootprint);
+    const half = size.clone().multiplyScalar(0.5);
+    const center = snapCenterToBuildGrid(targetCenter, size);
+    const hitboxMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4f8f46,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    hitboxMaterial.colorWrite = false;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size.x, size.y, size.z),
+      hitboxMaterial
+    );
+    mesh.position.copy(center);
+    mesh.userData.treeFootprint = treeFootprint;
+    mesh.layers.set(HITBOX_LAYER);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    if (treeModelTemplate) {
+      applyTreeVisualToMesh(mesh);
+    }
+    scene.add(mesh);
+    const collider = structureStore.addTreeCollider(center, half, mesh, entry.maxHp, {
+      playerBuilt: entry.ownerId !== 'Map',
+      createdAtMs: entry.createdAtMs,
+      lastDecayTickMs: entry.createdAtMs,
+    });
+    const state = structureStore.structureStates.get(collider);
+    if (state) {
+      state.hp = entry.hp;
+      state.maxHp = entry.maxHp;
+    }
+    serverStructureById.set(entry.structureId, collider);
+    return;
+  }
+
+  if (entry.type === 'rock') {
+    const rockMeta = entry.metadata?.rock;
+    const placement: RockPlacement = {
+      x: targetCenter.x,
+      z: targetCenter.z,
+      footprintX: Math.max(1, rockMeta?.footprintX ?? 1),
+      footprintZ: Math.max(1, rockMeta?.footprintZ ?? 1),
+      yawQuarterTurns: rockMeta?.yawQuarterTurns ?? 0,
+      modelIndex: rockMeta?.modelIndex ?? 0,
+      mirrorX: rockMeta?.mirrorX ?? false,
+      mirrorZ: rockMeta?.mirrorZ ?? false,
+      verticalScale: rockMeta?.verticalScale ?? 1,
+    };
+    const size = new THREE.Vector3(
+      Math.max(1, placement.footprintX),
+      ROCK_BASE_HEIGHT,
+      Math.max(1, placement.footprintZ)
+    );
+    const half = size.clone().multiplyScalar(0.5);
+    const snapped = snapCenterToBuildGrid(targetCenter, size);
+    const colliderCenter = snapped.clone().setY(half.y);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size.x, size.y, size.z),
+      new THREE.MeshStandardMaterial({ color: 0x646d79 })
+    );
+    mesh.position.copy(colliderCenter);
+    mesh.userData.rockModelIndex = placement.modelIndex;
+    mesh.userData.rockYawQuarterTurns = placement.yawQuarterTurns;
+    mesh.userData.rockFootprintX = placement.footprintX;
+    mesh.userData.rockFootprintZ = placement.footprintZ;
+    mesh.userData.rockMirrorX = placement.mirrorX;
+    mesh.userData.rockMirrorZ = placement.mirrorZ;
+    mesh.userData.rockVerticalScale = placement.verticalScale;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    applyRockVisualToMesh(mesh);
+    scene.add(mesh);
+    const collider = structureStore.addRockCollider(
+      colliderCenter,
+      half,
+      mesh,
+      entry.maxHp,
+      {
+        playerBuilt: entry.ownerId !== 'Map',
+        createdAtMs: entry.createdAtMs,
+        lastDecayTickMs: entry.createdAtMs,
+      }
+    );
+    const state = structureStore.structureStates.get(collider);
+    if (state) {
+      state.hp = entry.hp;
+      state.maxHp = entry.maxHp;
+    }
+    serverStructureById.set(entry.structureId, collider);
+    return;
+  }
 };
 
 const applyServerStructureDelta = (delta: StructureDelta) => {
@@ -3774,7 +3985,7 @@ const applyServerStructureDelta = (delta: StructureDelta) => {
   for (const structure of delta.upserts) {
     upsertServerStructure(structure);
   }
-  if (delta.requiresPathRefresh) {
+  if (delta.requiresPathRefresh && !isServerAuthoritative()) {
     refreshAllSpawnerPathlines();
   }
 };
@@ -3839,6 +4050,7 @@ const applyServerMobDelta = (delta: EntityDelta) => {
         hp: item.hp,
         maxHp: item.maxHp,
         spawnerId: '',
+        routeIndex: 0,
       });
       continue;
     }
@@ -3869,6 +4081,7 @@ const applyServerWaveDelta = (delta: WaveDelta) => {
   serverWaveActive = delta.wave.active;
   gameState.nextWaveAt =
     delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0;
+  syncAuthoritativeWaveSpawners(delta.wave);
 };
 
 const applyServerSnapshot = (snapshot: SharedWorldState) => {
@@ -3920,11 +4133,16 @@ const updateServerMobInterpolation = (now: number) => {
 };
 
 const setupAuthoritativeBridge = async () => {
-  if (authoritativeBridge) return;
+  if (authoritativeBridge) {
+    authoritativeHandshakePending = false;
+    return;
+  }
   try {
     authoritativeBridge = await connectAuthoritativeBridge({
       onSnapshot: (snapshot) => {
         applyServerSnapshot(snapshot);
+        authoritativeInitialDataReady = true;
+        startGameWhenReady?.();
       },
       onSelfReady: (playerId, username, position) => {
         authoritativeSelfPlayerId = playerId;
@@ -3971,6 +4189,10 @@ const setupAuthoritativeBridge = async () => {
     void syncCastleCoinsFromServer();
   } catch (error) {
     console.error('Failed to connect authoritative bridge', error);
+    authoritativeInitialDataReady = true;
+  } finally {
+    authoritativeHandshakePending = false;
+    startGameWhenReady?.();
   }
 };
 
@@ -5993,52 +6215,6 @@ const placeWallSegments = (positions: THREE.Vector3[]) => {
   return placed > 0;
 };
 
-const addMapTower = (center: THREE.Vector3) => {
-  const size = getBuildSizeForMode('tower');
-  const half = size.clone().multiplyScalar(0.5);
-  const snapped = snapCenterToBuildGrid(center, size);
-  if (!canPlaceAt(snapped, half, staticColliders)) return;
-  const tower = createTowerAt(snapped, 'base', 'Map');
-  const mesh = tower.mesh;
-  markPersistentMapFeature(mesh);
-  const nowMs = Date.now();
-  structureStore.addTowerCollider(snapped, half, mesh, tower, TOWER_HP, {
-    playerBuilt: false,
-    createdAtMs: nowMs,
-    lastDecayTickMs: nowMs,
-    cumulativeBuildCost: ENERGY_COST_TOWER,
-  });
-};
-
-let castleGuardTowersPlaced = false;
-const placeCastleGuardTowers = () => {
-  if (castleGuardTowersPlaced) return;
-  const centerX = castleCollider.center.x;
-  const centerZ = castleCollider.center.z;
-  const outwardOffset = 6;
-  const sideOffset = 4;
-  const xOffset = castleCollider.halfSize.x + outwardOffset;
-  const zOffset = castleCollider.halfSize.z + outwardOffset;
-
-  const positions = [
-    new THREE.Vector3(centerX - sideOffset, 0, centerZ + zOffset),
-    new THREE.Vector3(centerX + sideOffset, 0, centerZ + zOffset),
-    new THREE.Vector3(centerX - sideOffset, 0, centerZ - zOffset),
-    new THREE.Vector3(centerX + sideOffset, 0, centerZ - zOffset),
-    new THREE.Vector3(centerX + xOffset, 0, centerZ - sideOffset),
-    new THREE.Vector3(centerX + xOffset, 0, centerZ + sideOffset),
-    new THREE.Vector3(centerX - xOffset, 0, centerZ - sideOffset),
-    new THREE.Vector3(centerX - xOffset, 0, centerZ + sideOffset),
-  ];
-
-  for (const position of positions) {
-    addMapTower(position);
-  }
-  castleGuardTowersPlaced = true;
-  invalidateCastleFlowField();
-  refreshAllSpawnerPathlines();
-};
-
 const addMapTree = (
   center: THREE.Vector3,
   initialScale = 1,
@@ -6083,62 +6259,8 @@ const addMapTree = (
   return true;
 };
 
-const addMapRock = (center: THREE.Vector3, placement: RockPlacement) => {
-  const size = new THREE.Vector3(
-    Math.max(1, placement.footprintX),
-    ROCK_BASE_HEIGHT,
-    Math.max(1, placement.footprintZ)
-  );
-  const half = size.clone().multiplyScalar(0.5);
-  const snapped = snapCenterToBuildGrid(center, size);
-  if (!canPlaceAt(snapped, half, staticColliders)) return false;
-  const colliderCenter = snapped.clone().setY(half.y);
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size.x, size.y, size.z),
-    new THREE.MeshStandardMaterial({ color: 0x646d79 })
-  );
-  mesh.position.copy(colliderCenter);
-  mesh.userData.rockModelIndex = placement.modelIndex;
-  mesh.userData.rockYawQuarterTurns = placement.yawQuarterTurns;
-  mesh.userData.rockFootprintX = placement.footprintX;
-  mesh.userData.rockFootprintZ = placement.footprintZ;
-  mesh.userData.rockMirrorX = placement.mirrorX;
-  mesh.userData.rockMirrorZ = placement.mirrorZ;
-  mesh.userData.rockVerticalScale = placement.verticalScale;
-  markPersistentMapFeature(mesh);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  applyRockVisualToMesh(mesh);
-  scene.add(mesh);
-  const nowMs = Date.now();
-  structureStore.addRockCollider(colliderCenter, half, mesh, WALL_HP, {
-    playerBuilt: false,
-    createdAtMs: nowMs,
-    lastDecayTickMs: nowMs,
-  });
-  return true;
-};
-
-const populateSeededWorld = () => {
-  rockVisualsNeedFullRefresh = true;
-  const features = generateSeededWorldFeatures({
-    seed: WORLD_SEED,
-    worldBounds: WORLD_BOUNDS,
-    margin: 3,
-  });
-  for (const tree of features.trees) {
-    addMapTree(new THREE.Vector3(tree.x, 0, tree.z), 1, tree.footprint);
-  }
-  for (const rock of features.rocks) {
-    addMapRock(new THREE.Vector3(rock.x, 0, rock.z), rock);
-  }
-};
-
-populateSeededWorld();
+rockVisualsNeedFullRefresh = true;
 renderAllCardinalStagingIslands();
-
-// Initialize lane paths for active spawners once map is ready.
-refreshAllSpawnerPathlines();
 
 const CASTLE_FALL_RESTART_DELAY_MS = 30000;
 const CASTLE_FALL_TAX_RATE = 0.2;
@@ -6208,7 +6330,6 @@ const resetGame = (restartAt: number) => {
   }
   treeRegrowQueue.length = 0;
   growingTrees.length = 0;
-  populateSeededWorld();
   updateCastleBankPilesVisual();
   for (const tower of Array.from(towerBallistaRigs.keys())) {
     if (towers.includes(tower)) continue;
@@ -6928,6 +7049,8 @@ const processCastleCaptures = (now: number) => {
 
 const tick = (now: number, delta: number) => {
   const serverAuthoritative = isServerAuthoritative();
+  const allowLocalSimulation =
+    !serverAuthoritative && !authoritativeHandshakePending;
   if (rockVisualsNeedFullRefresh && hasAllRockTemplates()) {
     refreshAllRockVisuals(true);
     rockVisualsNeedFullRefresh = false;
@@ -6963,7 +7086,7 @@ const tick = (now: number, delta: number) => {
   }
   processTreeRegrowth(wallClockNowMs);
   updateGrowingTrees(wallClockNowMs);
-  if (!serverAuthoritative) {
+  if (allowLocalSimulation) {
     processPendingGateOpens(delta);
     waveAndSpawnSystem.emit(pendingWaveSpawners, delta, (fromSpawner) =>
       makeMob(fromSpawner)
@@ -7010,14 +7133,14 @@ const tick = (now: number, delta: number) => {
 
   if (serverAuthoritative) {
     updateServerMobInterpolation(now);
-  } else {
+  } else if (allowLocalSimulation) {
     for (const mob of mobs) {
       mob.target.set(0, 0, 0);
       updateEntityMotion(mob, delta);
     }
   }
 
-  if (!serverAuthoritative && processCastleCaptures(now)) return;
+  if (allowLocalSimulation && processCastleCaptures(now)) return;
 
   spatialGrid.clear();
   const dynamicEntities = [player, ...npcs, ...mobs];
@@ -7115,7 +7238,7 @@ const tick = (now: number, delta: number) => {
     clampStagedMobToSpawnerIsland(mob);
   }
 
-  if (!serverAuthoritative) {
+  if (allowLocalSimulation) {
     for (let i = mobs.length - 1; i >= 0; i -= 1) {
       const mob = mobs[i]!;
       if ((mob.hp ?? 0) <= 0) {
@@ -7134,8 +7257,10 @@ const tick = (now: number, delta: number) => {
 
   const waveComplete = serverAuthoritative
     ? gameState.wave > 0 && !serverWaveActive && mobs.length === 0
-    : gameState.wave > 0 && areWaveSpawnersDone(activeWaveSpawners);
-  if (!serverAuthoritative) {
+    : allowLocalSimulation &&
+      gameState.wave > 0 &&
+      areWaveSpawnersDone(activeWaveSpawners);
+  if (allowLocalSimulation) {
     if (waveComplete && gameState.nextWaveAt === 0) {
       prepareNextWave();
       gameState.nextWaveAt = now + 10000;
@@ -7374,7 +7499,7 @@ const tick = (now: number, delta: number) => {
         `Bank invariant violated: bankEnergy=${gameState.bankEnergy}`
       );
     }
-    if (!serverAuthoritative) {
+    if (allowLocalSimulation) {
       assertSpawnerCounts(activeWaveSpawners);
       assertMobSpawnerReferences(
         mobs,
@@ -7394,9 +7519,9 @@ const tick = (now: number, delta: number) => {
 const gameLoop = createGameLoop(tick);
 startGameWhenReady = () => {
   if (hasStartedGameLoop || !hasFinishedLoadingAssets) return;
+  if (!authoritativeInitialDataReady) return;
   hasStartedGameLoop = true;
   completeLoadingAndRevealScene();
-  void setupAuthoritativeBridge();
   gameLoop.start();
 };
 let disposed = false;
@@ -7496,4 +7621,5 @@ const disposeApp = () => {
 window.addEventListener('beforeunload', disposeApp);
 syncCoinTrailViewport();
 syncMinimapCanvasSize();
+void setupAuthoritativeBridge();
 startGameWhenReady();

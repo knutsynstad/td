@@ -5,6 +5,7 @@ import {
   type MobState,
   type PlayerIntent,
   type PlayerState,
+  type StructureMetadata,
   type StructureState,
   type WaveState,
   type WorldMeta,
@@ -21,6 +22,7 @@ import {
   RATE_REFILL_PER_SECOND,
 } from './config';
 import { getEconomyRedisKeys, getGameRedisKeys } from './keys';
+import { buildStaticMapStructures } from './staticStructures';
 
 type RateLimitState = {
   tokens: number;
@@ -139,6 +141,40 @@ const parseStructure = (value: unknown): StructureState => {
       createdAtMs: 0,
     };
   }
+  const parseStructureMetadata = (raw: unknown): StructureMetadata | undefined => {
+    if (!isRecord(raw)) return undefined;
+    const out: StructureMetadata = {};
+    const treeFootprint = Number(raw.treeFootprint ?? 0);
+    if (treeFootprint >= 1 && treeFootprint < 2) out.treeFootprint = 1;
+    else if (treeFootprint >= 2 && treeFootprint < 3) out.treeFootprint = 2;
+    else if (treeFootprint >= 3 && treeFootprint < 4) out.treeFootprint = 3;
+    else if (treeFootprint >= 4) out.treeFootprint = 4;
+    const rockRaw = raw.rock;
+    if (isRecord(rockRaw)) {
+      const yawQuarterTurns = Number(rockRaw.yawQuarterTurns ?? 0);
+      const modelIndex = Number(rockRaw.modelIndex ?? 0);
+      const parsedYaw =
+        yawQuarterTurns >= 0 && yawQuarterTurns < 1
+          ? 0
+          : yawQuarterTurns >= 1 && yawQuarterTurns < 2
+            ? 1
+            : yawQuarterTurns >= 2 && yawQuarterTurns < 3
+              ? 2
+              : 3;
+      out.rock = {
+        footprintX: Math.max(1, Number(rockRaw.footprintX ?? 1)),
+        footprintZ: Math.max(1, Number(rockRaw.footprintZ ?? 1)),
+        yawQuarterTurns: parsedYaw,
+        modelIndex: modelIndex === 1 ? 1 : 0,
+        mirrorX: Boolean(rockRaw.mirrorX ?? false),
+        mirrorZ: Boolean(rockRaw.mirrorZ ?? false),
+        verticalScale: Math.max(0.1, Number(rockRaw.verticalScale ?? 1)),
+      };
+    }
+    if (!out.treeFootprint && !out.rock) return undefined;
+    return out;
+  };
+
   return {
     structureId: String(value.structureId ?? ''),
     ownerId: String(value.ownerId ?? ''),
@@ -153,6 +189,7 @@ const parseStructure = (value: unknown): StructureState => {
     hp: Number(value.hp ?? 1),
     maxHp: Number(value.maxHp ?? 1),
     createdAtMs: Number(value.createdAtMs ?? 0),
+    metadata: parseStructureMetadata(value.metadata),
   };
 };
 
@@ -165,6 +202,7 @@ const parseMob = (value: unknown): MobState => {
       hp: 1,
       maxHp: 1,
       spawnerId: '',
+      routeIndex: 0,
     };
   }
   return {
@@ -174,6 +212,7 @@ const parseMob = (value: unknown): MobState => {
     hp: Number(value.hp ?? 1),
     maxHp: Number(value.maxHp ?? 1),
     spawnerId: String(value.spawnerId ?? ''),
+    routeIndex: Number(value.routeIndex ?? 0),
   };
 };
 
@@ -318,24 +357,31 @@ export const loadWorldState = async (): Promise<WorldState> => {
   );
   const mobs = parseMapFromHash<MobState>(mobsRaw, parseMob);
   const parsedWave = parseJson(waveRaw ?? undefined);
-  const wave = isRecord(parsedWave)
+  const makeDefaultSpawner = (): WaveState['spawners'][number] => ({
+    spawnerId: '',
+    totalCount: 0,
+    spawnedCount: 0,
+    aliveCount: 0,
+    spawnRatePerSecond: 0,
+    spawnAccumulator: 0,
+    gateOpen: false,
+    routeState: 'blocked',
+    route: [],
+  });
+  const wave: WaveState = isRecord(parsedWave)
     ? {
         wave: Number(parsedWave.wave ?? 0),
         active: Boolean(parsedWave.active ?? false),
         nextWaveAtMs: Number(parsedWave.nextWaveAtMs ?? 0),
         spawners: Array.isArray(parsedWave.spawners)
           ? parsedWave.spawners.map((entry) => {
-              if (!isRecord(entry)) {
-                return {
-                  spawnerId: '',
-                  totalCount: 0,
-                  spawnedCount: 0,
-                  aliveCount: 0,
-                  spawnRatePerSecond: 0,
-                  spawnAccumulator: 0,
-                  gateOpen: false,
-                };
-              }
+              if (!isRecord(entry)) return makeDefaultSpawner();
+              const rawRoute = Array.isArray(entry.route) ? entry.route : [];
+              const routeState: WaveState['spawners'][number]['routeState'] =
+                entry.routeState === 'reachable' ||
+                entry.routeState === 'unstable'
+                  ? entry.routeState
+                  : 'blocked';
               return {
                 spawnerId: String(entry.spawnerId ?? ''),
                 totalCount: Number(entry.totalCount ?? 0),
@@ -344,6 +390,8 @@ export const loadWorldState = async (): Promise<WorldState> => {
                 spawnRatePerSecond: Number(entry.spawnRatePerSecond ?? 0),
                 spawnAccumulator: Number(entry.spawnAccumulator ?? 0),
                 gateOpen: Boolean(entry.gateOpen ?? false),
+                routeState,
+                route: rawRoute.map((point) => parseVec2(point)),
               };
             })
           : [],
@@ -918,6 +966,12 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
   const preservedCoins = await getCoins(nowMs);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
 
+  const staticStructures = buildStaticMapStructures(nowMs);
+  const structureWrites: Record<string, string> = {};
+  for (const [structureId, structure] of Object.entries(staticStructures)) {
+    structureWrites[structureId] = toJson(structure);
+  }
+
   await Promise.all([
     redis.hSet(keys.meta, {
       tickSeq: String(nextMeta.tickSeq),
@@ -941,4 +995,7 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
     redis.del(keys.lastTickRunMs),
     redis.del(keys.lastPublishTickSeq),
   ]);
+  if (Object.keys(structureWrites).length > 0) {
+    await redis.hSet(keys.structures, structureWrites);
+  }
 };

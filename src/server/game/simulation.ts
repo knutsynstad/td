@@ -34,6 +34,15 @@ const normalize = (x: number, z: number): { x: number; z: number } => {
   return { x: x / len, z: z / len };
 };
 
+const hashString01 = (value: string): number => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) / 4294967296;
+};
+
 const WORLD_BOUNDS = 64;
 const GRID_SIZE = 1;
 const SPAWNER_ENTRY_INSET_CELLS = 3;
@@ -41,6 +50,8 @@ const STAGING_ISLAND_DISTANCE = 14;
 const CASTLE_CAPTURE_RADIUS = 2;
 const CASTLE_ROUTE_HALF_WIDTH_CELLS = 1;
 const CASTLE_HALF_EXTENT = 4;
+const MOB_ROUTE_REACH_RADIUS = 0.65;
+const MOB_ROUTE_LATERAL_SPREAD = 0.9;
 
 type SideId = 'north' | 'east' | 'south' | 'west';
 type SideDef = {
@@ -241,21 +252,43 @@ const buildFlowField = (
     }
   };
 
+  // Keep castle walls blocked so routes terminate at entrances.
+  markBlockedAabb(0, 0, CASTLE_HALF_EXTENT, CASTLE_HALF_EXTENT);
+
   for (const structure of Object.values(structures)) {
-    const halfSize =
+    const treeFootprint = structure.metadata?.treeFootprint ?? 2;
+    const rockHalfX = (structure.metadata?.rock?.footprintX ?? 2) * 0.5;
+    const rockHalfZ = (structure.metadata?.rock?.footprintZ ?? 2) * 0.5;
+    const halfX =
       structure.type === 'wall'
         ? 0.6
         : structure.type === 'tower'
-          ? 0.8
+          ? 1
           : structure.type === 'bank'
             ? 1.4
-            : 1.1;
+            : structure.type === 'tree'
+              ? treeFootprint * 0.5
+              : structure.type === 'rock'
+                ? rockHalfX
+                : 1.1;
+    const halfZ =
+      structure.type === 'wall'
+        ? 0.6
+        : structure.type === 'tower'
+          ? 1
+          : structure.type === 'bank'
+            ? 1.4
+            : structure.type === 'tree'
+              ? treeFootprint * 0.5
+              : structure.type === 'rock'
+                ? rockHalfZ
+                : 1.1;
     const inflate = structure.type === 'wall' ? 0.25 : 0.4;
     markBlockedAabb(
       structure.center.x,
       structure.center.z,
-      halfSize + inflate,
-      halfSize + inflate
+      halfX + inflate,
+      halfZ + inflate
     );
   }
 
@@ -316,6 +349,15 @@ const buildFlowField = (
   };
 };
 
+const getNearestGoalDistance = (goals: Array<{ x: number; z: number }>, x: number, z: number) => {
+  let best = Number.POSITIVE_INFINITY;
+  for (const goal of goals) {
+    const d = distance(goal.x, goal.z, x, z);
+    if (d < best) best = d;
+  }
+  return best;
+};
+
 const pickFlowDirection = (
   field: FlowField,
   x: number,
@@ -374,6 +416,66 @@ const pickFlowDirection = (
   return normalize(bestGoal.x - x, bestGoal.z - z);
 };
 
+const buildSpawnerRoute = (
+  field: FlowField,
+  start: { x: number; z: number }
+): { route: Array<{ x: number; z: number }>; routeState: 'reachable' | 'blocked' } => {
+  const toCellNearest = (wx: number, wz: number): [number, number] => {
+    const cx = Math.max(
+      0,
+      Math.min(field.width - 1, Math.round((wx - field.minWX) / field.resolution))
+    );
+    const cz = Math.max(
+      0,
+      Math.min(field.height - 1, Math.round((wz - field.minWZ) / field.resolution))
+    );
+    return [cx, cz];
+  };
+  const toIdx = (cx: number, cz: number) => cz * field.width + cx;
+
+  const route: Array<{ x: number; z: number }> = [start];
+  let point = { ...start };
+  const maxSteps = field.width * field.height;
+  for (let step = 0; step < maxSteps; step += 1) {
+    const [cx, cz] = toCellNearest(point.x, point.z);
+    const idx = toIdx(cx, cz);
+    if (field.distance[idx] === 0) {
+      return { route, routeState: 'reachable' };
+    }
+    const dir = pickFlowDirection(field, point.x, point.z);
+    if (dir.x === 0 && dir.z === 0) break;
+    const nextPoint = {
+      x: point.x + dir.x * field.resolution,
+      z: point.z + dir.z * field.resolution,
+    };
+    const last = route[route.length - 1]!;
+    if (distance(last.x, last.z, nextPoint.x, nextPoint.z) > 0.25) {
+      route.push(nextPoint);
+    }
+    point = nextPoint;
+  }
+  if (field.goals[0]) route.push(field.goals[0]);
+  return { route, routeState: 'blocked' };
+};
+
+const getNearestRouteIndex = (
+  route: Array<{ x: number; z: number }>,
+  position: { x: number; z: number }
+): number => {
+  if (route.length === 0) return 0;
+  let bestIdx = 0;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < route.length; i += 1) {
+    const point = route[i]!;
+    const d = distance(point.x, point.z, position.x, position.z);
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+};
+
 const makeMob = (tickSeq: number, spawnerId: string): MobState => {
   const side = toSideDef(spawnerId);
   const spawn = getSpawnerSpawnPoint(side);
@@ -384,28 +486,72 @@ const makeMob = (tickSeq: number, spawnerId: string): MobState => {
     hp: 100,
     maxHp: 100,
     spawnerId,
+    routeIndex: 0,
   };
+};
+
+const recomputeSpawnerRoutes = (world: WorldState): void => {
+  const goals = getCastleEntryGoals();
+  const field = buildFlowField(world.structures, goals);
+  const routesBySpawner = new Map<string, Array<{ x: number; z: number }>>();
+  for (const spawner of world.wave.spawners) {
+    const side = toSideDef(spawner.spawnerId);
+    const entry = getSpawnerEntryPoint(side);
+    const route = buildSpawnerRoute(field, entry);
+    spawner.route = route.route;
+    spawner.routeState = route.routeState;
+    routesBySpawner.set(spawner.spawnerId, route.route);
+  }
+
+  for (const mob of Object.values(world.mobs)) {
+    const route = routesBySpawner.get(mob.spawnerId) ?? [];
+    const nearest = getNearestRouteIndex(route, mob.position);
+    mob.routeIndex = Math.max(0, Math.min(nearest, Math.max(0, route.length - 1)));
+  }
+};
+
+const prepareNextWaveSpawners = (
+  world: WorldState
+): WorldState['wave']['spawners'] => {
+  const nextWave = world.wave.wave + 1;
+  const totalMobCount = (5 + nextWave * 2) * 8;
+  const sides = pickSpawnerSidesForWave(nextWave);
+  const split = splitByWeights(totalMobCount, sides.length);
+  return split.map((count, index) => {
+    const side = sides[index]!;
+    return {
+      spawnerId: `wave-${nextWave}-${side.id}`,
+      totalCount: count,
+      spawnedCount: 0,
+      aliveCount: 0,
+      spawnRatePerSecond:
+        (WAVE_SPAWN_BASE + nextWave * 0.2) * (0.9 + Math.random() * 0.4),
+      spawnAccumulator: 0,
+      gateOpen: false,
+      routeState: 'blocked',
+      route: [],
+    };
+  });
+};
+
+const prepareUpcomingWave = (world: WorldState): void => {
+  world.wave.spawners = prepareNextWaveSpawners(world);
+  recomputeSpawnerRoutes(world);
 };
 
 const activateWave = (world: WorldState): boolean => {
   if (world.wave.active) return false;
+  if (world.wave.spawners.length === 0) {
+    prepareUpcomingWave(world);
+  }
   world.wave.wave += 1;
   world.wave.active = true;
-  const totalMobCount = (5 + world.wave.wave * 2) * 8;
-  const sides = pickSpawnerSidesForWave(world.wave.wave);
-  const split = splitByWeights(totalMobCount, sides.length);
-  world.wave.spawners = split.map((count, index) => {
-    const side = sides[index]!;
-    return {
-      spawnerId: `wave-${world.wave.wave}-${side.id}`,
-      totalCount: count,
-      spawnedCount: 0,
-      aliveCount: 0,
-      spawnRatePerSecond: (WAVE_SPAWN_BASE + world.wave.wave * 0.2) * (0.9 + Math.random() * 0.4),
-      spawnAccumulator: 0,
-      gateOpen: false,
-    };
-  });
+  for (const spawner of world.wave.spawners) {
+    spawner.spawnedCount = 0;
+    spawner.aliveCount = 0;
+    spawner.spawnAccumulator = 0;
+    spawner.gateOpen = false;
+  }
   world.wave.nextWaveAtMs = 0;
   return true;
 };
@@ -413,6 +559,9 @@ const activateWave = (world: WorldState): boolean => {
 const ensureInitialWaveSchedule = (world: WorldState): boolean => {
   if (world.wave.wave > 0 || world.wave.active || world.wave.nextWaveAtMs > 0) {
     return false;
+  }
+  if (world.wave.spawners.length === 0) {
+    prepareUpcomingWave(world);
   }
   world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INITIAL_DELAY_MS;
   return true;
@@ -426,8 +575,7 @@ const maybeActivateScheduledWave = (world: WorldState): boolean => {
 
 const updateMobs = (
   world: WorldState,
-  deltaSeconds: number,
-  field: FlowField
+  deltaSeconds: number
 ): { upserts: MobState[]; despawnedIds: string[] } => {
   const upserts: MobState[] = [];
   const despawnedIds: string[] = [];
@@ -438,17 +586,66 @@ const updateMobs = (
   const spawnerById = new Map(
     world.wave.spawners.map((spawner) => [spawner.spawnerId, spawner])
   );
+  const goals = getCastleEntryGoals();
   for (const mob of Object.values(world.mobs)) {
     const side = toSideDef(mob.spawnerId);
     const entry = getSpawnerEntryPoint(side);
+    const spawner = spawnerById.get(mob.spawnerId);
+    const route = spawner?.route ?? [];
+    const canUseRoute = route.length > 0;
     const isInMap =
       Math.abs(mob.position.x) <= WORLD_BOUNDS &&
       Math.abs(mob.position.z) <= WORLD_BOUNDS;
-    const moveDir = isInMap
-      ? pickFlowDirection(field, mob.position.x, mob.position.z)
-      : normalize(entry.x - mob.position.x, entry.z - mob.position.z);
-    mob.velocity.x = moveDir.x * MOB_SPEED_UNITS_PER_SECOND;
-    mob.velocity.z = moveDir.z * MOB_SPEED_UNITS_PER_SECOND;
+    let target = entry;
+    const laneOffset =
+      (hashString01(`${mob.mobId}:lane`) * 2 - 1) * MOB_ROUTE_LATERAL_SPREAD;
+    if (isInMap && canUseRoute) {
+      const maxRouteIndex = Math.max(0, route.length - 1);
+      mob.routeIndex = Math.max(0, Math.min(mob.routeIndex, maxRouteIndex));
+      const currentTarget = route[mob.routeIndex] ?? route[maxRouteIndex]!;
+      if (
+        distance(
+          mob.position.x,
+          mob.position.z,
+          currentTarget.x,
+          currentTarget.z
+        ) <= MOB_ROUTE_REACH_RADIUS + Math.abs(laneOffset) * 0.9
+      ) {
+        mob.routeIndex = Math.min(maxRouteIndex, mob.routeIndex + 1);
+      }
+      const routedTarget = route[mob.routeIndex] ?? route[maxRouteIndex]!;
+      const nextRouteIdx = Math.min(maxRouteIndex, mob.routeIndex + 1);
+      const prevRouteIdx = Math.max(0, mob.routeIndex - 1);
+      const nextPoint = route[nextRouteIdx] ?? routedTarget;
+      const prevPoint = route[prevRouteIdx] ?? routedTarget;
+      const hasForwardSegment =
+        nextPoint.x !== routedTarget.x || nextPoint.z !== routedTarget.z;
+      const forward = normalize(
+        hasForwardSegment
+          ? nextPoint.x - routedTarget.x
+          : routedTarget.x - prevPoint.x,
+        hasForwardSegment
+          ? nextPoint.z - routedTarget.z
+          : routedTarget.z - prevPoint.z
+      );
+      const lateralScale = mob.routeIndex >= maxRouteIndex - 2 ? 0.45 : 1;
+      target = {
+        x: routedTarget.x - forward.z * laneOffset * lateralScale,
+        z: routedTarget.z + forward.x * laneOffset * lateralScale,
+      };
+    } else if (isInMap && !canUseRoute) {
+      // Fallback for invalid/blocked routes.
+      const fallbackGoal = goals[0] ?? { x: 0, z: 0 };
+      target = fallbackGoal;
+    }
+
+    const moveDir = normalize(
+      target.x - mob.position.x,
+      target.z - mob.position.z
+    );
+    const speedScale = 0.92 + hashString01(`${mob.mobId}:speed`) * 0.16;
+    mob.velocity.x = moveDir.x * MOB_SPEED_UNITS_PER_SECOND * speedScale;
+    mob.velocity.z = moveDir.z * MOB_SPEED_UNITS_PER_SECOND * speedScale;
     mob.position.x += mob.velocity.x * deltaSeconds;
     mob.position.z += mob.velocity.z * deltaSeconds;
 
@@ -465,10 +662,14 @@ const updateMobs = (
       }
     }
 
-    if (mob.hp <= 0 || distance(0, 0, mob.position.x, mob.position.z) < CASTLE_CAPTURE_RADIUS) {
+    const nearestGoalDistance = getNearestGoalDistance(
+      goals,
+      mob.position.x,
+      mob.position.z
+    );
+    if (mob.hp <= 0 || nearestGoalDistance < CASTLE_CAPTURE_RADIUS) {
       despawnedIds.push(mob.mobId);
       delete world.mobs[mob.mobId];
-      const spawner = spawnerById.get(mob.spawnerId);
       if (spawner) {
         spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
       }
@@ -512,6 +713,7 @@ const updateWave = (world: WorldState, deltaSeconds: number): boolean => {
   const aliveMobs = Object.keys(world.mobs).length;
   if (allSpawned && aliveMobs === 0) {
     world.wave.active = false;
+    prepareUpcomingWave(world);
     world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INTERMISSION_MS;
     changed = true;
   }
@@ -610,6 +812,10 @@ export const runSimulation = (
   let waveChanged = ensureInitialWaveSchedule(world);
   const commandChanges = applyCommands(world, commands, nowMs);
   waveChanged = waveChanged || commandChanges.waveChanged;
+  if (world.wave.spawners.some((spawner) => spawner.route.length === 0)) {
+    recomputeSpawnerRoutes(world);
+    waveChanged = true;
+  }
   if (commandChanges.movedPlayers.length > 0) {
     deltas.push({
       type: 'entityDelta',
@@ -624,6 +830,8 @@ export const runSimulation = (
     commandChanges.structureUpserts.length > 0 ||
     commandChanges.structureRemoves.length > 0
   ) {
+    recomputeSpawnerRoutes(world);
+    waveChanged = true;
     const structureDelta: StructureDelta = {
       type: 'structureDelta',
       tickSeq: world.meta.tickSeq,
@@ -643,40 +851,28 @@ export const runSimulation = (
   }
 
   let steps = 0;
-  let latestEntityDelta: EntityDelta | null = null;
+  const interpolationStartMs = world.meta.lastTickMs;
+  const mobStartById = new Map(
+    Object.values(world.mobs).map((mob) => [
+      mob.mobId,
+      { x: mob.position.x, z: mob.position.z },
+    ])
+  );
+  let latestMobUpserts: MobState[] = [];
+  const despawnedDuringRun = new Set<string>();
   let latestWaveDelta: WaveDelta | null = null;
-  const flowField = buildFlowField(world.structures, getCastleEntryGoals());
   while (world.meta.lastTickMs + SIM_TICK_MS <= nowMs && steps < maxSteps) {
-    const fromMs = world.meta.lastTickMs;
     world.meta.lastTickMs += SIM_TICK_MS;
     world.meta.tickSeq += 1;
     steps += 1;
     const deltaSeconds = SIM_TICK_MS / 1000;
 
     const waveChanged = updateWave(world, deltaSeconds);
-    const mobResult = updateMobs(world, deltaSeconds, flowField);
-    const entityDelta: EntityDelta = {
-      type: 'entityDelta',
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion,
-      players: [],
-      mobs: mobResult.upserts.slice(0, MAX_DELTA_MOBS).map((mob) => ({
-        mobId: mob.mobId,
-        interpolation: {
-          from: {
-            x: mob.position.x - mob.velocity.x * deltaSeconds,
-            z: mob.position.z - mob.velocity.z * deltaSeconds,
-          },
-          to: { x: mob.position.x, z: mob.position.z },
-          t0: fromMs,
-          t1: world.meta.lastTickMs,
-        },
-        hp: mob.hp,
-        maxHp: mob.maxHp,
-      })),
-      despawnedMobIds: mobResult.despawnedIds,
-    };
-    latestEntityDelta = entityDelta;
+    const mobResult = updateMobs(world, deltaSeconds);
+    latestMobUpserts = mobResult.upserts;
+    for (const mobId of mobResult.despawnedIds) {
+      despawnedDuringRun.add(mobId);
+    }
 
     if (waveChanged) {
       latestWaveDelta = {
@@ -697,8 +893,32 @@ export const runSimulation = (
     };
   }
 
-  if (latestEntityDelta) {
-    deltas.push(latestEntityDelta);
+  if (steps > 0) {
+    const entityDelta: EntityDelta = {
+      type: 'entityDelta',
+      tickSeq: world.meta.tickSeq,
+      worldVersion: world.meta.worldVersion,
+      players: [],
+      mobs: latestMobUpserts.slice(0, MAX_DELTA_MOBS).map((mob) => {
+        const from = mobStartById.get(mob.mobId);
+        return {
+          mobId: mob.mobId,
+          interpolation: {
+            from: from ?? {
+              x: mob.position.x - mob.velocity.x * (SIM_TICK_MS / 1000),
+              z: mob.position.z - mob.velocity.z * (SIM_TICK_MS / 1000),
+            },
+            to: { x: mob.position.x, z: mob.position.z },
+            t0: interpolationStartMs,
+            t1: world.meta.lastTickMs,
+          },
+          hp: mob.hp,
+          maxHp: mob.maxHp,
+        };
+      }),
+      despawnedMobIds: Array.from(despawnedDuringRun),
+    };
+    deltas.push(entityDelta);
   }
   if (latestWaveDelta) {
     deltas.push(latestWaveDelta);

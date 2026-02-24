@@ -22,5 +22,7 @@ test('resetGame resets wave progression without economy tax', async () => {
   expect(snapshot.snapshot.wave.active).toBe(false);
   expect(snapshot.snapshot.wave.nextWaveAtMs).toBe(0);
   expect(Object.keys(snapshot.snapshot.mobs)).toHaveLength(0);
-  expect(Object.keys(snapshot.snapshot.structures)).toHaveLength(0);
+  const structures = Object.values(snapshot.snapshot.structures);
+  expect(structures.length).toBeGreaterThan(0);
+  expect(structures.every((structure) => structure.ownerId === 'Map')).toBe(true);
 });
