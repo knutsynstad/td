@@ -5645,12 +5645,16 @@ const getWallLinePlacement = (
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
   if (authoritativeBridge) {
-    const center = start.clone().add(end).multiplyScalar(0.5);
-    void authoritativeBridge.sendBuildStructure({
-      structureId: `wall-line-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
-      type: 'wall',
-      center: { x: center.x, z: center.z },
-    });
+    const { validPositions } = getWallLinePlacement(start, end, gameState.energy);
+    if (validPositions.length === 0) return false;
+    const now = Date.now();
+    void authoritativeBridge.sendBuildStructures(
+      validPositions.map((center, i) => ({
+        structureId: `wall-line-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
+        type: 'wall',
+        center: { x: center.x, z: center.z },
+      }))
+    );
     return true;
   }
   const placed = placeWallSegment(start, end, gameState.energy, {
@@ -5670,12 +5674,14 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
 
 const placeWallSegments = (positions: THREE.Vector3[]) => {
   if (authoritativeBridge && positions.length > 0) {
-    const center = positions[Math.floor(positions.length * 0.5)]!;
-    void authoritativeBridge.sendBuildStructure({
-      structureId: `wall-segments-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
-      type: 'wall',
-      center: { x: center.x, z: center.z },
-    });
+    const now = Date.now();
+    void authoritativeBridge.sendBuildStructures(
+      positions.map((center, i) => ({
+        structureId: `wall-segments-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
+        type: 'wall',
+        center: { x: center.x, z: center.z },
+      }))
+    );
     return true;
   }
   const placed = placeWallSegmentsAt(positions, gameState.energy, {

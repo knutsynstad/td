@@ -30,6 +30,16 @@ export type BuildStructureCommand = {
   };
 };
 
+export type BuildStructuresCommand = {
+  type: 'buildStructures';
+  playerId: string;
+  structures: Array<{
+    structureId: string;
+    type: StructureState['type'];
+    center: Vec2;
+  }>;
+};
+
 export type RemoveStructureCommand = {
   type: 'removeStructure';
   playerId: string;
@@ -50,6 +60,7 @@ export type ShootCommand = {
 export type GameCommand =
   | MoveIntentCommand
   | BuildStructureCommand
+  | BuildStructuresCommand
   | RemoveStructureCommand
   | StartWaveCommand
   | ShootCommand;

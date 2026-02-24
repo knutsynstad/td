@@ -1,6 +1,7 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import { joinGame, resetGame, resyncGame, runLeaderLoop } from './service';
+import type { CommandEnvelope } from '../../shared/game-protocol';
+import { applyCommand, getCoinBalance, joinGame, resetGame, resyncGame, runLeaderLoop } from './service';
 
 const test = createDevvitTest();
 
@@ -23,4 +24,58 @@ test('resetGame resets wave progression without economy tax', async () => {
   const structures = Object.values(snapshot.snapshot.structures);
   expect(structures.length).toBeGreaterThan(0);
   expect(structures.every((structure) => structure.ownerId === 'Map')).toBe(true);
+});
+
+test('applyCommand charges total cost for batched buildStructures', async () => {
+  await resetGame();
+  const joined = await joinGame();
+  const beforeCoins = await getCoinBalance();
+  const envelope: CommandEnvelope = {
+    seq: 1,
+    sentAtMs: Date.now(),
+    command: {
+      type: 'buildStructures',
+      playerId: joined.playerId,
+      structures: [
+        {
+          structureId: 'batch-wall-1',
+          type: 'wall',
+          center: { x: 12, z: 12 },
+        },
+        {
+          structureId: 'batch-wall-2',
+          type: 'wall',
+          center: { x: 13, z: 12 },
+        },
+      ],
+    },
+  };
+  const response = await applyCommand(envelope);
+  const afterCoins = await getCoinBalance();
+  const spent = beforeCoins - afterCoins;
+
+  expect(response.accepted).toBe(true);
+  expect(spent).toBeGreaterThan(3.99);
+  expect(spent).toBeLessThan(4.01);
+});
+
+test('applyCommand rejects empty buildStructures payloads', async () => {
+  await resetGame();
+  const joined = await joinGame();
+  const beforeCoins = await getCoinBalance();
+  const envelope: CommandEnvelope = {
+    seq: 2,
+    sentAtMs: Date.now(),
+    command: {
+      type: 'buildStructures',
+      playerId: joined.playerId,
+      structures: [],
+    },
+  };
+  const response = await applyCommand(envelope);
+  const afterCoins = await getCoinBalance();
+
+  expect(response.accepted).toBe(false);
+  expect(response.reason).toBe('no structures requested');
+  expect(afterCoins).toBe(beforeCoins);
 });

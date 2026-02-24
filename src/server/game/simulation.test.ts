@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { CommandEnvelope } from '../../shared/game-protocol';
 import type { WorldState } from '../../shared/game-state';
 import { AUTO_WAVE_INITIAL_DELAY_MS } from './config';
 import { runSimulation } from './simulation';
@@ -75,6 +76,49 @@ describe('runSimulation', () => {
           before.dir !== middle.dir;
         expect(isSingleCellKink).toBe(false);
       }
+    }
+  });
+
+  it('applies batched buildStructures commands in a single tick', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    const commands: CommandEnvelope[] = [
+      {
+        seq: 1,
+        sentAtMs: nowMs,
+        command: {
+          type: 'buildStructures',
+          playerId: 'player-1',
+          structures: [
+            {
+              structureId: 'wall-a',
+              type: 'wall',
+              center: { x: 10, z: 10 },
+            },
+            {
+              structureId: 'wall-b',
+              type: 'wall',
+              center: { x: 11, z: 10 },
+            },
+          ],
+        },
+      },
+    ];
+
+    const result = runSimulation(gameWorld, nowMs + 100, commands, 1);
+    expect(result.world.structures['wall-a']?.type).toBe('wall');
+    expect(result.world.structures['wall-b']?.type).toBe('wall');
+
+    const structureDelta = result.deltas.find(
+      (delta) => delta.type === 'structureDelta'
+    );
+    expect(structureDelta?.type).toBe('structureDelta');
+    if (structureDelta?.type === 'structureDelta') {
+      expect(structureDelta.upserts.map((entry) => entry.structureId)).toEqual(
+        expect.arrayContaining(['wall-a', 'wall-b'])
+      );
+      expect(structureDelta.upserts).toHaveLength(2);
+      expect(structureDelta.requiresPathRefresh).toBe(true);
     }
   });
 });

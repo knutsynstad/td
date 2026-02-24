@@ -71,6 +71,14 @@ const parseVec2 = (value: unknown) => {
   };
 };
 
+const parseStructureType = (value: unknown): StructureState['type'] =>
+  value === 'tower' ||
+  value === 'tree' ||
+  value === 'rock' ||
+  value === 'bank'
+    ? value
+    : 'wall';
+
 const parsePlayerState = (value: unknown): PlayerState => {
   if (!isRecord(value)) {
     return {
@@ -236,15 +244,31 @@ const parseCommandEnvelope = (value: unknown): CommandEnvelope | undefined => {
         playerId,
         structure: {
           structureId: String(structure.structureId ?? ''),
-          type:
-            structure.type === 'tower' ||
-            structure.type === 'tree' ||
-            structure.type === 'rock' ||
-            structure.type === 'bank'
-              ? structure.type
-              : 'wall',
+          type: parseStructureType(structure.type),
           center: parseVec2(structure.center),
         },
+      },
+    };
+  }
+  if (commandType === 'buildStructures') {
+    const rawStructures = Array.isArray(value.command.structures)
+      ? value.command.structures
+      : [];
+    const structures = rawStructures
+      .filter(isRecord)
+      .map((structure) => ({
+        structureId: String(structure.structureId ?? ''),
+        type: parseStructureType(structure.type),
+        center: parseVec2(structure.center),
+      }))
+      .filter((structure) => structure.structureId.length > 0);
+    return {
+      seq,
+      sentAtMs,
+      command: {
+        type: 'buildStructures',
+        playerId,
+        structures,
       },
     };
   }
@@ -843,10 +867,13 @@ export const removeOldPlayersByLastSeen = async (
   return playerIds;
 };
 
-export const enforceStructureCap = async (): Promise<boolean> => {
+export const enforceStructureCap = async (
+  incomingCount = 1
+): Promise<boolean> => {
   const keys = getGameRedisKeys();
   const count = await redis.hLen(keys.structures);
-  return count < MAX_STRUCTURES;
+  const safeIncoming = Math.max(0, Math.floor(incomingCount));
+  return count + safeIncoming <= MAX_STRUCTURES;
 };
 
 export const createDefaultPlayer = (

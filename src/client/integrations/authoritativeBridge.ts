@@ -40,6 +40,13 @@ type AuthoritativeBridge = {
     type: 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
     center: Vec2;
   }) => Promise<void>;
+  sendBuildStructures: (
+    payloads: Array<{
+      structureId: string;
+      type: 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
+      center: Vec2;
+    }>
+  ) => Promise<void>;
   resync: () => Promise<void>;
   heartbeat: (position: Vec2) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -250,6 +257,14 @@ export const connectAuthoritativeBridge = async (
         type: 'buildStructure',
         playerId: joinResponse.playerId,
         structure: payload,
+      });
+    },
+    sendBuildStructures: async (payloads) => {
+      if (payloads.length === 0) return;
+      await sendCommand({
+        type: 'buildStructures',
+        playerId: joinResponse.playerId,
+        structures: payloads,
       });
     },
     resync,

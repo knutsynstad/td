@@ -797,6 +797,22 @@ const applyCommands = (
       structureUpserts.push(structure);
       continue;
     }
+    if (command.type === 'buildStructures') {
+      for (const requested of command.structures) {
+        const structure: StructureState = {
+          structureId: requested.structureId,
+          ownerId: command.playerId,
+          type: requested.type,
+          center: requested.center,
+          hp: 100,
+          maxHp: 100,
+          createdAtMs: world.meta.lastTickMs,
+        };
+        world.structures[structure.structureId] = structure;
+        structureUpserts.push(structure);
+      }
+      continue;
+    }
     if (command.type === 'removeStructure') {
       delete world.structures[command.structureId];
       structureRemoves.push(command.structureId);

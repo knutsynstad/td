@@ -277,6 +277,8 @@ export const applyCommand = async (
   const nowMs = Date.now();
   const playerId = envelope.command.playerId;
   let spentBuildCoins = 0;
+  const getStructureEnergyCost = (type: string): number =>
+    type === 'tower' ? ENERGY_COST_TOWER : ENERGY_COST_WALL;
   const hasToken = await consumeRateLimitToken(playerId, nowMs);
   if (!hasToken) {
     const world = await loadWorldState();
@@ -289,8 +291,26 @@ export const applyCommand = async (
     };
   }
 
-  if (envelope.command.type === 'buildStructure') {
-    const canBuild = await enforceStructureCap();
+  if (
+    envelope.command.type === 'buildStructure' ||
+    envelope.command.type === 'buildStructures'
+  ) {
+    const structures =
+      envelope.command.type === 'buildStructure'
+        ? [envelope.command.structure]
+        : envelope.command.structures;
+    const requestedCount = structures.length;
+    if (requestedCount <= 0) {
+      const world = await loadWorldState();
+      return {
+        type: 'commandAck',
+        accepted: false,
+        tickSeq: world.meta.tickSeq,
+        worldVersion: world.meta.worldVersion,
+        reason: 'no structures requested',
+      };
+    }
+    const canBuild = await enforceStructureCap(requestedCount);
     if (!canBuild) {
       const world = await loadWorldState();
       return {
@@ -301,10 +321,10 @@ export const applyCommand = async (
         reason: 'structure cap reached',
       };
     }
-    const energyCost =
-      envelope.command.structure.type === 'tower'
-        ? ENERGY_COST_TOWER
-        : ENERGY_COST_WALL;
+    const energyCost = structures.reduce(
+      (total, structure) => total + getStructureEnergyCost(structure.type),
+      0
+    );
     const spendResult = await spendCoins(energyCost, nowMs);
     if (!spendResult.ok) {
       const world = await loadWorldState();
