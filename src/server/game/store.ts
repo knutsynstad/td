@@ -34,15 +34,9 @@ type GlobalCoinState = {
   lastAccruedMs: number;
 };
 
-type TickLeaseState = {
-  ownerId: string;
-  token: number;
-  expiresAtMs: number;
-};
-
-export type TickHealthState = {
-  lastTickRunMs: number;
-  lastPublishTickSeq: number;
+export type LeaderLockResult = {
+  acquired: boolean;
+  ownerToken: string;
 };
 
 const toJson = (value: unknown): string => JSON.stringify(value);
@@ -62,31 +56,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const clampCoins = (coins: number): number =>
   Math.max(0, Math.min(ENERGY_CAP, coins));
 const MAX_TX_RETRIES = 5;
-const TX_RETRY_BASE_DELAY_MS = 5;
 const economyKeys = getEconomyRedisKeys();
 
-const sleep = async (ms: number): Promise<void> =>
+export const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-
-const isRedisTransactionFailure = (error: unknown): boolean =>
-  error instanceof Error &&
-  /redis:\s*transaction failed/i.test(error.message);
-
-const parseTickLeaseState = (
-  raw: string | undefined
-): TickLeaseState | undefined => {
-  const parsed = parseJson(raw);
-  if (!isRecord(parsed)) return undefined;
-  const ownerId = String(parsed.ownerId ?? '');
-  const token = Number(parsed.token ?? 0);
-  const expiresAtMs = Number(parsed.expiresAtMs ?? 0);
-  if (!ownerId || !Number.isFinite(token) || !Number.isFinite(expiresAtMs)) {
-    return undefined;
-  }
-  return { ownerId, token, expiresAtMs };
-};
 
 const parseVec2 = (value: unknown) => {
   if (!isRecord(value)) return { x: 0, z: 0 };
@@ -805,102 +780,44 @@ export const removePlayers = async (
   ]);
 };
 
-export const acquireTickLease = async (
-  ownerId: string,
-  nowMs: number,
-  leaseMs: number
-): Promise<{ ownerId: string; token: number; expiresAtMs: number } | null> => {
-  const keys = getGameRedisKeys();
-  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    let tx:
-      | Awaited<ReturnType<typeof redis.watch>>
-      | undefined;
-    try {
-      tx = await redis.watch(keys.tickLease, keys.tickLeaseToken);
-      const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
-      if (
-        currentLease &&
-        currentLease.expiresAtMs > nowMs &&
-        currentLease.ownerId !== ownerId
-      ) {
-        await tx.unwatch();
-        return null;
-      }
-      const currentToken = Number((await redis.get(keys.tickLeaseToken)) ?? '0');
-      const nextToken = Number.isFinite(currentToken) ? currentToken + 1 : 1;
-      const nextLease: TickLeaseState = {
-        ownerId,
-        token: nextToken,
-        expiresAtMs: nowMs + Math.max(1, leaseMs),
-      };
-      await tx.multi();
-      await tx.set(keys.tickLeaseToken, String(nextToken));
-      await tx.set(keys.tickLease, toJson(nextLease));
-      const result = await tx.exec();
-      if (result !== null) {
-        return nextLease;
-      }
-    } catch (error) {
-      if (!isRedisTransactionFailure(error)) {
-        throw error;
-      }
-      try {
-        await tx?.unwatch();
-      } catch {
-        // Best-effort cleanup only.
-      }
-      const backoffMs = TX_RETRY_BASE_DELAY_MS * (attempt + 1);
-      await sleep(backoffMs);
-    }
-  }
-  return null;
-};
-
-export const releaseTickLease = async (
-  ownerId: string,
-  token: number
+export const acquireLeaderLock = async (
+  ownerToken: string,
+  ttlSeconds: number
 ): Promise<boolean> => {
   const keys = getGameRedisKeys();
-  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    let tx:
-      | Awaited<ReturnType<typeof redis.watch>>
-      | undefined;
-    try {
-      tx = await redis.watch(keys.tickLease);
-      const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
-      if (!currentLease) {
-        await tx.unwatch();
-        return true;
-      }
-      if (currentLease.ownerId !== ownerId || currentLease.token !== token) {
-        await tx.unwatch();
-        return false;
-      }
-      await tx.multi();
-      await tx.del(keys.tickLease);
-      const result = await tx.exec();
-      if (result !== null) {
-        return true;
-      }
-    } catch (error) {
-      if (!isRedisTransactionFailure(error)) {
-        throw error;
-      }
-      try {
-        await tx?.unwatch();
-      } catch {
-        // Best-effort cleanup only.
-      }
-      const backoffMs = TX_RETRY_BASE_DELAY_MS * (attempt + 1);
-      await sleep(backoffMs);
-    }
+  try {
+    await redis.set(keys.leaderLock, ownerToken, {
+      expiration: new Date(Date.now() + ttlSeconds * 1000),
+    });
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 };
 
-export const markTickRun = async (nowMs: number): Promise<void> => {
+export const verifyLeaderLock = async (
+  ownerToken: string
+): Promise<boolean> => {
   const keys = getGameRedisKeys();
-  await redis.set(keys.lastTickRunMs, String(nowMs));
+  const current = await redis.get(keys.leaderLock);
+  return current === ownerToken;
+};
+
+export const refreshLeaderLock = async (
+  ttlSeconds: number
+): Promise<void> => {
+  const keys = getGameRedisKeys();
+  await redis.expire(keys.leaderLock, ttlSeconds);
+};
+
+export const releaseLeaderLock = async (
+  ownerToken: string
+): Promise<void> => {
+  const keys = getGameRedisKeys();
+  const current = await redis.get(keys.leaderLock);
+  if (current === ownerToken) {
+    await redis.del(keys.leaderLock);
+  }
 };
 
 export const markTickPublish = async (tickSeq: number): Promise<void> => {
@@ -909,22 +826,6 @@ export const markTickPublish = async (tickSeq: number): Promise<void> => {
     keys.lastPublishTickSeq,
     String(Math.max(0, Math.floor(tickSeq)))
   );
-};
-
-export const getTickHealth = async (): Promise<TickHealthState> => {
-  const keys = getGameRedisKeys();
-  const [lastTickRunRaw, lastPublishRaw] = await Promise.all([
-    redis.get(keys.lastTickRunMs),
-    redis.get(keys.lastPublishTickSeq),
-  ]);
-  const lastTickRunMs = Number(lastTickRunRaw ?? '0');
-  const lastPublishTickSeq = Number(lastPublishRaw ?? '0');
-  return {
-    lastTickRunMs: Number.isFinite(lastTickRunMs) ? lastTickRunMs : 0,
-    lastPublishTickSeq: Number.isFinite(lastPublishTickSeq)
-      ? lastPublishTickSeq
-      : 0,
-  };
 };
 
 export const removeOldPlayersByLastSeen = async (
@@ -990,9 +891,7 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
     redis.del(keys.seen),
     redis.del(keys.rate),
     redis.del(keys.snaps),
-    redis.del(keys.tickLease),
-    redis.del(keys.tickLeaseToken),
-    redis.del(keys.lastTickRunMs),
+    redis.del(keys.leaderLock),
     redis.del(keys.lastPublishTickSeq),
   ]);
   if (Object.keys(structureWrites).length > 0) {

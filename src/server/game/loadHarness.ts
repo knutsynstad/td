@@ -1,6 +1,5 @@
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import type { WorldState } from '../../shared/game-state';
-import { MAX_STEPS_PER_REQUEST } from './config';
 import { runSimulation } from './simulation';
 
 type HarnessResult = {
@@ -83,7 +82,7 @@ export const runLoadHarness = (
         return makeMoveCommand(playerId, seq, nowMs);
       }
     );
-    const result = runSimulation(world, nowMs, commands, MAX_STEPS_PER_REQUEST);
+    const result = runSimulation(world, nowMs, commands, 1);
     totalDeltas += result.deltas.length;
   }
 
