@@ -17,6 +17,8 @@ import {
   DELTA_NEAR_MOBS_BUDGET,
   DELTA_RECENTLY_DAMAGED_MOBS_BUDGET,
   ENABLE_FULL_MOB_DELTAS,
+  FULL_MOB_DELTA_INTERVAL_MS,
+  FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS,
   ENABLE_INTEREST_MANAGED_MOB_DELTAS,
   ENABLE_SERVER_TOWER_SPATIAL_DAMAGE,
   MAX_DELTA_MOBS,
@@ -63,6 +65,14 @@ const MOB_STUCK_PROGRESS_EPSILON = 0.1;
 const SERVER_TOWER_RANGE = 8;
 const SERVER_TOWER_DPS = 16;
 const SERVER_SPATIAL_CELL_SIZE = SERVER_TOWER_RANGE;
+const FULL_MOB_DELTA_INTERVAL_TICKS = Math.max(
+  1,
+  Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
+);
+const FULL_MOB_AFTER_STRUCTURE_CHANGE_TICKS = Math.max(
+  1,
+  Math.round(FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS / SIM_TICK_MS)
+);
 
 export type SimulationPerfStats = {
   mobsSimulated: number;
@@ -1084,6 +1094,9 @@ export const runSimulation = (
     }
     waveChanged = true;
   }
+  if (structureUpserts.length > 0 || structureRemoves.length > 0) {
+    world.meta.lastStructureChangeTickSeq = world.meta.tickSeq;
+  }
   if (commandChanges.movedPlayers.length > 0) {
     deltas.push({
       type: 'entityDelta',
@@ -1159,7 +1172,19 @@ export const runSimulation = (
 
   if (steps > 0) {
     const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);
-    const baseMobs = ENABLE_FULL_MOB_DELTAS
+    const lastStructureChangeTickSeq = world.meta.lastStructureChangeTickSeq ?? 0;
+    const ticksSinceStructureChange = Math.max(
+      0,
+      world.meta.tickSeq - lastStructureChangeTickSeq
+    );
+    const structureChangeBurstActive =
+      lastStructureChangeTickSeq > 0 &&
+      ticksSinceStructureChange <= FULL_MOB_AFTER_STRUCTURE_CHANGE_TICKS;
+    const includeFullMobList =
+      ENABLE_FULL_MOB_DELTAS &&
+      (world.meta.tickSeq % FULL_MOB_DELTA_INTERVAL_TICKS === 0 ||
+        structureChangeBurstActive);
+    const baseMobs = includeFullMobList
       ? latestMobUpserts.map(toDeltaMob)
       : latestMobUpserts.slice(0, MAX_DELTA_MOBS).map(toDeltaMob);
     const entityDelta: EntityDelta = {
@@ -1171,10 +1196,10 @@ export const runSimulation = (
       players: [],
       mobs: baseMobs,
       priorityMobs:
-        !ENABLE_FULL_MOB_DELTAS && ENABLE_INTEREST_MANAGED_MOB_DELTAS
+        !includeFullMobList && ENABLE_INTEREST_MANAGED_MOB_DELTAS
         ? buildPriorityMobSlices(latestMobUpserts, world)
         : undefined,
-      fullMobList: ENABLE_FULL_MOB_DELTAS,
+      fullMobList: includeFullMobList,
       despawnedMobIds: Array.from(despawnedDuringRun),
     };
     deltas.push(entityDelta);

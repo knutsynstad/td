@@ -3335,6 +3335,10 @@ const serverMobSampleById = new Map<
     receivedAtPerfMs: number;
   }
 >();
+const serverMobSeenIdsScratch = new Set<string>();
+const serverMobRemovalScratch: string[] = [];
+const serverMobDeltaPosScratch = new THREE.Vector3();
+const serverMobDeltaVelScratch = new THREE.Vector3();
 let serverWaveActive = false;
 let serverLastAckSeq = 0;
 const isServerAuthoritative = () => authoritativeBridge !== null;
@@ -3700,74 +3704,126 @@ const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
   serverMobsById.set(mobState.mobId, mob);
 };
 
-const applyServerMobDelta = (delta: EntityDelta) => {
-  syncServerClockSkew(delta.serverTimeMs);
-  const mergedMobUpdates = [...delta.mobs];
-  const priority = delta.priorityMobs;
-  if (priority) {
-    for (const item of priority.nearPlayers) mergedMobUpdates.push(item);
-    for (const item of priority.castleThreats) mergedMobUpdates.push(item);
-    for (const item of priority.recentlyDamaged) mergedMobUpdates.push(item);
-  }
-  const seenUpdateMobIds = new Set<string>();
-  for (const item of mergedMobUpdates) {
-    if (seenUpdateMobIds.has(item.mobId)) continue;
-    seenUpdateMobIds.add(item.mobId);
-    const existing = serverMobsById.get(item.mobId);
-    if (!existing) {
-      upsertServerMobFromSnapshot({
-        mobId: item.mobId,
-        position: item.position,
-        velocity: item.velocity,
-        hp: item.hp,
-        maxHp: item.maxHp,
-        spawnerId: '',
-        routeIndex: 0,
-      });
-      serverMobSampleById.set(item.mobId, {
-        serverTimeMs: delta.serverTimeMs,
-        position: new THREE.Vector3(
-          item.position.x,
-          MOB_HEIGHT * 0.5,
-          item.position.z
-        ),
-        velocity: new THREE.Vector3(item.velocity.x, 0, item.velocity.z),
-        receivedAtPerfMs: performance.now(),
-      });
-      continue;
-    }
-    existing.hp = item.hp;
-    existing.maxHp = item.maxHp;
-    const prev = serverMobSampleById.get(item.mobId);
-    const currentPos = new THREE.Vector3(
-      item.position.x,
-      existing.baseY,
-      item.position.z
-    );
-    const currentVel = new THREE.Vector3(item.velocity.x, 0, item.velocity.z);
-    const hasPrev =
-      !!prev && Number.isFinite(prev.serverTimeMs) && delta.serverTimeMs > prev.serverTimeMs;
-    const fromServerMs = hasPrev ? prev.serverTimeMs : delta.serverTimeMs - Math.max(1, delta.tickMs);
-    const toServerMs = delta.serverTimeMs;
-    const from = hasPrev ? prev.position.clone() : currentPos.clone().addScaledVector(currentVel, -delta.tickMs / 1000);
-    const to = currentPos;
-    serverMobInterpolationById.set(item.mobId, {
-      from,
-      to,
-      velocity: currentVel,
-      t0: toPerfTime(fromServerMs),
-      t1: toPerfTime(toServerMs),
+const applyServerMobUpdate = (
+  item: EntityDelta['mobs'][number],
+  delta: EntityDelta
+) => {
+  const existing = serverMobsById.get(item.mobId);
+  if (!existing) {
+    upsertServerMobFromSnapshot({
+      mobId: item.mobId,
+      position: item.position,
+      velocity: item.velocity,
+      hp: item.hp,
+      maxHp: item.maxHp,
+      spawnerId: '',
+      routeIndex: 0,
     });
     serverMobSampleById.set(item.mobId, {
       serverTimeMs: delta.serverTimeMs,
-      position: currentPos,
-      velocity: currentVel,
+      position: new THREE.Vector3(item.position.x, MOB_HEIGHT * 0.5, item.position.z),
+      velocity: new THREE.Vector3(item.velocity.x, 0, item.velocity.z),
+      receivedAtPerfMs: performance.now(),
+    });
+    return;
+  }
+
+  existing.hp = item.hp;
+  existing.maxHp = item.maxHp;
+  const prev = serverMobSampleById.get(item.mobId);
+  const currentPos = serverMobDeltaPosScratch.set(
+    item.position.x,
+    existing.baseY,
+    item.position.z
+  );
+  const currentVel = serverMobDeltaVelScratch.set(item.velocity.x, 0, item.velocity.z);
+  const hasPrev =
+    !!prev &&
+    Number.isFinite(prev.serverTimeMs) &&
+    delta.serverTimeMs > prev.serverTimeMs;
+  const fromServerMs = hasPrev
+    ? prev.serverTimeMs
+    : delta.serverTimeMs - Math.max(1, delta.tickMs);
+  const toServerMs = delta.serverTimeMs;
+
+  const interpolation = serverMobInterpolationById.get(item.mobId);
+  if (interpolation) {
+    if (hasPrev && prev) {
+      interpolation.from.copy(prev.position);
+    } else {
+      interpolation.from
+        .copy(currentPos)
+        .addScaledVector(currentVel, -delta.tickMs / 1000);
+    }
+    interpolation.to.copy(currentPos);
+    interpolation.velocity.copy(currentVel);
+    interpolation.t0 = toPerfTime(fromServerMs);
+    interpolation.t1 = toPerfTime(toServerMs);
+  } else {
+    serverMobInterpolationById.set(item.mobId, {
+      from:
+        hasPrev && prev
+          ? prev.position.clone()
+          : currentPos.clone().addScaledVector(currentVel, -delta.tickMs / 1000),
+      to: currentPos.clone(),
+      velocity: currentVel.clone(),
+      t0: toPerfTime(fromServerMs),
+      t1: toPerfTime(toServerMs),
+    });
+  }
+
+  const sample = serverMobSampleById.get(item.mobId);
+  if (sample) {
+    sample.serverTimeMs = delta.serverTimeMs;
+    sample.position.copy(currentPos);
+    sample.velocity.copy(currentVel);
+    sample.receivedAtPerfMs = performance.now();
+  } else {
+    serverMobSampleById.set(item.mobId, {
+      serverTimeMs: delta.serverTimeMs,
+      position: currentPos.clone(),
+      velocity: currentVel.clone(),
       receivedAtPerfMs: performance.now(),
     });
   }
+};
+
+const applyServerMobDelta = (delta: EntityDelta) => {
+  syncServerClockSkew(delta.serverTimeMs);
+  serverMobSeenIdsScratch.clear();
+  for (const item of delta.mobs) {
+    if (serverMobSeenIdsScratch.has(item.mobId)) continue;
+    serverMobSeenIdsScratch.add(item.mobId);
+    applyServerMobUpdate(item, delta);
+  }
+  // Full list already contains all entities; avoid extra pass over priority buckets.
+  if (!delta.fullMobList) {
+    const priority = delta.priorityMobs;
+    if (priority) {
+      for (const item of priority.nearPlayers) {
+        if (serverMobSeenIdsScratch.has(item.mobId)) continue;
+        serverMobSeenIdsScratch.add(item.mobId);
+        applyServerMobUpdate(item, delta);
+      }
+      for (const item of priority.castleThreats) {
+        if (serverMobSeenIdsScratch.has(item.mobId)) continue;
+        serverMobSeenIdsScratch.add(item.mobId);
+        applyServerMobUpdate(item, delta);
+      }
+      for (const item of priority.recentlyDamaged) {
+        if (serverMobSeenIdsScratch.has(item.mobId)) continue;
+        serverMobSeenIdsScratch.add(item.mobId);
+        applyServerMobUpdate(item, delta);
+      }
+    }
+  }
   if (delta.fullMobList) {
-    for (const mobId of Array.from(serverMobsById.keys())) {
-      if (seenUpdateMobIds.has(mobId)) continue;
+    serverMobRemovalScratch.length = 0;
+    for (const mobId of serverMobsById.keys()) {
+      if (serverMobSeenIdsScratch.has(mobId)) continue;
+      serverMobRemovalScratch.push(mobId);
+    }
+    for (const mobId of serverMobRemovalScratch) {
       removeServerMobById(mobId);
     }
   }

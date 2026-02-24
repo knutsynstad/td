@@ -324,6 +324,7 @@ const defaultMeta = (nowMs: number, energy: number): WorldMeta => ({
   tickSeq: 0,
   worldVersion: 0,
   lastTickMs: nowMs,
+  lastStructureChangeTickSeq: 0,
   seed: nowMs,
   energy: clampCoins(energy),
   lives: 1,
@@ -346,6 +347,9 @@ export const loadWorldState = async (): Promise<WorldState> => {
     tickSeq: Number(metaRaw?.tickSeq ?? '0'),
     worldVersion: Number(metaRaw?.worldVersion ?? '0'),
     lastTickMs: Number(metaRaw?.lastTickMs ?? String(now)),
+    lastStructureChangeTickSeq: Number(
+      metaRaw?.lastStructureChangeTickSeq ?? '0'
+    ),
     seed: Number(metaRaw?.seed ?? String(now)),
     energy: Math.max(
       0,
@@ -412,6 +416,9 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
     tickSeq: String(world.meta.tickSeq),
     worldVersion: String(world.meta.worldVersion),
     lastTickMs: String(world.meta.lastTickMs),
+    lastStructureChangeTickSeq: String(
+      world.meta.lastStructureChangeTickSeq ?? 0
+    ),
     seed: String(world.meta.seed),
     energy: String(world.meta.energy),
     lives: String(world.meta.lives),
@@ -911,6 +918,9 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
       tickSeq: String(nextMeta.tickSeq),
       worldVersion: String(nextMeta.worldVersion),
       lastTickMs: String(nextMeta.lastTickMs),
+      lastStructureChangeTickSeq: String(
+        nextMeta.lastStructureChangeTickSeq ?? 0
+      ),
       seed: String(nextMeta.seed),
       energy: String(nextMeta.energy),
       lives: String(nextMeta.lives),

@@ -81,6 +81,7 @@ export type WorldMeta = {
   tickSeq: number;
   worldVersion: number;
   lastTickMs: number;
+  lastStructureChangeTickSeq?: number;
   seed: number;
   energy: number;
   lives: number;

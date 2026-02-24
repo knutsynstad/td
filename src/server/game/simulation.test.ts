@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import type { WorldState } from '../../shared/game-state';
-import { AUTO_WAVE_INITIAL_DELAY_MS } from './config';
+import {
+  AUTO_WAVE_INITIAL_DELAY_MS,
+  FULL_MOB_DELTA_INTERVAL_MS,
+  MAX_DELTA_MOBS,
+  SIM_TICK_MS,
+} from './config';
 import { runSimulation } from './simulation';
 
 const world = (nowMs: number): WorldState => ({
@@ -357,6 +362,151 @@ describe('runSimulation', () => {
       } else {
         expect(entityDelta.mobs.length).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it('sends compact mob deltas between full snapshot intervals', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    const intervalTicks = Math.max(
+      1,
+      Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
+    );
+    gameWorld.meta.tickSeq = 1;
+    gameWorld.meta.lastStructureChangeTickSeq = 0;
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 0,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'reachable',
+        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+      },
+    ];
+    for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
+      gameWorld.mobs[`compact-${i}`] = {
+        mobId: `compact-${i}`,
+        position: { x: i * 0.1, z: -10 },
+        velocity: { x: 0, z: 0 },
+        hp: 100,
+        maxHp: 100,
+        spawnerId: 'wave-1-north',
+        routeIndex: 0,
+      };
+    }
+    const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
+    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    expect(entityDelta?.type).toBe('entityDelta');
+    if (entityDelta?.type === 'entityDelta') {
+      expect(entityDelta.tickSeq % intervalTicks).not.toBe(0);
+      expect(entityDelta.fullMobList).toBe(false);
+      expect(entityDelta.mobs.length).toBe(MAX_DELTA_MOBS);
+      expect(entityDelta.priorityMobs).toBeDefined();
+    }
+  });
+
+  it('sends full mob snapshots every five seconds', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    const intervalTicks = Math.max(
+      1,
+      Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
+    );
+    gameWorld.meta.tickSeq = intervalTicks - 1;
+    gameWorld.meta.lastStructureChangeTickSeq = 0;
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 0,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'reachable',
+        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+      },
+    ];
+    for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
+      gameWorld.mobs[`full-${i}`] = {
+        mobId: `full-${i}`,
+        position: { x: i * 0.1, z: -10 },
+        velocity: { x: 0, z: 0 },
+        hp: 100,
+        maxHp: 100,
+        spawnerId: 'wave-1-north',
+        routeIndex: 0,
+      };
+    }
+    const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
+    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    expect(entityDelta?.type).toBe('entityDelta');
+    if (entityDelta?.type === 'entityDelta') {
+      expect(entityDelta.tickSeq % intervalTicks).toBe(0);
+      expect(entityDelta.fullMobList).toBe(true);
+      expect(entityDelta.mobs.length).toBeGreaterThan(MAX_DELTA_MOBS);
+      expect(entityDelta.priorityMobs).toBeUndefined();
+    }
+  });
+
+  it('sends full mob snapshots for one second after structure changes', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.meta.tickSeq = 9;
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 0,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'reachable',
+        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+      },
+    ];
+    for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
+      gameWorld.mobs[`burst-${i}`] = {
+        mobId: `burst-${i}`,
+        position: { x: i * 0.1, z: -10 },
+        velocity: { x: 0, z: 0 },
+        hp: 100,
+        maxHp: 100,
+        spawnerId: 'wave-1-north',
+        routeIndex: 0,
+      };
+    }
+    const commandNow: CommandEnvelope[] = [
+      {
+        seq: 1,
+        sentAtMs: nowMs,
+        command: {
+          type: 'buildStructure',
+          playerId: 'player-1',
+          structure: {
+            structureId: 'burst-wall',
+            type: 'wall',
+            center: { x: 20, z: 20 },
+          },
+        },
+      },
+    ];
+    const first = runSimulation(gameWorld, nowMs + SIM_TICK_MS, commandNow, 1);
+    const firstEntity = first.deltas.find((delta) => delta.type === 'entityDelta');
+    expect(firstEntity?.type).toBe('entityDelta');
+    if (firstEntity?.type === 'entityDelta') {
+      expect(firstEntity.fullMobList).toBe(true);
     }
   });
 });
