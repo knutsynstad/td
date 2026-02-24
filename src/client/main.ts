@@ -52,7 +52,6 @@ import {
 } from './domains/world/collision';
 import { createEntityMotionSystem } from './domains/entities/systems/motion';
 import { createGameLoop } from './domains/gameplay/gameLoop';
-import { areWaveSpawnersDone } from './domains/gameplay/spawners';
 import { getAllBorderDoors } from './domains/gameplay/borderDoors';
 import type { LanePathResult } from './domains/world/pathfinding/laneAStar';
 import {
@@ -61,7 +60,7 @@ import {
   type CorridorFlowField,
 } from './domains/world/pathfinding/corridorFlowField';
 import { buildPathTilesFromPoints as buildPathTilesFromNavPoints } from './domains/world/pathfinding/pathTiles';
-import { simplifyCollinear } from './domains/world/pathfinding/pathSimplification';
+import { toCastleDisplayRoute } from './domains/world/pathfinding/castleRouteDisplay';
 import { SpawnerPathOverlay } from './rendering/effects/spawnerPathOverlay';
 import {
   canPlace as canPlaceAt,
@@ -99,7 +98,6 @@ import {
   ENERGY_COST_UPGRADE_RANGE,
   ENERGY_COST_UPGRADE_SPEED,
   ENERGY_COST_WALL,
-  ENERGY_PER_PLAYER_KILL,
   ENERGY_REGEN_RATE,
   GRID_SIZE,
   MAX_VISIBLE_MOB_INSTANCES,
@@ -131,9 +129,6 @@ import {
   WATER_BOB_SPEED,
   WATER_LEVEL,
   WATER_RING_OUTER_PADDING,
-  WAVE_MAX_SPAWNERS,
-  WAVE_MIN_SPAWNERS,
-  WAVE_SPAWNER_BASE_RATE,
   WALL_HP,
   WORLD_BOUNDS,
 } from './domains/gameplay/constants';
@@ -148,10 +143,7 @@ import {
   updateBallistaRigTracking,
   type BallistaVisualRig,
 } from './rendering/presenters/ballistaRig';
-import {
-  createWaveAndSpawnSystem,
-  type PreparedWave,
-} from './domains/gameplay/waveAndSpawnSystem';
+import { syncAuthoritativeWaveSpawners } from './domains/gameplay/authoritativeWaveSync';
 import { connectAuthoritativeBridge } from './integrations/authoritativeBridge';
 import {
   fetchCastleCoinsBalance,
@@ -239,7 +231,6 @@ const CASTLE_ROUTE_HALF_WIDTH_CELLS = Math.max(
 const CASTLE_ENTRY_GOAL_STRIP_HALF_WIDTH_CELLS = CASTLE_ROUTE_HALF_WIDTH_CELLS;
 const SPAWNER_ENTRY_INSET_CELLS = 3;
 const STAGING_PLATFORM_Y = Math.max(0, STAGING_ISLAND_HEIGHT - 1);
-const STAGING_GATE_OPEN_DURATION = 0.8;
 const MOB_STAGING_BOUNDS_PADDING =
   STAGING_ISLAND_DISTANCE + STAGING_ISLAND_SIZE * 0.5 + 2;
 app.innerHTML = `
@@ -2726,19 +2717,8 @@ const getCastleEntryGoals = () => {
   return goals;
 };
 const borderDoors = getAllBorderDoors(WORLD_BOUNDS);
-const waveAndSpawnSystem = createWaveAndSpawnSystem({
-  borderDoors,
-  minSpawners: WAVE_MIN_SPAWNERS,
-  maxSpawners: WAVE_MAX_SPAWNERS,
-  baseSpawnRate: WAVE_SPAWNER_BASE_RATE,
-  random,
-});
 const activeWaveSpawners: WaveSpawner[] = [];
-let pendingWave: PreparedWave | null = null;
-const pendingWaveSpawners: WaveSpawner[] = [];
 const spawnerById = new Map<string, WaveSpawner>();
-const pendingSpawnerById = new Map<string, WaveSpawner>();
-const pendingGateOpenBySpawnerId = new Map<string, number>();
 const spawnerPathlineCache = new Map<string, LanePathResult>();
 let castleFlowField: CorridorFlowField | null = null;
 let isCastleFlowFieldDirty = true;
@@ -2979,51 +2959,6 @@ const getForwardWaypointIndex = (
   return bestIdx;
 };
 
-const getSpawnCandidatePosition = (spawner: WaveSpawner) => {
-  const center = getStagingIslandCenter(spawner.position);
-  const normal = getSpawnerOutwardNormal(spawner.position);
-  const towardMap = normal.clone().multiplyScalar(-1);
-  const tangent = getSpawnerTangent(spawner.position);
-  const islandHalf = STAGING_ISLAND_SIZE * 0.5;
-  if (!spawner.gateOpen) {
-    const spread = Math.max(1, islandHalf - 1.2);
-    return new THREE.Vector3(
-      center.x + (Math.random() * 2 - 1) * spread,
-      0,
-      center.z + (Math.random() * 2 - 1) * spread
-    );
-  }
-  const lateral = (Math.random() - 0.5) * (STAGING_BRIDGE_WIDTH - 0.8);
-  const alongBridge = islandHalf - 0.9 + Math.random() * 0.9;
-  const pos = center
-    .clone()
-    .addScaledVector(tangent, lateral)
-    .addScaledVector(towardMap, alongBridge);
-  return new THREE.Vector3(
-    clamp(
-      pos.x,
-      -WORLD_BOUNDS - MOB_STAGING_BOUNDS_PADDING,
-      WORLD_BOUNDS + MOB_STAGING_BOUNDS_PADDING
-    ),
-    0,
-    clamp(
-      pos.z,
-      -WORLD_BOUNDS - MOB_STAGING_BOUNDS_PADDING,
-      WORLD_BOUNDS + MOB_STAGING_BOUNDS_PADDING
-    )
-  );
-};
-
-const canSpawnAt = (pos: THREE.Vector3, radius = MOB_WIDTH * 0.5) => {
-  const minDist = radius * 3.2;
-  const minDistSq = minDist * minDist;
-  for (const mob of mobs) {
-    const dx = mob.mesh.position.x - pos.x;
-    const dz = mob.mesh.position.z - pos.z;
-    if (dx * dx + dz * dz < minDistSq) return false;
-  }
-  return true;
-};
 
 const getSpawnContainerCorners = (spawnerPos: THREE.Vector3) => {
   const normal = getSpawnerOutwardNormal(spawnerPos);
@@ -3061,8 +2996,7 @@ const renderAllCardinalStagingIslands = () => {
 
 const clampStagedMobToSpawnerIsland = (mob: MobEntity) => {
   if (!mob.staged || !mob.spawnerId) return;
-  const spawner =
-    spawnerById.get(mob.spawnerId) ?? pendingSpawnerById.get(mob.spawnerId);
+  const spawner = spawnerById.get(mob.spawnerId);
   if (!spawner) return;
   const center = getStagingIslandCenter(spawner.position);
   const half = STAGING_ISLAND_SIZE * 0.5 - mob.radius - 0.25;
@@ -3078,145 +3012,13 @@ const clampStagedMobToSpawnerIsland = (mob: MobEntity) => {
   );
 };
 
-const isPointInsideCastle = (point: THREE.Vector3) =>
-  Math.abs(point.x - castleCollider.center.x) <= castleCollider.halfSize.x &&
-  Math.abs(point.z - castleCollider.center.z) <= castleCollider.halfSize.z;
-
-const getCastleBoundaryIntersection = (
-  from: THREE.Vector3,
-  to: THREE.Vector3
-) => {
-  const minX = castleCollider.center.x - castleCollider.halfSize.x;
-  const maxX = castleCollider.center.x + castleCollider.halfSize.x;
-  const minZ = castleCollider.center.z - castleCollider.halfSize.z;
-  const maxZ = castleCollider.center.z + castleCollider.halfSize.z;
-  const dx = to.x - from.x;
-  const dz = to.z - from.z;
-  const eps = 1e-6;
-  const candidates: number[] = [];
-
-  if (Math.abs(dx) > eps) {
-    candidates.push((minX - from.x) / dx, (maxX - from.x) / dx);
-  }
-  if (Math.abs(dz) > eps) {
-    candidates.push((minZ - from.z) / dz, (maxZ - from.z) / dz);
-  }
-
-  let bestT = Number.POSITIVE_INFINITY;
-  for (const t of candidates) {
-    if (t < 0 || t > 1) continue;
-    const x = from.x + dx * t;
-    const z = from.z + dz * t;
-    const onFaceX = x >= minX - eps && x <= maxX + eps;
-    const onFaceZ = z >= minZ - eps && z <= maxZ + eps;
-    if (!onFaceX || !onFaceZ) continue;
-    if (t < bestT) bestT = t;
-  }
-
-  if (!Number.isFinite(bestT)) return to.clone();
-  return new THREE.Vector3(from.x + dx * bestT, to.y, from.z + dz * bestT);
-};
-
-const trimPathToCastleBoundary = (points: THREE.Vector3[]) => {
-  if (points.length < 2) return points.map((point) => point.clone());
-
-  for (let i = 1; i < points.length; i += 1) {
-    const prev = points[i - 1]!;
-    const curr = points[i]!;
-    if (!isPointInsideCastle(prev) && isPointInsideCastle(curr)) {
-      const clipped = points.slice(0, i).map((point) => point.clone());
-      const boundaryRaw = getCastleBoundaryIntersection(prev, curr);
-      const boundary = new THREE.Vector3(
-        Math.round(boundaryRaw.x / GRID_SIZE) * GRID_SIZE,
-        boundaryRaw.y,
-        Math.round(boundaryRaw.z / GRID_SIZE) * GRID_SIZE
-      );
-      const lastClipped = clipped[clipped.length - 1];
-      if (!lastClipped || lastClipped.distanceToSquared(boundary) > 1e-6) {
-        clipped.push(boundary);
-      }
-      return clipped;
-    }
-  }
-
-  return points.map((point) => point.clone());
-};
-
-const extendPathToCastleCenter = (points: THREE.Vector3[]) => {
-  const extended = points.map((point) => point.clone());
-  if (extended.length === 0) return extended;
-  const center = new THREE.Vector3(
-    Math.round(castleCollider.center.x / GRID_SIZE) * GRID_SIZE,
-    0,
-    Math.round(castleCollider.center.z / GRID_SIZE) * GRID_SIZE
-  );
-  const last = extended[extended.length - 1]!;
-  const dx = center.x - last.x;
-  const dz = center.z - last.z;
-  if (Math.abs(dx) <= 1e-6 && Math.abs(dz) <= 1e-6) return extended;
-  // Keep the castle entry extension cardinal so path tile stamping never drops it as a diagonal.
-  if (Math.abs(dx) > 1e-6 && Math.abs(dz) > 1e-6) {
-    extended.push(new THREE.Vector3(center.x, 0, last.z));
-  }
-  extended.push(center);
-  const frontAxisUsesX =
-    Math.abs(CASTLE_FRONT_DIRECTION.x) >= Math.abs(CASTLE_FRONT_DIRECTION.y);
-  const smoothed = extended.map((p) => p.clone());
-  if (smoothed.length >= 4) {
-    const a = smoothed[smoothed.length - 4]!;
-    const b = smoothed[smoothed.length - 3]!;
-    const c = smoothed[smoothed.length - 2]!;
-    const d = smoothed[smoothed.length - 1]!;
-    const nearCastle = [a, b, c, d].some(
-      (p) => Math.abs(p.x - center.x) <= 12 && Math.abs(p.z - center.z) <= 12
-    );
-    if (nearCastle) {
-      if (!frontAxisUsesX) {
-        const onCenterAtC = Math.abs(c.x - center.x) <= 1e-6;
-        const onCenterAtD = Math.abs(d.x - center.x) <= 1e-6;
-        const oneCellLateralAtB = Math.abs(b.x - center.x) <= GRID_SIZE + 1e-6;
-        const bToCLateralOne =
-          Math.abs(b.x - c.x) <= GRID_SIZE + 1e-6 &&
-          Math.abs(b.z - c.z) <= 1e-6;
-        const aToBFrontRun =
-          Math.abs(a.x - b.x) <= 1e-6 &&
-          Math.abs(a.z - b.z) >= 2 * GRID_SIZE - 1e-6;
-        if (
-          onCenterAtC &&
-          onCenterAtD &&
-          oneCellLateralAtB &&
-          bToCLateralOne &&
-          aToBFrontRun
-        ) {
-          b.x = center.x;
-          b.z = a.z;
-        }
-      } else {
-        const onCenterAtC = Math.abs(c.z - center.z) <= 1e-6;
-        const onCenterAtD = Math.abs(d.z - center.z) <= 1e-6;
-        const oneCellLateralAtB = Math.abs(b.z - center.z) <= GRID_SIZE + 1e-6;
-        const bToCLateralOne =
-          Math.abs(b.z - c.z) <= GRID_SIZE + 1e-6 &&
-          Math.abs(b.x - c.x) <= 1e-6;
-        const aToBFrontRun =
-          Math.abs(a.z - b.z) <= 1e-6 &&
-          Math.abs(a.x - b.x) >= 2 * GRID_SIZE - 1e-6;
-        if (
-          onCenterAtC &&
-          onCenterAtD &&
-          oneCellLateralAtB &&
-          bToCLateralOne &&
-          aToBFrontRun
-        ) {
-          b.z = center.z;
-          b.x = a.x;
-        }
-      }
-    }
-  }
-  const simplified = simplifyCollinear(smoothed);
-  return simplified;
-};
+const toCastleDisplayPoints = (points: THREE.Vector3[]) =>
+  toCastleDisplayRoute(points, {
+    castleCenter: castleCollider.center,
+    castleHalfSize: { x: castleCollider.halfSize.x, z: castleCollider.halfSize.z },
+    gridSize: GRID_SIZE,
+    castleFrontDirection: CASTLE_FRONT_DIRECTION,
+  });
 
 const invalidateCastleFlowField = () => {
   isCastleFlowFieldDirty = true;
@@ -3243,8 +3045,7 @@ const refreshSpawnerPathline = (spawner: WaveSpawner) => {
   const entry = getSpawnerEntryPoint(spawner.position);
   const flow = getCastleFlowField();
   const route = tracePathFromSpawner(flow, { start: entry });
-  const mapCorridorPoints = trimPathToCastleBoundary(route.points);
-  const displayPoints = extendPathToCastleCenter(mapCorridorPoints);
+  const displayPoints = toCastleDisplayPoints(route.points);
   const stagingPreviewPoints = [
     getStagingIslandCenter(spawner.position),
     getSpawnerGatePoint(spawner.position),
@@ -3341,8 +3142,7 @@ const processSpawnerPathlineQueue = (
   while (processed < budget && pendingSpawnerPathOrder.length > 0) {
     const spawnerId = pendingSpawnerPathOrder.shift()!;
     pendingSpawnerPathRefresh.delete(spawnerId);
-    const spawner =
-      spawnerById.get(spawnerId) ?? pendingSpawnerById.get(spawnerId);
+    const spawner = spawnerById.get(spawnerId);
     if (!spawner) continue;
     refreshSpawnerPathline(spawner);
     processed += 1;
@@ -3350,10 +3150,8 @@ const processSpawnerPathlineQueue = (
 };
 
 const refreshAllSpawnerPathlines = () => {
+  if (isServerAuthoritative()) return;
   for (const spawner of activeWaveSpawners) {
-    refreshSpawnerPathline(spawner);
-  }
-  for (const spawner of pendingWaveSpawners) {
     refreshSpawnerPathline(spawner);
   }
 };
@@ -3362,9 +3160,9 @@ const applyObstacleDelta = (
   added: StaticCollider[],
   removed: StaticCollider[] = []
 ) => {
+  if (isServerAuthoritative()) return;
   if (added.length === 0 && removed.length === 0) return;
-  if (activeWaveSpawners.length === 0 && pendingWaveSpawners.length === 0)
-    return;
+  if (activeWaveSpawners.length === 0) return;
 
   const deltas = [...added, ...removed].filter(
     (collider) => collider.type !== 'castle'
@@ -3372,9 +3170,6 @@ const applyObstacleDelta = (
   if (deltas.length === 0) return;
   invalidateCastleFlowField();
   for (const spawner of activeWaveSpawners) {
-    enqueueSpawnerPathRefresh(spawner.id);
-  }
-  for (const spawner of pendingWaveSpawners) {
     enqueueSpawnerPathRefresh(spawner.id);
   }
   // Force an immediate reroute on build/destruction so mobs do not keep stale lanes.
@@ -3499,7 +3294,6 @@ const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
 let authoritativeBridge: Awaited<
   ReturnType<typeof connectAuthoritativeBridge>
 > | null = null;
-let authoritativeHandshakePending = true;
 let authoritativeInitialDataReady = false;
 let authoritativeSelfPlayerId = '';
 let lastNetworkHeartbeatAt = 0;
@@ -3548,114 +3342,6 @@ const syncServerClockSkew = (serverEpochMs: number) => {
 const toPerfTime = (serverEpochMs: number) =>
   performance.now() + (serverEpochMs - (Date.now() + serverClockSkewMs));
 
-const getDoorPositionForSpawnerId = (spawnerId: string): THREE.Vector3 | null => {
-  if (spawnerId.endsWith('-north')) return new THREE.Vector3(0, 0, -WORLD_BOUNDS);
-  if (spawnerId.endsWith('-east')) return new THREE.Vector3(WORLD_BOUNDS, 0, 0);
-  if (spawnerId.endsWith('-south')) return new THREE.Vector3(0, 0, WORLD_BOUNDS);
-  if (spawnerId.endsWith('-west')) return new THREE.Vector3(-WORLD_BOUNDS, 0, 0);
-  return null;
-};
-
-const syncAuthoritativeWaveSpawners = (wave: SharedWaveState) => {
-  // Drop any local-only wave state once server authority is active.
-  pendingWave = null;
-  pendingWaveSpawners.length = 0;
-  pendingSpawnerById.clear();
-  pendingGateOpenBySpawnerId.clear();
-
-  const nextSpawnerIds = new Set(wave.spawners.map((entry) => entry.spawnerId));
-  let topologyChanged = nextSpawnerIds.size !== spawnerById.size;
-  if (!topologyChanged) {
-    for (const spawnerId of nextSpawnerIds) {
-      if (!spawnerById.has(spawnerId)) {
-        topologyChanged = true;
-        break;
-      }
-    }
-  }
-
-  if (topologyChanged) {
-    clearWaveOverlays();
-    activeWaveSpawners.length = 0;
-    spawnerById.clear();
-  }
-
-  for (const entry of wave.spawners) {
-    let spawner = spawnerById.get(entry.spawnerId);
-    if (!spawner) {
-      const position = getDoorPositionForSpawnerId(entry.spawnerId);
-      if (!position) continue;
-      spawner = {
-        id: entry.spawnerId,
-        position,
-        gateOpen: entry.gateOpen,
-        totalCount: entry.totalCount,
-        spawnedCount: entry.spawnedCount,
-        aliveCount: entry.aliveCount,
-        spawnRatePerSecond: entry.spawnRatePerSecond,
-        spawnAccumulator: entry.spawnAccumulator,
-        routeState: 'reachable',
-      };
-      activeWaveSpawners.push(spawner);
-      spawnerById.set(spawner.id, spawner);
-    }
-
-    spawner.gateOpen = entry.gateOpen;
-    spawner.totalCount = entry.totalCount;
-    spawner.spawnedCount = entry.spawnedCount;
-    spawner.aliveCount = entry.aliveCount;
-    spawner.spawnRatePerSecond = entry.spawnRatePerSecond;
-    spawner.spawnAccumulator = entry.spawnAccumulator;
-
-    const routePoints = entry.route.map(
-      (point) => new THREE.Vector3(point.x, 0, point.z)
-    );
-    const stagingPreviewPoints = [
-      getStagingIslandCenter(spawner.position),
-      getSpawnerGatePoint(spawner.position),
-      getSpawnerBridgeExitPoint(spawner.position),
-    ];
-    const fullDisplayPoints = [...stagingPreviewPoints, ...routePoints];
-    const connector = buildPathTilesFromPoints(
-      [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
-      staticColliders,
-      WORLD_BOUNDS,
-      CASTLE_ROUTE_HALF_WIDTH_CELLS
-    );
-    const corridor = buildPathTilesFromPoints(
-      routePoints,
-      staticColliders,
-      WORLD_BOUNDS,
-      CASTLE_ROUTE_HALF_WIDTH_CELLS
-    );
-    spawner.routeState = entry.routeState;
-    spawnerPathlineCache.set(spawner.id, {
-      points: routePoints,
-      state: entry.routeState,
-    });
-    if (entry.routeState === 'reachable') {
-      const merged = new Map<string, THREE.Vector3>();
-      for (const tile of connector.tiles) merged.set(`${tile.x},${tile.z}`, tile);
-      for (const tile of corridor.tiles) merged.set(`${tile.x},${tile.z}`, tile);
-      pathTilePositions.set(spawner.id, Array.from(merged.values()));
-    } else {
-      pathTilePositions.set(spawner.id, []);
-    }
-    spawnerRouteOverlay.upsert(spawner.id, fullDisplayPoints, entry.routeState);
-    spawnContainerOverlay.upsert(
-      spawner.id,
-      getSpawnContainerCorners(spawner.position)
-    );
-    stagingIslandsOverlay.upsert(
-      getSpawnerAnchorId(spawner.position),
-      getStagingIslandCenter(spawner.position),
-      getSpawnerOutwardNormal(spawner.position),
-      spawner.gateOpen,
-      spawner.totalCount > 0
-    );
-  }
-  rebuildPathTileLayer();
-};
 
 const upsertRemoteNpc = (
   playerId: string,
@@ -3688,6 +3374,50 @@ const removeRemoteNpc = (playerId: string) => {
   remotePlayersById.delete(playerId);
 };
 
+const syncServerWaveSpawners = (wave: SharedWaveState) => {
+  syncAuthoritativeWaveSpawners({
+    wave,
+    worldBounds: WORLD_BOUNDS,
+    castleRouteHalfWidthCells: CASTLE_ROUTE_HALF_WIDTH_CELLS,
+    staticColliders,
+    activeWaveSpawners,
+    spawnerById,
+    spawnerPathlineCache,
+    pathTilePositions,
+    clearWaveOverlays,
+    rebuildPathTileLayer,
+    toCastleDisplayPoints,
+    getStagingIslandCenter,
+    getSpawnerGatePoint,
+    getSpawnerBridgeExitPoint,
+    getSpawnerEntryPoint,
+    getSpawnContainerCorners,
+    getSpawnerAnchorId,
+    getSpawnerOutwardNormal,
+    upsertSpawnerRouteOverlay: (spawnerId, points, routeState) => {
+      spawnerRouteOverlay.upsert(spawnerId, points, routeState);
+    },
+    upsertSpawnContainerOverlay: (spawnerId, corners) => {
+      spawnContainerOverlay.upsert(spawnerId, corners);
+    },
+    upsertStagingIslandsOverlay: (
+      anchorId,
+      center,
+      outwardNormal,
+      gateOpen,
+      hasMobs
+    ) => {
+      stagingIslandsOverlay.upsert(
+        anchorId,
+        center,
+        outwardNormal,
+        gateOpen,
+        hasMobs
+      );
+    },
+  });
+};
+
 const syncServerMeta = (
   wave: SharedWaveState,
   world: SharedWorldState['meta']
@@ -3698,7 +3428,7 @@ const syncServerMeta = (
   serverWaveActive = wave.active;
   gameState.nextWaveAt =
     wave.nextWaveAtMs > 0 ? toPerfTime(wave.nextWaveAtMs) : 0;
-  syncAuthoritativeWaveSpawners(wave);
+  syncServerWaveSpawners(wave);
 };
 
 const removeServerStructure = (structureId: string) => {
@@ -4018,7 +3748,7 @@ const applyServerWaveDelta = (delta: WaveDelta) => {
   serverWaveActive = delta.wave.active;
   gameState.nextWaveAt =
     delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0;
-  syncAuthoritativeWaveSpawners(delta.wave);
+  syncServerWaveSpawners(delta.wave);
 };
 
 const applyServerSnapshot = (snapshot: SharedWorldState) => {
@@ -4085,7 +3815,6 @@ const updateServerMobInterpolation = (now: number) => {
 
 const setupAuthoritativeBridge = async () => {
   if (authoritativeBridge) {
-    authoritativeHandshakePending = false;
     return;
   }
   try {
@@ -4143,7 +3872,6 @@ const setupAuthoritativeBridge = async () => {
     console.error('Failed to connect authoritative bridge', error);
     authoritativeInitialDataReady = false;
   } finally {
-    authoritativeHandshakePending = false;
     startGameWhenReady?.();
   }
 };
@@ -4248,101 +3976,6 @@ const createTowerAt = (
   return tower;
 };
 
-const makeMob = (spawner: WaveSpawner, forceSpawn = false) => {
-  const pos = getSpawnCandidatePosition(spawner);
-  if (!forceSpawn && !canSpawnAt(pos)) return false;
-  const mob = new THREE.Mesh(mobLogicGeometry, mobLogicMaterial);
-  mob.position.copy(pos).setY(MOB_HEIGHT * 0.5);
-  const lanePath = spawnerPathlineCache.get(spawner.id);
-  const hasLane = lanePath?.state === 'reachable';
-  const laneWaypoints = hasLane
-    ? buildLaneWaypointsForSpawner(spawner, lanePath?.points)
-    : undefined;
-  const maxHp = 3;
-  mobs.push({
-    mesh: mob,
-    radius: MOB_WIDTH * 0.5,
-    speed: MOB_SPEED,
-    velocity: new THREE.Vector3(),
-    target: new THREE.Vector3(0, 0, 0),
-    kind: 'mob',
-    hp: maxHp,
-    maxHp: maxHp,
-    baseY: MOB_HEIGHT * 0.5,
-    staged: !spawner.gateOpen,
-    waypoints: laneWaypoints,
-    waypointIndex:
-      hasLane && spawner.gateOpen && laneWaypoints
-        ? getForwardWaypointIndex(mob.position, laneWaypoints)
-        : undefined,
-    berserkMode: false,
-    berserkTarget: null,
-    laneBlocked: !hasLane || !spawner.gateOpen,
-    siegeAttackCooldown: 0,
-    unreachableTime: 0,
-    lastHitBy: undefined,
-    spawnerId: spawner.id,
-  });
-  return true;
-};
-
-const stageAllMobsForSpawner = (spawner: WaveSpawner) => {
-  const remaining = Math.max(0, spawner.totalCount - spawner.spawnedCount);
-  if (remaining === 0) return;
-  const maxAttempts = Math.max(remaining * 40, 400);
-  let attempts = 0;
-  while (spawner.spawnedCount < spawner.totalCount && attempts < maxAttempts) {
-    const forceSpawn = attempts > maxAttempts * 0.7;
-    if (makeMob(spawner, forceSpawn)) {
-      spawner.spawnedCount += 1;
-      spawner.aliveCount += 1;
-    }
-    attempts += 1;
-  }
-  spawner.spawnAccumulator = 0;
-};
-
-const releaseStagedMobsForSpawner = (spawner: WaveSpawner) => {
-  const lanePath = spawnerPathlineCache.get(spawner.id);
-  const hasLane = lanePath?.state === 'reachable';
-  const laneWaypoints = hasLane
-    ? buildLaneWaypointsForSpawner(spawner, lanePath?.points)
-    : undefined;
-  for (const mob of mobs) {
-    if (mob.spawnerId !== spawner.id) continue;
-    mob.staged = false;
-    mob.waypoints = laneWaypoints
-      ? laneWaypoints.map((point) => point.clone())
-      : undefined;
-    // Start released mobs at the beginning so they visibly cross gate + bridge.
-    mob.waypointIndex = laneWaypoints ? 0 : undefined;
-    mob.laneBlocked = !hasLane;
-  }
-};
-
-const processPendingGateOpens = (delta: number) => {
-  if (pendingGateOpenBySpawnerId.size === 0) return;
-  for (const [spawnerId, elapsed] of Array.from(
-    pendingGateOpenBySpawnerId.entries()
-  )) {
-    const nextElapsed = elapsed + delta;
-    const progress = clamp(nextElapsed / STAGING_GATE_OPEN_DURATION, 0, 1);
-    const spawner = spawnerById.get(spawnerId);
-    if (!spawner) {
-      pendingGateOpenBySpawnerId.delete(spawnerId);
-      continue;
-    }
-    const anchorId = getSpawnerAnchorId(spawner.position);
-    stagingIslandsOverlay.setGateProgress(anchorId, progress);
-    if (progress >= 1) {
-      spawner.gateOpen = true;
-      releaseStagedMobsForSpawner(spawner);
-      pendingGateOpenBySpawnerId.delete(spawnerId);
-      continue;
-    }
-    pendingGateOpenBySpawnerId.set(spawnerId, nextElapsed);
-  }
-};
 
 const gameState = createGameState(ENERGY_CAP);
 let isDraggingWall = false;
@@ -4355,7 +3988,6 @@ const keyboardRight = new THREE.Vector3();
 const keyboardMoveDir = new THREE.Vector3();
 let wasKeyboardMoving = false;
 const EVENT_BANNER_DURATION = 2.4;
-const CASTLE_FALL_BANNER_DURATION = 4.8;
 
 type EnergyTrail = {
   mesh: THREE.Object3D;
@@ -4844,11 +4476,6 @@ const updateViewportFogCenter = () => {
   viewportFogEl.style.setProperty('--fog-center-y', `${yPct}%`);
 };
 
-const getEnergyCounterAnchor = () => {
-  const rect = coinHudCanvasEl.getBoundingClientRect();
-  return { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 };
-};
-
 const addEnergy = (amount: number, withPop = false) => {
   if (isServerAuthoritative()) return;
   gameState.energy = Math.min(ENERGY_CAP, gameState.energy + amount);
@@ -5093,107 +4720,6 @@ const withdrawFromCastle = async (requestedAmount: number) => {
   });
   triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
   return true;
-};
-
-const createTrailCoinInstance = () => {
-  if (!coinModelTemplate) return null;
-  const mesh = coinModelTemplate.clone(true);
-  const materials: THREE.Material[] = [];
-  mesh.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    const source = child.material;
-    if (Array.isArray(source)) {
-      const cloned = source.map((material) => {
-        const next = material.clone();
-        next.transparent = true;
-        next.depthWrite = false;
-        next.depthTest = false;
-        return next;
-      });
-      child.material = cloned;
-      materials.push(...cloned);
-      return;
-    }
-    const cloned = source.clone();
-    cloned.transparent = true;
-    cloned.depthWrite = false;
-    cloned.depthTest = false;
-    child.material = cloned;
-    materials.push(cloned);
-  });
-  return { mesh, materials };
-};
-
-const spawnEnergyTrail = (fromWorldPos: THREE.Vector3, reward: number) => {
-  const start = worldToScreen(fromWorldPos.clone().setY(fromWorldPos.y + 0.6));
-  if (!start) {
-    addEnergy(reward, true);
-    return;
-  }
-  const trailCoin = createTrailCoinInstance();
-  if (!trailCoin) {
-    addEnergy(reward, true);
-    return;
-  }
-  coinTrailScene.add(trailCoin.mesh);
-  const end = getEnergyCounterAnchor();
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const dist = Math.hypot(dx, dy);
-  const dirX = dist > 0.001 ? dx / dist : 0;
-  const dirY = dist > 0.001 ? dy / dist : -1;
-  const perpX = -dirY;
-  const perpY = dirX;
-  const baseArc = Math.min(
-    210,
-    Math.max(80, dist * (0.34 + Math.random() * 0.16))
-  );
-  const sideA =
-    (Math.random() - 0.5) * Math.min(190, Math.max(60, dist * 0.45));
-  const sideB = (Math.random() - 0.5) * Math.min(70, Math.max(20, dist * 0.18));
-  const progress1 = 0.22 + Math.random() * 0.16;
-  const control1X = start.x + dx * progress1 + perpX * sideA;
-  const control1Y =
-    start.y +
-    dy * progress1 +
-    perpY * sideA -
-    baseArc * (0.9 + Math.random() * 0.45);
-  const approachHeight = Math.min(
-    180,
-    Math.max(70, dist * (0.28 + Math.random() * 0.14))
-  );
-  const control2X = end.x + sideB;
-  const control2Y = end.y + approachHeight;
-  const spinStartDeg = Math.random() * 360;
-  const spinDirection = Math.random() < 0.5 ? -1 : 1;
-  const spinTotalDeg = spinDirection * (360 + Math.random() * 540);
-  const pitchStartDeg = -16 + Math.random() * 32;
-  const pitchTotalDeg = -30 + Math.random() * 60;
-  const rollStartDeg = -14 + Math.random() * 28;
-  const rollTotalDeg = -32 + Math.random() * 64;
-  const baseScale = 15 + Math.random() * 8;
-  activeEnergyTrails.push({
-    mesh: trailCoin.mesh,
-    materials: trailCoin.materials,
-    startX: start.x,
-    startY: start.y,
-    control1X,
-    control1Y,
-    control2X,
-    control2Y,
-    endX: end.x,
-    endY: end.y,
-    elapsed: 0,
-    duration: 0.44 + Math.random() * 0.16,
-    reward,
-    spinStartDeg,
-    spinTotalDeg,
-    pitchStartDeg,
-    pitchTotalDeg,
-    rollStartDeg,
-    rollTotalDeg,
-    baseScale,
-  });
 };
 
 const updateEnergyTrails = (delta: number) => {
@@ -6214,101 +5740,6 @@ const addMapTree = (
 rockVisualsNeedFullRefresh = true;
 renderAllCardinalStagingIslands();
 
-const CASTLE_FALL_RESTART_DELAY_MS = 30000;
-const CASTLE_FALL_TAX_RATE = 0.2;
-
-const resetGame = (restartAt: number) => {
-  const bankBeforeTax = Math.max(0, Math.floor(gameState.bankEnergy));
-  const deathTax = Math.floor(bankBeforeTax * CASTLE_FALL_TAX_RATE);
-
-  gameState.lives = 1;
-  gameState.wave = 0;
-  gameState.nextWaveAt = restartAt;
-  gameState.prevMobsCount = 0;
-  gameState.energy = ENERGY_CAP;
-  gameState.bankEnergy = Math.max(0, bankBeforeTax - deathTax);
-  gameState.energyPopTimer = 0;
-  gameState.eventBannerTimer = 0;
-  eventBannerEl.classList.remove('show');
-  eventBannerEl.textContent = '';
-  finalCountdownEl.classList.remove('show');
-  finalCountdownEl.textContent = '';
-  setBuildMode('off');
-  selectedTower = null;
-  selectedStructures.clear();
-  structureOutlinePass.selectedObjects = [];
-  treeOutlinePass.selectedObjects = [];
-  isDraggingWall = false;
-  wallDragStart = null;
-  wallDragEnd = null;
-  wallDragValidPositions = [];
-
-  for (const mob of mobs) {
-    if (mob.spawnerId) {
-      const spawner = spawnerById.get(mob.spawnerId);
-      if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
-    }
-  }
-  mobs.length = 0;
-  mobInstanceMesh.count = 0;
-  clearMobDeathVisuals();
-  spawnerById.clear();
-  pendingSpawnerById.clear();
-  pendingGateOpenBySpawnerId.clear();
-  activeWaveSpawners.length = 0;
-  pendingWaveSpawners.length = 0;
-  pendingWave = null;
-  spawnerPathlineCache.clear();
-  pathTilePositions.clear();
-  rebuildPathTileLayer();
-  pendingSpawnerPathRefresh.clear();
-  pendingSpawnerPathOrder.length = 0;
-  spawnerRouteOverlay.clear();
-  spawnContainerOverlay.clear();
-  stagingIslandsOverlay.clear();
-  renderAllCardinalStagingIslands();
-  particleSystem.dispose();
-  const toRemove: DestructibleCollider[] = [];
-  for (const [collider, state] of structureStore.structureStates.entries()) {
-    if (collider.type === 'castle') continue;
-    const isNaturalFeature =
-      collider.type === 'tree' || collider.type === 'rock';
-    const isResetPersistent = state.mesh.userData.persistOnReset === true;
-    if (!isNaturalFeature && isResetPersistent) continue;
-    toRemove.push(collider as DestructibleCollider);
-  }
-  for (const collider of toRemove) {
-    structureStore.removeStructureCollider(collider);
-  }
-  treeRegrowQueue.length = 0;
-  growingTrees.length = 0;
-  updateCastleBankPilesVisual();
-  for (const tower of Array.from(towerBallistaRigs.keys())) {
-    if (towers.includes(tower)) continue;
-    towerBallistaRigs.delete(tower);
-  }
-  for (const projectile of activeArrowProjectiles) {
-    scene.remove(projectile.mesh);
-  }
-  activeArrowProjectiles.length = 0;
-  for (const projectile of activePlayerArrowProjectiles) {
-    scene.remove(projectile.mesh);
-  }
-  activePlayerArrowProjectiles.length = 0;
-
-  for (const trail of activeEnergyTrails) {
-    coinTrailScene.remove(trail.mesh);
-    for (const material of trail.materials) {
-      material.dispose();
-    }
-  }
-  activeEnergyTrails.length = 0;
-
-  refreshAllSpawnerPathlines();
-
-  return deathTax;
-};
-
 const setMoveTarget = (pos: THREE.Vector3) => {
   const clamped = new THREE.Vector3(
     clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS),
@@ -6531,39 +5962,6 @@ const triggerEventBanner = (text: string, duration = EVENT_BANNER_DURATION) => {
   gameState.eventBannerTimer = duration;
 };
 
-const triggerEventBannerWithSubhead = (
-  heading: string,
-  subhead: string,
-  secondarySubhead?: string,
-  duration = EVENT_BANNER_DURATION
-) => {
-  eventBannerEl.textContent = '';
-
-  const headingLine = document.createElement('div');
-  headingLine.className = 'event-banner__single';
-  headingLine.textContent = heading;
-
-  const subheadLine = document.createElement('div');
-  subheadLine.className = 'event-banner__subhead';
-  subheadLine.textContent = subhead;
-
-  eventBannerEl.appendChild(headingLine);
-  eventBannerEl.appendChild(subheadLine);
-  if (secondarySubhead) {
-    const secondarySubheadLine = document.createElement('div');
-    secondarySubheadLine.className = 'event-banner__subhead';
-    secondarySubheadLine.textContent = secondarySubhead;
-    eventBannerEl.appendChild(secondarySubheadLine);
-  }
-  eventBannerEl.classList.remove('single');
-  eventBannerEl.classList.add('stack');
-  eventBannerEl.style.setProperty('--banner-duration', `${duration}s`);
-  eventBannerEl.classList.remove('show');
-  void eventBannerEl.offsetWidth;
-  eventBannerEl.classList.add('show');
-  gameState.eventBannerTimer = duration;
-};
-
 const clearWaveOverlays = () => {
   spawnerRouteOverlay.clear();
   spawnerPathlineCache.clear();
@@ -6572,50 +5970,8 @@ const clearWaveOverlays = () => {
   spawnContainerOverlay.clear();
   stagingIslandsOverlay.clear();
   renderAllCardinalStagingIslands();
-  pendingGateOpenBySpawnerId.clear();
   pendingSpawnerPathRefresh.clear();
   pendingSpawnerPathOrder.length = 0;
-};
-
-const prepareNextWave = () => {
-  pendingWave = waveAndSpawnSystem.prepareNextWave({
-    wave: gameState.wave,
-    refreshSpawnerPathline,
-    clearWaveOverlays,
-  });
-  pendingWaveSpawners.length = 0;
-  pendingSpawnerById.clear();
-  for (const spawner of pendingWave.spawners) {
-    pendingWaveSpawners.push(spawner);
-    pendingSpawnerById.set(spawner.id, spawner);
-    stageAllMobsForSpawner(spawner);
-  }
-};
-
-const startPreparedWave = () => {
-  if (authoritativeBridge) {
-    void authoritativeBridge.sendStartWave();
-    return;
-  }
-  if (!pendingWave) return;
-  pendingGateOpenBySpawnerId.clear();
-  gameState.wave = waveAndSpawnSystem.startPreparedWave({
-    preparedWave: pendingWave,
-    activeWaveSpawners,
-    spawnerById,
-    onReleaseSpawnerMobs: (spawner) => {
-      spawner.gateOpen = false;
-      stagingIslandsOverlay.setGateProgress(
-        getSpawnerAnchorId(spawner.position),
-        0
-      );
-      pendingGateOpenBySpawnerId.set(spawner.id, 0);
-    },
-  });
-  pendingWave = null;
-  pendingWaveSpawners.length = 0;
-  pendingSpawnerById.clear();
-  triggerEventBanner(`Wave ${gameState.wave} spawned`);
 };
 
 const pickMobInRange = (center: THREE.Vector3, radius: number) => {
@@ -6966,43 +6322,8 @@ const updateGrowingTrees = (nowMs: number) => {
   }
 };
 
-const processCastleCaptures = (now: number) => {
-  for (let i = mobs.length - 1; i >= 0; i -= 1) {
-    const mob = mobs[i]!;
-    if (mob.staged) continue;
-    if (
-      distanceToColliderSurface(mob.mesh.position, mob.radius, castleCollider) >
-      0.2
-    )
-      continue;
-
-    spawnCubeEffects(mob.mesh.position.clone());
-    gameState.lives = Math.max(gameState.lives - 1, 0);
-    if (mob.spawnerId) {
-      const spawner = spawnerById.get(mob.spawnerId);
-      if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
-    }
-    mobs.splice(i, 1);
-
-    if (gameState.lives === 0) {
-      const deathTax = resetGame(now + CASTLE_FALL_RESTART_DELAY_MS);
-      triggerEventBannerWithSubhead(
-        'Our castle has fallen',
-        `Mobs looted ${deathTax} gold`,
-        undefined,
-        CASTLE_FALL_BANNER_DURATION
-      );
-      return true;
-    }
-  }
-
-  return false;
-};
-
 const tick = (now: number, delta: number) => {
   const serverAuthoritative = isServerAuthoritative();
-  const allowLocalSimulation =
-    !serverAuthoritative && !authoritativeHandshakePending;
   if (rockVisualsNeedFullRefresh && hasAllRockTemplates()) {
     refreshAllRockVisuals(true);
     rockVisualsNeedFullRefresh = false;
@@ -7038,16 +6359,6 @@ const tick = (now: number, delta: number) => {
   }
   processTreeRegrowth(wallClockNowMs);
   updateGrowingTrees(wallClockNowMs);
-  if (allowLocalSimulation) {
-    processPendingGateOpens(delta);
-    waveAndSpawnSystem.emit(pendingWaveSpawners, delta, (fromSpawner) =>
-      makeMob(fromSpawner)
-    );
-    waveAndSpawnSystem.emit(activeWaveSpawners, delta, (fromSpawner) =>
-      makeMob(fromSpawner)
-    );
-    processSpawnerPathlineQueue();
-  }
 
   const keyboardDir = inputController.getKeyboardMoveDirection({
     camera,
@@ -7088,14 +6399,7 @@ const tick = (now: number, delta: number) => {
 
   if (serverAuthoritative) {
     updateServerMobInterpolation(now);
-  } else if (allowLocalSimulation) {
-    for (const mob of mobs) {
-      mob.target.set(0, 0, 0);
-      updateEntityMotion(mob, delta);
-    }
   }
-
-  if (allowLocalSimulation && processCastleCaptures(now)) return;
 
   spatialGrid.clear();
   const dynamicEntities = [player, ...npcs, ...mobs];
@@ -7193,56 +6497,7 @@ const tick = (now: number, delta: number) => {
     clampStagedMobToSpawnerIsland(mob);
   }
 
-  if (allowLocalSimulation) {
-    for (let i = mobs.length - 1; i >= 0; i -= 1) {
-      const mob = mobs[i]!;
-      if ((mob.hp ?? 0) <= 0) {
-        spawnMobDeathVisual(mob);
-        if (mob.lastHitBy === 'player') {
-          spawnEnergyTrail(mob.mesh.position.clone(), ENERGY_PER_PLAYER_KILL);
-        }
-        if (mob.spawnerId) {
-          const spawner = spawnerById.get(mob.spawnerId);
-          if (spawner) spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
-        }
-        mobs.splice(i, 1);
-      }
-    }
-  }
-
-  const waveComplete = serverAuthoritative
-    ? gameState.wave > 0 && !serverWaveActive && mobs.length === 0
-    : allowLocalSimulation &&
-      gameState.wave > 0 &&
-      areWaveSpawnersDone(activeWaveSpawners);
-  if (allowLocalSimulation) {
-    if (waveComplete && gameState.nextWaveAt === 0) {
-      prepareNextWave();
-      gameState.nextWaveAt = now + 10000;
-    }
-    if (
-      waveComplete &&
-      now >= gameState.nextWaveAt &&
-      gameState.nextWaveAt !== 0
-    ) {
-      gameState.nextWaveAt = 0;
-      startPreparedWave();
-    }
-    if (gameState.wave === 0 && pendingWave === null) {
-      prepareNextWave();
-      if (gameState.nextWaveAt === 0) {
-        gameState.nextWaveAt = now + 10000;
-      }
-    }
-    if (
-      gameState.wave === 0 &&
-      gameState.nextWaveAt !== 0 &&
-      now >= gameState.nextWaveAt
-    ) {
-      gameState.nextWaveAt = 0;
-      startPreparedWave();
-    }
-  }
+  const waveComplete = gameState.wave > 0 && !serverWaveActive && mobs.length === 0;
 
   const selected = pickSelectedMob();
   if (selected) {
@@ -7454,13 +6709,8 @@ const tick = (now: number, delta: number) => {
         `Bank invariant violated: bankEnergy=${gameState.bankEnergy}`
       );
     }
-    if (allowLocalSimulation) {
-      assertSpawnerCounts(activeWaveSpawners);
-      assertMobSpawnerReferences(
-        mobs,
-        new Set([...spawnerById.keys(), ...pendingSpawnerById.keys()])
-      );
-    }
+    assertSpawnerCounts(activeWaveSpawners);
+    assertMobSpawnerReferences(mobs, new Set([...spawnerById.keys()]));
     assertStructureStoreConsistency(structureStore, staticColliders);
   }
 
