@@ -1153,6 +1153,11 @@ canvas {
     left: 12px;
   }
 
+  .hud-corner--top-right {
+    top: 12px;
+    right: 12px;
+  }
+
   .hud-corner--bottom-right {
     right: 12px;
     bottom: 12px;
