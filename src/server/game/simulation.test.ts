@@ -45,4 +45,36 @@ describe('runSimulation', () => {
     expect(result.world.wave.wave).toBe(1);
     expect(result.world.wave.spawners.length).toBeGreaterThan(0);
   });
+
+  it('builds routes without single-cell ABA kinks', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.wave.nextWaveAtMs = nowMs;
+    const result = runSimulation(gameWorld, nowMs + 100, [], 5);
+    for (const spawner of result.world.wave.spawners) {
+      const runs: Array<{ dir: string; len: number }> = [];
+      for (let i = 1; i < spawner.route.length; i += 1) {
+        const prev = spawner.route[i - 1]!;
+        const curr = spawner.route[i]!;
+        const dx = Math.round(curr.x - prev.x);
+        const dz = Math.round(curr.z - prev.z);
+        const dir = `${dx},${dz}`;
+        if (runs.length === 0 || runs[runs.length - 1]!.dir !== dir) {
+          runs.push({ dir, len: 1 });
+        } else {
+          runs[runs.length - 1]!.len += 1;
+        }
+      }
+      for (let i = 1; i < runs.length - 1; i += 1) {
+        const before = runs[i - 1]!;
+        const middle = runs[i]!;
+        const after = runs[i + 1]!;
+        const isSingleCellKink =
+          middle.len === 1 &&
+          before.dir === after.dir &&
+          before.dir !== middle.dir;
+        expect(isSingleCellKink).toBe(false);
+      }
+    }
+  });
 });

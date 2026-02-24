@@ -2,6 +2,7 @@ export * from './collision';
 export * from './pathfinding/gridMath';
 export * from './pathfinding/laneAStar';
 export * from './pathfinding/corridorFlowField';
+export * from './pathfinding/pathTiles';
 export * from './pathfinding/pathSimplification';
 export * from './seededWorld';
 export * from './coords';

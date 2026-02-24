@@ -60,6 +60,7 @@ import {
   tracePathFromSpawner,
   type CorridorFlowField,
 } from './domains/world/pathfinding/corridorFlowField';
+import { buildPathTilesFromPoints as buildPathTilesFromNavPoints } from './domains/world/pathfinding/pathTiles';
 import { simplifyCollinear } from './domains/world/pathfinding/pathSimplification';
 import { SpawnerPathOverlay } from './rendering/effects/spawnerPathOverlay';
 import {
@@ -1524,140 +1525,22 @@ const buildPathTilesFromPoints = (
   worldBounds: number,
   halfWidth: number
 ) => {
-  if (points.length === 0) {
-    return {
-      tiles: [] as THREE.Vector3[],
-      isComplete: false,
-      firstRejectedCell: null as { x: number; z: number } | null,
-      firstRejectedReason: null as
-        | 'blocked'
-        | 'out_of_bounds'
-        | 'diagonal'
-        | null,
-    };
-  }
-  const out: THREE.Vector3[] = [];
-  const seen = new Set<string>();
-  let isComplete = true;
-  let blockedRejects = 0;
-  let outOfBoundsRejects = 0;
-  let diagonalSegments = 0;
-  let cornerCapWrites = 0;
-  let segmentRejects = 0;
-  let cornerCapRejects = 0;
-  let inCornerCapPhase = false;
-  let firstRejectedCell: { x: number; z: number } | null = null;
-  let firstRejectedReason: 'blocked' | 'out_of_bounds' | 'diagonal' | null =
-    null;
-  const widthHalfCells = Math.max(0, Math.floor(halfWidth));
-  const isBlockedCell = (x: number, z: number) => {
-    for (const collider of colliders) {
-      if (collider.type === 'castle') continue;
-      if (
-        Math.abs(x - collider.center.x) < collider.halfSize.x &&
-        Math.abs(z - collider.center.z) < collider.halfSize.z
-      ) {
-        return true;
-      }
-    }
-    return false;
-  };
-  const pushCell = (x: number, z: number) => {
-    const gx = Math.round(x);
-    const gz = Math.round(z);
-    if (Math.abs(gx) > worldBounds || Math.abs(gz) > worldBounds) {
-      isComplete = false;
-      outOfBoundsRejects += 1;
-      if (!firstRejectedCell) {
-        firstRejectedCell = { x: gx, z: gz };
-        firstRejectedReason = 'out_of_bounds';
-      }
-      return;
-    }
-    if (isBlockedCell(gx, gz)) {
-      isComplete = false;
-      blockedRejects += 1;
-      if (inCornerCapPhase) {
-        cornerCapRejects += 1;
-      } else {
-        segmentRejects += 1;
-      }
-      if (!firstRejectedCell) {
-        firstRejectedCell = { x: gx, z: gz };
-        firstRejectedReason = 'blocked';
-      }
-      return;
-    }
-    const key = `${gx},${gz}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(new THREE.Vector3(gx, 0, gz));
-  };
-  const snappedPoints = points.map(
-    (point) => new THREE.Vector3(Math.round(point.x), 0, Math.round(point.z))
+  const navResult = buildPathTilesFromNavPoints(
+    points.map((point) => ({ x: point.x, z: point.z })),
+    colliders.map((collider) => ({
+      center: { x: collider.center.x, z: collider.center.z },
+      halfSize: { x: collider.halfSize.x, z: collider.halfSize.z },
+      type: collider.type,
+    })),
+    worldBounds,
+    halfWidth
   );
-  for (let i = 1; i < snappedPoints.length; i += 1) {
-    const a = snappedPoints[i - 1]!;
-    const b = snappedPoints[i]!;
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    if (dx !== 0 && dz !== 0) {
-      isComplete = false;
-      diagonalSegments += 1;
-      if (!firstRejectedReason) firstRejectedReason = 'diagonal';
-      continue;
-    }
-    if (dx === 0 && dz === 0) {
-      for (let ox = -widthHalfCells; ox <= widthHalfCells; ox += 1) {
-        pushCell(a.x + ox, a.z);
-      }
-      continue;
-    }
-    if (dz === 0) {
-      const stepX = Math.sign(dx);
-      for (let x = a.x; x !== b.x + stepX; x += stepX) {
-        for (let oz = -widthHalfCells; oz <= widthHalfCells; oz += 1) {
-          pushCell(x, a.z + oz);
-        }
-      }
-      continue;
-    }
-    const stepZ = Math.sign(dz);
-    for (let z = a.z; z !== b.z + stepZ; z += stepZ) {
-      for (let ox = -widthHalfCells; ox <= widthHalfCells; ox += 1) {
-        pushCell(a.x + ox, z);
-      }
-    }
-  }
-
-  // Fill outside-corner caps so 90deg turns stay visually sharp.
-  for (let i = 1; i < snappedPoints.length - 1; i += 1) {
-    inCornerCapPhase = true;
-    const prev = snappedPoints[i - 1]!;
-    const curr = snappedPoints[i]!;
-    const next = snappedPoints[i + 1]!;
-    const inDx = Math.sign(curr.x - prev.x);
-    const inDz = Math.sign(curr.z - prev.z);
-    const outDx = Math.sign(next.x - curr.x);
-    const outDz = Math.sign(next.z - curr.z);
-    const inLen = Math.abs(curr.x - prev.x) + Math.abs(curr.z - prev.z);
-    const outLen = Math.abs(next.x - curr.x) + Math.abs(next.z - curr.z);
-    const isTurn =
-      (inDx !== outDx || inDz !== outDz) &&
-      (inDx === 0 || inDz === 0) &&
-      (outDx === 0 || outDz === 0);
-    if (!isTurn) continue;
-    // Skip cap fill when either leg is too short; this avoids single-diagonal artifacts
-    // near merges (especially at the castle approach) while keeping square corners on normal turns.
-    if (inLen <= widthHalfCells || outLen <= widthHalfCells) continue;
-    for (let a = 1; a <= widthHalfCells; a += 1) {
-      for (let b = 1; b <= widthHalfCells; b += 1) {
-        cornerCapWrites += 1;
-        pushCell(curr.x + inDx * a - outDx * b, curr.z + inDz * a - outDz * b);
-      }
-    }
-  }
-  return { tiles: out, isComplete, firstRejectedCell, firstRejectedReason };
+  return {
+    tiles: navResult.tiles.map((tile) => new THREE.Vector3(tile.x, 0, tile.z)),
+    isComplete: navResult.isComplete,
+    firstRejectedCell: navResult.firstRejectedCell,
+    firstRejectedReason: navResult.firstRejectedReason,
+  };
 };
 const rebuildPathTileLayer = () => {
   tmpPathCenterTransforms.length = 0;

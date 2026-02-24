@@ -261,36 +261,91 @@ const createRockPlacement = (
 const rockRule: WorldGenRule = {
   id: 'rock-patches',
   apply: (context, state) => {
-    const patchSeed = deriveSeed(context.seed, 'rocks:patch-centers');
+    const densitySeed = deriveSeed(context.seed, 'rocks:density');
+    const thresholdSeed = deriveSeed(context.seed, 'rocks:threshold');
     const shapeSeed = deriveSeed(context.seed, 'rocks:shape');
     const stream = createMulberry32(deriveSeed(context.seed, 'rocks:stream'));
-    const patchCount = 6 + Math.floor(stream.next() * 7);
-    const maxCoord = context.worldBounds - context.margin - 2;
-    for (let patchIndex = 0; patchIndex < patchCount; patchIndex += 1) {
-      const centerX = Math.round((stream.next() * 2 - 1) * maxCoord);
-      const centerZ = Math.round((stream.next() * 2 - 1) * maxCoord);
-      const halfSpan = 1 + Math.floor(stream.next() * 4);
-      for (let dx = -halfSpan; dx <= halfSpan; dx += 1) {
-        for (let dz = -halfSpan; dz <= halfSpan; dz += 1) {
-          const x = centerX + dx;
-          const z = centerZ + dz;
-          if (Math.abs(x) > maxCoord || Math.abs(z) > maxCoord) continue;
-          const dist = Math.hypot(dx, dz);
-          const radius = halfSpan + 0.35;
-          if (dist > radius) continue;
-          const centerWeight = Math.max(0, 1 - dist / radius);
-          const patchNoise = hash2(patchSeed + patchIndex * 17, x, z);
-          if (patchNoise > 0.35 + centerWeight * 0.6) continue;
-          const placement = createRockPlacement(shapeSeed, x, z, centerWeight);
-          const halfX = placement.footprintX * 0.5;
-          const halfZ = placement.footprintZ * 0.5;
-          if (Math.abs(x) + halfX > context.worldBounds - context.margin)
-            continue;
-          if (Math.abs(z) + halfZ > context.worldBounds - context.margin)
-            continue;
-          pushRock(state, placement);
+    const maxCoord = context.worldBounds - context.margin - 1;
+    const targetCount = 56 + Math.floor(stream.next() * 28);
+    const accepted = new Set<string>();
+    const candidates: Array<{
+      x: number;
+      z: number;
+      centerWeight: number;
+      priority: number;
+    }> = [];
+    const isTooCloseToExistingRock = (
+      x: number,
+      z: number,
+      minSpacingCells: number
+    ): boolean => {
+      for (let dx = -minSpacingCells; dx <= minSpacingCells; dx += 1) {
+        for (let dz = -minSpacingCells; dz <= minSpacingCells; dz += 1) {
+          if (dx === 0 && dz === 0) continue;
+          if (Math.abs(dx) + Math.abs(dz) > minSpacingCells + 1) continue;
+          if (accepted.has(getKey(x + dx, z + dz))) return true;
         }
       }
+      return false;
+    };
+    for (let x = -maxCoord; x <= maxCoord; x += context.gridStep) {
+      for (let z = -maxCoord; z <= maxCoord; z += context.gridStep) {
+        const radialDistance = Math.hypot(x, z);
+        const radialT = Math.max(
+          0,
+          Math.min(1, radialDistance / Math.max(1, maxCoord))
+        );
+        const macro = fractalNoise2D(densitySeed, x, z, 0.028, 3, 2.05, 0.55);
+        const local = fractalNoise2D(
+          densitySeed ^ 0x7f4a7c15,
+          x,
+          z,
+          0.094,
+          2,
+          2,
+          0.5
+        );
+        const basin =
+          Math.max(0, macro - 0.53) * 0.9 + Math.max(0, local - 0.62) * 0.55;
+        const edgeBoost = Math.pow(smoothStep(radialT), 0.7) * 0.05;
+        const density = Math.min(0.045, 0.001 + basin * 0.015 + edgeBoost);
+        const pick = hash2(thresholdSeed, x, z);
+        if (pick >= density) continue;
+        const centerWeight = Math.max(
+          0,
+          Math.min(1, macro * 0.68 + local * 0.32)
+        );
+        candidates.push({
+          x,
+          z,
+          centerWeight,
+          priority: hash2(thresholdSeed ^ 0x51f15eab, x, z),
+        });
+      }
+    }
+    candidates.sort((a, b) => b.priority - a.priority);
+    for (const candidate of candidates) {
+      if (state.rocks.length >= targetCount) break;
+      const minSpacing = candidate.centerWeight > 0.72 ? 2 : 3;
+      if (isTooCloseToExistingRock(candidate.x, candidate.z, minSpacing)) continue;
+      const placement = createRockPlacement(
+        shapeSeed,
+        candidate.x,
+        candidate.z,
+        candidate.centerWeight
+      );
+      const halfX = placement.footprintX * 0.5;
+      const halfZ = placement.footprintZ * 0.5;
+      if (
+        Math.abs(candidate.x) + halfX > context.worldBounds - context.margin
+      )
+        continue;
+      if (
+        Math.abs(candidate.z) + halfZ > context.worldBounds - context.margin
+      )
+        continue;
+      accepted.add(getKey(candidate.x, candidate.z));
+      pushRock(state, placement);
     }
   },
 };

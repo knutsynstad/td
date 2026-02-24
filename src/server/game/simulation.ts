@@ -69,6 +69,7 @@ type FlowField = {
   resolution: number;
   passable: Uint8Array;
   distance: Int32Array;
+  nextToGoal: Int32Array;
   goals: Array<{ x: number; z: number }>;
 };
 
@@ -213,6 +214,8 @@ const buildFlowField = (
   passable.fill(1);
   const distance = new Int32Array(cellCount);
   distance.fill(-1);
+  const nextToGoal = new Int32Array(cellCount);
+  nextToGoal.fill(-1);
 
   const toCellNearest = (x: number, z: number): [number, number] => {
     const cx = Math.max(0, Math.min(width - 1, Math.round((x - minWX) / GRID_SIZE)));
@@ -315,6 +318,7 @@ const buildFlowField = (
     passable[idx] = 1;
     if (distance[idx] >= 0) continue;
     distance[idx] = 0;
+    nextToGoal[idx] = idx;
     queue[tail] = idx;
     tail += 1;
   }
@@ -337,6 +341,61 @@ const buildFlowField = (
     }
   }
 
+  let maxDistance = 0;
+  for (let i = 0; i < cellCount; i += 1) {
+    const d = distance[i]!;
+    if (d > maxDistance) maxDistance = d;
+  }
+  const byDistance: number[][] = Array.from(
+    { length: maxDistance + 1 },
+    () => []
+  );
+  for (let i = 0; i < cellCount; i += 1) {
+    const d = distance[i]!;
+    if (d >= 0) byDistance[d]!.push(i);
+  }
+  const turnCost = new Int32Array(cellCount);
+  turnCost.fill(1_000_000);
+  const dirToGoal = new Int8Array(cellCount);
+  dirToGoal.fill(-1);
+  for (const idx of byDistance[0] ?? []) {
+    turnCost[idx] = 0;
+    nextToGoal[idx] = idx;
+    dirToGoal[idx] = -1;
+  }
+  for (let d = 1; d <= maxDistance; d += 1) {
+    const layer = byDistance[d];
+    if (!layer) continue;
+    for (const idx of layer) {
+      const [cx, cz] = fromIdx(idx);
+      let bestNeighbor = -1;
+      let bestTurns = 1_000_000;
+      let bestDir = -1;
+      for (let dir = 0; dir < CARDINALS.length; dir += 1) {
+        const [dx, dz] = CARDINALS[dir]!;
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= width || nz >= height) continue;
+        const nIdx = toIdx(nx, nz);
+        if (distance[nIdx] !== d - 1) continue;
+        if (!hasClearanceAt(nx, nz, dx, dz)) continue;
+        const successorDir = dirToGoal[nIdx];
+        const extraTurn = successorDir >= 0 && successorDir !== dir ? 1 : 0;
+        const turns = turnCost[nIdx]! + extraTurn;
+        if (turns < bestTurns) {
+          bestTurns = turns;
+          bestNeighbor = nIdx;
+          bestDir = dir;
+        }
+      }
+      if (bestNeighbor >= 0) {
+        nextToGoal[idx] = bestNeighbor;
+        turnCost[idx] = bestTurns;
+        dirToGoal[idx] = bestDir;
+      }
+    }
+  }
+
   return {
     width,
     height,
@@ -345,6 +404,7 @@ const buildFlowField = (
     resolution: GRID_SIZE,
     passable,
     distance,
+    nextToGoal,
     goals,
   };
 };
@@ -356,64 +416,6 @@ const getNearestGoalDistance = (goals: Array<{ x: number; z: number }>, x: numbe
     if (d < best) best = d;
   }
   return best;
-};
-
-const pickFlowDirection = (
-  field: FlowField,
-  x: number,
-  z: number
-): { x: number; z: number } => {
-  const toCellNearest = (wx: number, wz: number): [number, number] => {
-    const cx = Math.max(
-      0,
-      Math.min(field.width - 1, Math.round((wx - field.minWX) / field.resolution))
-    );
-    const cz = Math.max(
-      0,
-      Math.min(field.height - 1, Math.round((wz - field.minWZ) / field.resolution))
-    );
-    return [cx, cz];
-  };
-  const toIdx = (cx: number, cz: number) => cz * field.width + cx;
-  const [cx, cz] = toCellNearest(x, z);
-  const currentIdx = toIdx(cx, cz);
-  const currentDist = field.distance[currentIdx]!;
-
-  let bestNx = cx;
-  let bestNz = cz;
-  let bestDist = currentDist;
-  for (const [dx, dz] of CARDINALS) {
-    const nx = cx + dx;
-    const nz = cz + dz;
-    if (nx < 0 || nz < 0 || nx >= field.width || nz >= field.height) continue;
-    const nIdx = toIdx(nx, nz);
-    if (field.passable[nIdx] === 0) continue;
-    const nDist = field.distance[nIdx]!;
-    if (nDist < 0) continue;
-    if (bestDist < 0 || nDist < bestDist) {
-      bestDist = nDist;
-      bestNx = nx;
-      bestNz = nz;
-    }
-  }
-
-  const targetX = field.minWX + bestNx * field.resolution;
-  const targetZ = field.minWZ + bestNz * field.resolution;
-  const dir = normalize(targetX - x, targetZ - z);
-  if (dir.x !== 0 || dir.z !== 0) {
-    return dir;
-  }
-
-  let bestGoal = field.goals[0] ?? { x: 0, z: 0 };
-  let bestGoalDist = distance(x, z, bestGoal.x, bestGoal.z);
-  for (const goal of field.goals) {
-    const d = distance(x, z, goal.x, goal.z);
-    if (d < bestGoalDist) {
-      bestGoalDist = d;
-      bestGoal = goal;
-    }
-  }
-  return normalize(bestGoal.x - x, bestGoal.z - z);
 };
 
 const buildSpawnerRoute = (
@@ -432,27 +434,37 @@ const buildSpawnerRoute = (
     return [cx, cz];
   };
   const toIdx = (cx: number, cz: number) => cz * field.width + cx;
+  const fromIdx = (idx: number): [number, number] => [
+    idx % field.width,
+    Math.floor(idx / field.width),
+  ];
+  const toWorld = (cx: number, cz: number) => ({
+    x: field.minWX + cx * field.resolution,
+    z: field.minWZ + cz * field.resolution,
+  });
 
   const route: Array<{ x: number; z: number }> = [start];
-  let point = { ...start };
+  const [startCellX, startCellZ] = toCellNearest(start.x, start.z);
+  const startIdx = toIdx(startCellX, startCellZ);
+  if (field.distance[startIdx] < 0) {
+    if (field.goals[0]) route.push(field.goals[0]);
+    return { route, routeState: 'blocked' };
+  }
+  let idx = startIdx;
   const maxSteps = field.width * field.height;
   for (let step = 0; step < maxSteps; step += 1) {
-    const [cx, cz] = toCellNearest(point.x, point.z);
-    const idx = toIdx(cx, cz);
     if (field.distance[idx] === 0) {
       return { route, routeState: 'reachable' };
     }
-    const dir = pickFlowDirection(field, point.x, point.z);
-    if (dir.x === 0 && dir.z === 0) break;
-    const nextPoint = {
-      x: point.x + dir.x * field.resolution,
-      z: point.z + dir.z * field.resolution,
-    };
+    const nextIdx = field.nextToGoal[idx];
+    if (nextIdx < 0 || nextIdx === idx) break;
+    const [nx, nz] = fromIdx(nextIdx);
+    const nextPoint = toWorld(nx, nz);
     const last = route[route.length - 1]!;
     if (distance(last.x, last.z, nextPoint.x, nextPoint.z) > 0.25) {
       route.push(nextPoint);
     }
-    point = nextPoint;
+    idx = nextIdx;
   }
   if (field.goals[0]) route.push(field.goals[0]);
   return { route, routeState: 'blocked' };
