@@ -29,6 +29,24 @@
       }
     }
   },
+  "menu": {
+    "items": [
+      {
+        "label": "Create TD post",
+        "description": "Create a fresh Tower Defense post",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/create-post"
+      },
+      {
+        "label": "Reset game",
+        "description": "Reset castle game",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/reset-game"
+      }
+    ]
+  },
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build"

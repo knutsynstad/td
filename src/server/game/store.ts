@@ -276,6 +276,15 @@ const defaultWave = (): WaveState => ({
   spawners: [],
 });
 
+const defaultMeta = (nowMs: number, energy: number): WorldMeta => ({
+  tickSeq: 0,
+  worldVersion: 0,
+  lastTickMs: nowMs,
+  seed: nowMs,
+  energy: clampCoins(energy),
+  lives: 1,
+});
+
 export const loadWorldState = async (): Promise<WorldState> => {
   const keys = getGameRedisKeys();
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
@@ -903,3 +912,33 @@ export const createDefaultPlayer = (
   speed: PLAYER_SPEED_UNITS_PER_SECOND,
   lastSeenMs: nowMs,
 });
+
+export const resetGameState = async (nowMs: number): Promise<void> => {
+  const keys = getGameRedisKeys();
+  const preservedCoins = await getCoins(nowMs);
+  const nextMeta = defaultMeta(nowMs, preservedCoins);
+
+  await Promise.all([
+    redis.hSet(keys.meta, {
+      tickSeq: String(nextMeta.tickSeq),
+      worldVersion: String(nextMeta.worldVersion),
+      lastTickMs: String(nextMeta.lastTickMs),
+      seed: String(nextMeta.seed),
+      energy: String(nextMeta.energy),
+      lives: String(nextMeta.lives),
+    }),
+    redis.set(keys.wave, toJson(defaultWave())),
+    redis.del(keys.players),
+    redis.del(keys.intents),
+    redis.del(keys.structures),
+    redis.del(keys.mobs),
+    redis.del(keys.queue),
+    redis.del(keys.seen),
+    redis.del(keys.rate),
+    redis.del(keys.snaps),
+    redis.del(keys.tickLease),
+    redis.del(keys.tickLeaseToken),
+    redis.del(keys.lastTickRunMs),
+    redis.del(keys.lastPublishTickSeq),
+  ]);
+};

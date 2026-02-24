@@ -42,6 +42,7 @@ import {
   persistWorldState,
   popPendingCommands,
   releaseTickLease,
+  resetGameState,
   removeOldPlayersByLastSeen,
   spendCoins,
   touchPlayerPresence,
@@ -393,5 +394,26 @@ export const runSchedulerTick = async (): Promise<{
     worldVersion: result.worldVersion,
     eventCount: result.deltas.length,
     remainingSteps: result.remainingSteps,
+  };
+};
+
+export const resetGame = async (): Promise<{
+  tickSeq: number;
+  worldVersion: number;
+}> => {
+  const nowMs = Date.now();
+  await resetGameState(nowMs);
+  const world = await loadWorldState();
+  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
+    {
+      type: 'resyncRequired',
+      tickSeq: world.meta.tickSeq,
+      worldVersion: world.meta.worldVersion,
+      reason: 'game reset',
+    },
+  ]);
+  return {
+    tickSeq: world.meta.tickSeq,
+    worldVersion: world.meta.worldVersion,
   };
 };
