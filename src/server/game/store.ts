@@ -1,6 +1,6 @@
 import { redis } from "@devvit/web/server";
 import type { CommandEnvelope } from "../../shared/game-protocol";
-import type { MobState, PlayerIntent, PlayerState, StructureState, WaveState, WorldMeta, WorldState } from "../../shared/game-state";
+import { DEFAULT_PLAYER_SPAWN, type MobState, type PlayerIntent, type PlayerState, type StructureState, type WaveState, type WorldMeta, type WorldState } from "../../shared/game-state";
 import {
   ENERGY_CAP,
   ENERGY_REGEN_PER_SECOND,
@@ -630,7 +630,7 @@ export const enforceStructureCap = async (postId: string): Promise<boolean> => {
 export const createDefaultPlayer = (playerId: string, username: string, nowMs: number): PlayerState => ({
   playerId,
   username,
-  position: { x: 0, z: 0 },
+  position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
   velocity: { x: 0, z: 0 },
   speed: PLAYER_SPEED_UNITS_PER_SECOND,
   lastSeenMs: nowMs,

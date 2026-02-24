@@ -137,11 +137,12 @@ import { createWaveAndSpawnSystem, type PreparedWave } from './game/systems/Wave
 import { connectAuthoritativeBridge } from './network/authoritativeBridge'
 import { fetchCastleCoinsBalance, requestCastleCoinsDeposit, requestCastleCoinsWithdraw } from './network/castleApi'
 import type { EntityDelta, StructureDelta, WaveDelta } from '../shared/game-protocol'
-import type {
-  MobState as SharedMobState,
-  StructureState as SharedStructureState,
-  WaveState as SharedWaveState,
-  WorldState as SharedWorldState
+import {
+  DEFAULT_PLAYER_SPAWN,
+  type MobState as SharedMobState,
+  type StructureState as SharedStructureState,
+  type WaveState as SharedWaveState,
+  type WorldState as SharedWorldState
 } from '../shared/game-state'
 import {
   assertEnergyInBounds,
@@ -3101,7 +3102,7 @@ const player: PlayerEntity = {
   baseY: PLAYER_HEIGHT * 0.5,
   username: ''
 }
-player.mesh.position.set(4, player.baseY, 4)
+player.mesh.position.set(DEFAULT_PLAYER_SPAWN.x, player.baseY, DEFAULT_PLAYER_SPAWN.z)
 player.target.set(player.mesh.position.x, 0, player.mesh.position.z)
 scene.add(player.mesh)
 
