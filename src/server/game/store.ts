@@ -186,6 +186,8 @@ const parseMob = (value: unknown): MobState => {
       maxHp: 1,
       spawnerId: '',
       routeIndex: 0,
+      stuckMs: 0,
+      lastProgressDistanceToGoal: Number.POSITIVE_INFINITY,
     };
   }
   return {
@@ -196,6 +198,10 @@ const parseMob = (value: unknown): MobState => {
     maxHp: Number(value.maxHp ?? 1),
     spawnerId: String(value.spawnerId ?? ''),
     routeIndex: Number(value.routeIndex ?? 0),
+    stuckMs: Number(value.stuckMs ?? 0),
+    lastProgressDistanceToGoal: Number(
+      value.lastProgressDistanceToGoal ?? Number.POSITIVE_INFINITY
+    ),
   };
 };
 

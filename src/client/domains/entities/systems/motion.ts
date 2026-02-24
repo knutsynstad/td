@@ -211,6 +211,10 @@ export const createEntityMotionSystem = (context: MotionContext) => {
         const berserkDir = getMobBerserkDirection(entity);
         if (berserkDir) {
           dir.copy(berserkDir);
+        } else if (entity.laneBlocked) {
+          // If blocked and we cannot pick a smash target, keep pressure toward castle.
+          dir.set(-entity.mesh.position.x, 0, -entity.mesh.position.z);
+          if (dir.length() > 0.1) dir.normalize();
         }
       } else {
         const waypoints = entity.waypoints;
@@ -316,7 +320,12 @@ export const createEntityMotionSystem = (context: MotionContext) => {
 
       if (entity.berserkMode) {
         const berserkDir = getMobBerserkDirection(entity);
-        if (berserkDir) dir.copy(berserkDir);
+        if (berserkDir) {
+          dir.copy(berserkDir);
+        } else if (entity.laneBlocked) {
+          dir.set(-entity.mesh.position.x, 0, -entity.mesh.position.z);
+          if (dir.length() > 0.1) dir.normalize();
+        }
       }
     } else {
       if (hasReachedBlockedTarget(entity)) {

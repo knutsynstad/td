@@ -52,6 +52,8 @@ const CASTLE_ROUTE_HALF_WIDTH_CELLS = 1;
 const CASTLE_HALF_EXTENT = 4;
 const MOB_ROUTE_REACH_RADIUS = 0.65;
 const MOB_ROUTE_LATERAL_SPREAD = 0.9;
+const MOB_STUCK_TIMEOUT_MS = 2 * 60 * 1000;
+const MOB_STUCK_PROGRESS_EPSILON = 0.1;
 const SERVER_TOWER_RANGE = 8;
 const SERVER_TOWER_DPS = 16;
 
@@ -501,6 +503,8 @@ const makeMob = (tickSeq: number, spawnerId: string): MobState => {
     maxHp: 100,
     spawnerId,
     routeIndex: 0,
+    stuckMs: 0,
+    lastProgressDistanceToGoal: Number.POSITIVE_INFINITY,
   };
 };
 
@@ -681,7 +685,22 @@ const updateMobs = (
       mob.position.x,
       mob.position.z
     );
-    if (mob.hp <= 0 || nearestGoalDistance < CASTLE_CAPTURE_RADIUS) {
+    const previousDistance =
+      mob.lastProgressDistanceToGoal ?? Number.POSITIVE_INFINITY;
+    const madeProgress =
+      nearestGoalDistance + MOB_STUCK_PROGRESS_EPSILON < previousDistance;
+    if (madeProgress) {
+      mob.stuckMs = 0;
+      mob.lastProgressDistanceToGoal = nearestGoalDistance;
+    } else {
+      mob.stuckMs = Math.max(0, (mob.stuckMs ?? 0) + deltaSeconds * 1000);
+      mob.lastProgressDistanceToGoal = Math.min(
+        previousDistance,
+        nearestGoalDistance
+      );
+    }
+    const stuckTimedOut = (mob.stuckMs ?? 0) >= MOB_STUCK_TIMEOUT_MS;
+    if (mob.hp <= 0 || nearestGoalDistance < CASTLE_CAPTURE_RADIUS || stuckTimedOut) {
       despawnedIds.push(mob.mobId);
       delete world.mobs[mob.mobId];
       if (spawner) {

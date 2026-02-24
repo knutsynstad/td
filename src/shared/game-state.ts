@@ -54,6 +54,8 @@ export type MobState = {
   maxHp: number;
   spawnerId: string;
   routeIndex: number;
+  stuckMs?: number;
+  lastProgressDistanceToGoal?: number;
 };
 
 export type SpawnerState = {

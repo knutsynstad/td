@@ -121,4 +121,45 @@ describe('runSimulation', () => {
       expect(structureDelta.requiresPathRefresh).toBe(true);
     }
   });
+
+  it('despawns mobs that remain stuck for over two minutes', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 1,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'reachable',
+        route: [{ x: 20, z: 20 }],
+      },
+    ];
+    gameWorld.mobs['stuck-mob'] = {
+      mobId: 'stuck-mob',
+      position: { x: 20, z: 20 },
+      velocity: { x: 0, z: 0 },
+      hp: 100,
+      maxHp: 100,
+      spawnerId: 'wave-1-north',
+      routeIndex: 0,
+      stuckMs: 0,
+      lastProgressDistanceToGoal: 1000,
+    };
+    const runUntilMs = nowMs + 121_000;
+    const maxSteps = Math.ceil((runUntilMs - nowMs) / 100) + 5;
+    const result = runSimulation(gameWorld, runUntilMs, [], maxSteps);
+
+    expect(result.world.mobs['stuck-mob']).toBeUndefined();
+    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    expect(entityDelta?.type).toBe('entityDelta');
+    if (entityDelta?.type === 'entityDelta') {
+      expect(entityDelta.despawnedMobIds).toContain('stuck-mob');
+    }
+  });
 });
