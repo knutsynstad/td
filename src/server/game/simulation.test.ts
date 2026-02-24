@@ -197,6 +197,119 @@ describe('runSimulation', () => {
     expect(moved.position.z).toBeLessThan(-50);
   });
 
+  it('auto-removes player obstacles first when paths are fully blocked', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 0,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'blocked',
+        route: [],
+      },
+    ];
+    gameWorld.structures['player-blocker'] = {
+      structureId: 'player-blocker',
+      ownerId: 'player-1',
+      type: 'rock',
+      center: { x: 0, z: -32 },
+      hp: 100,
+      maxHp: 100,
+      createdAtMs: nowMs,
+      metadata: {
+        rock: {
+          footprintX: 200,
+          footprintZ: 200,
+          yawQuarterTurns: 0,
+          modelIndex: 0,
+          mirrorX: false,
+          mirrorZ: false,
+          verticalScale: 1,
+        },
+      },
+    };
+    gameWorld.structures['map-nonblocker'] = {
+      structureId: 'map-nonblocker',
+      ownerId: 'Map',
+      type: 'tower',
+      center: { x: 40, z: 40 },
+      hp: 100,
+      maxHp: 100,
+      createdAtMs: nowMs - 1,
+    };
+
+    const result = runSimulation(gameWorld, nowMs, [], 1);
+    expect(result.world.structures['player-blocker']).toBeUndefined();
+    expect(result.world.structures['map-nonblocker']).toBeDefined();
+    expect(result.world.wave.spawners[0]?.routeState).toBe('reachable');
+    const structureDelta = result.deltas.find(
+      (delta) => delta.type === 'structureDelta'
+    );
+    expect(structureDelta?.type).toBe('structureDelta');
+    if (structureDelta?.type === 'structureDelta') {
+      expect(structureDelta.removes).toContain('player-blocker');
+      expect(structureDelta.removes).not.toContain('map-nonblocker');
+    }
+  });
+
+  it('falls back to removing map geometry when no player obstacle resolves block', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 0,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'blocked',
+        route: [],
+      },
+    ];
+    gameWorld.structures['map-blocker'] = {
+      structureId: 'map-blocker',
+      ownerId: 'Map',
+      type: 'rock',
+      center: { x: 0, z: -32 },
+      hp: 100,
+      maxHp: 100,
+      createdAtMs: nowMs,
+      metadata: {
+        rock: {
+          footprintX: 200,
+          footprintZ: 200,
+          yawQuarterTurns: 0,
+          modelIndex: 0,
+          mirrorX: false,
+          mirrorZ: false,
+          verticalScale: 1,
+        },
+      },
+    };
+
+    const result = runSimulation(gameWorld, nowMs, [], 1);
+    expect(result.world.structures['map-blocker']).toBeUndefined();
+    expect(result.world.wave.spawners[0]?.routeState).toBe('reachable');
+    const structureDelta = result.deltas.find(
+      (delta) => delta.type === 'structureDelta'
+    );
+    expect(structureDelta?.type).toBe('structureDelta');
+    if (structureDelta?.type === 'structureDelta') {
+      expect(structureDelta.removes).toContain('map-blocker');
+    }
+  });
+
   it('includes priority mob slices in entity deltas', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);

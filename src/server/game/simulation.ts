@@ -601,6 +601,40 @@ const recomputeSpawnerRoutes = (world: WorldState): void => {
   }
 };
 
+const hasAtLeastOneReachableSpawner = (world: WorldState): boolean => {
+  if (world.wave.spawners.length === 0) return true;
+  return world.wave.spawners.some((spawner) => spawner.routeState === 'reachable');
+};
+
+const collectAutoUnblockCandidates = (
+  structures: Record<string, StructureState>
+): StructureState[] =>
+  Object.values(structures)
+    .filter((structure) => structure.type !== 'bank')
+    .sort((a, b) => {
+      const ownerPriorityA = a.ownerId === 'Map' ? 1 : 0;
+      const ownerPriorityB = b.ownerId === 'Map' ? 1 : 0;
+      if (ownerPriorityA !== ownerPriorityB) return ownerPriorityA - ownerPriorityB;
+      return b.createdAtMs - a.createdAtMs;
+    });
+
+const autoUnblockFullyBlockedPaths = (world: WorldState): string[] => {
+  if (world.wave.spawners.length === 0) return [];
+  if (hasAtLeastOneReachableSpawner(world)) return [];
+
+  const removedIds: string[] = [];
+  const candidates = collectAutoUnblockCandidates(world.structures);
+  for (const candidate of candidates) {
+    if (removedIds.length >= MAX_STRUCTURE_DELTA_REMOVES) break;
+    if (!world.structures[candidate.structureId]) continue;
+    delete world.structures[candidate.structureId];
+    removedIds.push(candidate.structureId);
+    recomputeSpawnerRoutes(world);
+    if (hasAtLeastOneReachableSpawner(world)) break;
+  }
+  return removedIds;
+};
+
 const prepareNextWaveSpawners = (
   world: WorldState
 ): WorldState['wave']['spawners'] => {
@@ -1036,9 +1070,18 @@ export const runSimulation = (
   const deltas: GameDelta[] = [];
   let waveChanged = ensureInitialWaveSchedule(world);
   const commandChanges = applyCommands(world, commands, nowMs);
+  const structureUpserts = commandChanges.structureUpserts.slice();
+  const structureRemoves = commandChanges.structureRemoves.slice();
   waveChanged = waveChanged || commandChanges.waveChanged;
   if (world.wave.spawners.some((spawner) => spawner.route.length === 0)) {
     recomputeSpawnerRoutes(world);
+    waveChanged = true;
+  }
+  const autoRemovedStructureIds = autoUnblockFullyBlockedPaths(world);
+  if (autoRemovedStructureIds.length > 0) {
+    for (const removedId of autoRemovedStructureIds) {
+      if (!structureRemoves.includes(removedId)) structureRemoves.push(removedId);
+    }
     waveChanged = true;
   }
   if (commandChanges.movedPlayers.length > 0) {
@@ -1054,8 +1097,8 @@ export const runSimulation = (
     });
   }
   if (
-    commandChanges.structureUpserts.length > 0 ||
-    commandChanges.structureRemoves.length > 0
+    structureUpserts.length > 0 ||
+    structureRemoves.length > 0
   ) {
     recomputeSpawnerRoutes(world);
     waveChanged = true;
@@ -1063,11 +1106,11 @@ export const runSimulation = (
       type: 'structureDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion + 1,
-      upserts: commandChanges.structureUpserts.slice(
+      upserts: structureUpserts.slice(
         0,
         MAX_STRUCTURE_DELTA_UPSERTS
       ),
-      removes: commandChanges.structureRemoves.slice(
+      removes: structureRemoves.slice(
         0,
         MAX_STRUCTURE_DELTA_REMOVES
       ),
