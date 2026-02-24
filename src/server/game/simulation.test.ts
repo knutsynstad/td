@@ -4,6 +4,7 @@ import type { WorldState } from '../../shared/game-state';
 import {
   AUTO_WAVE_INITIAL_DELAY_MS,
   FULL_MOB_DELTA_INTERVAL_MS,
+  FULL_MOB_SNAPSHOT_CHUNK_SIZE,
   MAX_DELTA_MOBS,
   SIM_TICK_MS,
 } from './config';
@@ -435,7 +436,7 @@ describe('runSimulation', () => {
         route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
       },
     ];
-    for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
+    for (let i = 0; i < FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25; i += 1) {
       gameWorld.mobs[`full-${i}`] = {
         mobId: `full-${i}`,
         position: { x: i * 0.1, z: -10 },
@@ -447,14 +448,31 @@ describe('runSimulation', () => {
       };
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
-    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
-    expect(entityDelta?.type).toBe('entityDelta');
-    if (entityDelta?.type === 'entityDelta') {
+    const entityDeltas = result.deltas.filter((delta) => delta.type === 'entityDelta');
+    expect(entityDeltas.length).toBe(2);
+    for (let i = 0; i < entityDeltas.length; i += 1) {
+      const entityDelta = entityDeltas[i]!;
       expect(entityDelta.tickSeq % intervalTicks).toBe(0);
       expect(entityDelta.fullMobList).toBe(true);
-      expect(entityDelta.mobs.length).toBeGreaterThan(MAX_DELTA_MOBS);
       expect(entityDelta.priorityMobs).toBeUndefined();
+      expect(entityDelta.fullMobSnapshotId).toBe(entityDelta.tickSeq);
+      expect(entityDelta.fullMobSnapshotChunkCount).toBe(2);
+      expect(entityDelta.fullMobSnapshotChunkIndex).toBe(i);
+      expect(entityDelta.mobs).toHaveLength(0);
+      expect(entityDelta.mobSnapshotCompact).toBeDefined();
+      if (entityDelta.mobSnapshotCompact) {
+        const compact = entityDelta.mobSnapshotCompact;
+        expect(compact.mobIds.length).toBe(compact.px.length);
+        expect(compact.mobIds.length).toBe(compact.pz.length);
+        expect(compact.mobIds.length).toBe(compact.vx.length);
+        expect(compact.mobIds.length).toBe(compact.vz.length);
+        expect(compact.mobIds.length).toBe(compact.hp.length);
+        expect(compact.mobIds.length).toBe(compact.maxHp.length);
+      }
     }
+    const allMobIds = new Set(entityDeltas.flatMap((delta) => delta.mobSnapshotCompact?.mobIds ?? []));
+    expect(allMobIds.size).toBe(FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25);
+    expect(entityDeltas[0]?.despawnedMobIds).toHaveLength(0);
   });
 
   it('sends full mob snapshots for one second after structure changes', () => {

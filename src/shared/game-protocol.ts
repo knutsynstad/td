@@ -104,6 +104,15 @@ export type EntityDelta = {
     hp: number;
     maxHp: number;
   }>;
+  mobSnapshotCompact?: {
+    mobIds: string[];
+    px: number[];
+    pz: number[];
+    vx: number[];
+    vz: number[];
+    hp: number[];
+    maxHp: number[];
+  };
   priorityMobs?: {
     nearPlayers: Array<{
       mobId: string;
@@ -128,6 +137,9 @@ export type EntityDelta = {
     }>;
   };
   fullMobList?: boolean;
+  fullMobSnapshotId?: number;
+  fullMobSnapshotChunkIndex?: number;
+  fullMobSnapshotChunkCount?: number;
   despawnedMobIds: string[];
 };
 

@@ -71,22 +71,41 @@ const broadcast = async (
   events: GameDelta[]
 ): Promise<void> => {
   if (events.length === 0) return;
-  const boundedEvents = events.slice(0, MAX_BATCH_EVENTS);
-  const batch: DeltaBatch = {
-    type: 'deltaBatch',
-    tickSeq,
-    worldVersion,
-    events: boundedEvents,
-  };
   try {
-    await realtime.send(getGameChannelName(), batch);
+    const totalBatches = Math.max(1, Math.ceil(events.length / MAX_BATCH_EVENTS));
+    for (
+      let offset = 0, batchIndex = 0;
+      offset < events.length;
+      offset += MAX_BATCH_EVENTS, batchIndex += 1
+    ) {
+      const batchEvents = events.slice(offset, offset + MAX_BATCH_EVENTS);
+      const batch: DeltaBatch = {
+        type: 'deltaBatch',
+        tickSeq,
+        worldVersion,
+        events: batchEvents,
+      };
+      const serialized = JSON.stringify(batch);
+      const messageSizeBytes = new TextEncoder().encode(serialized).length;
+      try {
+        await realtime.send(getGameChannelName(), batch);
+      } catch (error) {
+        console.error('Realtime broadcast failed', {
+          tickSeq,
+          worldVersion,
+          eventCount: events.length,
+          batchIndex,
+          totalBatches,
+          batchEventCount: batchEvents.length,
+          messageSizeBytes,
+          error,
+        });
+        throw error;
+      }
+    }
   } catch (error) {
-    console.error('Realtime broadcast failed', {
-      tickSeq,
-      worldVersion,
-      eventCount: boundedEvents.length,
-      error,
-    });
+    // Failure details are logged at the per-batch callsite above.
+    void error;
   }
 };
 

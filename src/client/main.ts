@@ -3339,6 +3339,8 @@ const serverMobSeenIdsScratch = new Set<string>();
 const serverMobRemovalScratch: string[] = [];
 const serverMobDeltaPosScratch = new THREE.Vector3();
 const serverMobDeltaVelScratch = new THREE.Vector3();
+let pendingFullMobSnapshotId: number | null = null;
+const pendingFullMobSnapshotSeenIds = new Set<string>();
 let serverWaveActive = false;
 let serverLastAckSeq = 0;
 const isServerAuthoritative = () => authoritativeBridge !== null;
@@ -3350,8 +3352,13 @@ const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
 const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
 const SERVER_MOB_FROZEN_REMOVE_MS = SERVER_MOB_EXTRAPOLATION_MAX_MS + 350;
 const SERVER_HEARTBEAT_INTERVAL_MS = 200;
+const SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS = 45_000;
+const SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS = 7_500;
 let serverClockSkewMs = 0;
 let serverClockSkewInitialized = false;
+let nextServerStructureResyncAtMs =
+  performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+let serverStructureResyncInFlight = false;
 const syncServerClockSkew = (serverEpochMs: number) => {
   const sample = serverEpochMs - Date.now();
   if (!serverClockSkewInitialized) {
@@ -3708,35 +3715,57 @@ const applyServerMobUpdate = (
   item: EntityDelta['mobs'][number],
   delta: EntityDelta
 ) => {
-  const existing = serverMobsById.get(item.mobId);
+  applyServerMobUpdateValues(
+    item.mobId,
+    item.position.x,
+    item.position.z,
+    item.velocity.x,
+    item.velocity.z,
+    item.hp,
+    item.maxHp,
+    delta
+  );
+};
+
+const applyServerMobUpdateValues = (
+  mobId: string,
+  posX: number,
+  posZ: number,
+  velX: number,
+  velZ: number,
+  hp: number,
+  maxHp: number,
+  delta: EntityDelta
+) => {
+  const existing = serverMobsById.get(mobId);
   if (!existing) {
     upsertServerMobFromSnapshot({
-      mobId: item.mobId,
-      position: item.position,
-      velocity: item.velocity,
-      hp: item.hp,
-      maxHp: item.maxHp,
+      mobId,
+      position: { x: posX, z: posZ },
+      velocity: { x: velX, z: velZ },
+      hp,
+      maxHp,
       spawnerId: '',
       routeIndex: 0,
     });
-    serverMobSampleById.set(item.mobId, {
+    serverMobSampleById.set(mobId, {
       serverTimeMs: delta.serverTimeMs,
-      position: new THREE.Vector3(item.position.x, MOB_HEIGHT * 0.5, item.position.z),
-      velocity: new THREE.Vector3(item.velocity.x, 0, item.velocity.z),
+      position: new THREE.Vector3(posX, MOB_HEIGHT * 0.5, posZ),
+      velocity: new THREE.Vector3(velX, 0, velZ),
       receivedAtPerfMs: performance.now(),
     });
     return;
   }
 
-  existing.hp = item.hp;
-  existing.maxHp = item.maxHp;
-  const prev = serverMobSampleById.get(item.mobId);
+  existing.hp = hp;
+  existing.maxHp = maxHp;
+  const prev = serverMobSampleById.get(mobId);
   const currentPos = serverMobDeltaPosScratch.set(
-    item.position.x,
+    posX,
     existing.baseY,
-    item.position.z
+    posZ
   );
-  const currentVel = serverMobDeltaVelScratch.set(item.velocity.x, 0, item.velocity.z);
+  const currentVel = serverMobDeltaVelScratch.set(velX, 0, velZ);
   const hasPrev =
     !!prev &&
     Number.isFinite(prev.serverTimeMs) &&
@@ -3746,7 +3775,7 @@ const applyServerMobUpdate = (
     : delta.serverTimeMs - Math.max(1, delta.tickMs);
   const toServerMs = delta.serverTimeMs;
 
-  const interpolation = serverMobInterpolationById.get(item.mobId);
+  const interpolation = serverMobInterpolationById.get(mobId);
   if (interpolation) {
     if (hasPrev && prev) {
       interpolation.from.copy(prev.position);
@@ -3760,7 +3789,7 @@ const applyServerMobUpdate = (
     interpolation.t0 = toPerfTime(fromServerMs);
     interpolation.t1 = toPerfTime(toServerMs);
   } else {
-    serverMobInterpolationById.set(item.mobId, {
+    serverMobInterpolationById.set(mobId, {
       from:
         hasPrev && prev
           ? prev.position.clone()
@@ -3772,14 +3801,14 @@ const applyServerMobUpdate = (
     });
   }
 
-  const sample = serverMobSampleById.get(item.mobId);
+  const sample = serverMobSampleById.get(mobId);
   if (sample) {
     sample.serverTimeMs = delta.serverTimeMs;
     sample.position.copy(currentPos);
     sample.velocity.copy(currentVel);
     sample.receivedAtPerfMs = performance.now();
   } else {
-    serverMobSampleById.set(item.mobId, {
+    serverMobSampleById.set(mobId, {
       serverTimeMs: delta.serverTimeMs,
       position: currentPos.clone(),
       velocity: currentVel.clone(),
@@ -3795,6 +3824,33 @@ const applyServerMobDelta = (delta: EntityDelta) => {
     if (serverMobSeenIdsScratch.has(item.mobId)) continue;
     serverMobSeenIdsScratch.add(item.mobId);
     applyServerMobUpdate(item, delta);
+  }
+  const compact = delta.mobSnapshotCompact;
+  if (compact) {
+    const length = Math.min(
+      compact.mobIds.length,
+      compact.px.length,
+      compact.pz.length,
+      compact.vx.length,
+      compact.vz.length,
+      compact.hp.length,
+      compact.maxHp.length
+    );
+    for (let i = 0; i < length; i += 1) {
+      const mobId = compact.mobIds[i]!;
+      if (serverMobSeenIdsScratch.has(mobId)) continue;
+      serverMobSeenIdsScratch.add(mobId);
+      applyServerMobUpdateValues(
+        mobId,
+        compact.px[i]!,
+        compact.pz[i]!,
+        compact.vx[i]!,
+        compact.vz[i]!,
+        compact.hp[i]!,
+        compact.maxHp[i]!,
+        delta
+      );
+    }
   }
   // Full list already contains all entities; avoid extra pass over priority buckets.
   if (!delta.fullMobList) {
@@ -3818,14 +3874,48 @@ const applyServerMobDelta = (delta: EntityDelta) => {
     }
   }
   if (delta.fullMobList) {
-    serverMobRemovalScratch.length = 0;
-    for (const mobId of serverMobsById.keys()) {
-      if (serverMobSeenIdsScratch.has(mobId)) continue;
-      serverMobRemovalScratch.push(mobId);
+    const chunkCount = Math.max(1, delta.fullMobSnapshotChunkCount ?? 1);
+    const chunkIndex = Math.max(0, delta.fullMobSnapshotChunkIndex ?? 0);
+    const snapshotId = delta.fullMobSnapshotId ?? delta.tickSeq;
+    if (chunkCount > 1) {
+      const startsNewSnapshot =
+        pendingFullMobSnapshotId !== snapshotId || chunkIndex === 0;
+      if (startsNewSnapshot) {
+        pendingFullMobSnapshotId = snapshotId;
+        pendingFullMobSnapshotSeenIds.clear();
+      }
+      for (const mobId of serverMobSeenIdsScratch) {
+        pendingFullMobSnapshotSeenIds.add(mobId);
+      }
+      const isFinalChunk = chunkIndex >= chunkCount - 1;
+      if (isFinalChunk) {
+        serverMobRemovalScratch.length = 0;
+        for (const mobId of serverMobsById.keys()) {
+          if (pendingFullMobSnapshotSeenIds.has(mobId)) continue;
+          serverMobRemovalScratch.push(mobId);
+        }
+        for (const mobId of serverMobRemovalScratch) {
+          removeServerMobById(mobId);
+        }
+        pendingFullMobSnapshotId = null;
+        pendingFullMobSnapshotSeenIds.clear();
+      }
+    } else {
+      serverMobRemovalScratch.length = 0;
+      for (const mobId of serverMobsById.keys()) {
+        if (serverMobSeenIdsScratch.has(mobId)) continue;
+        serverMobRemovalScratch.push(mobId);
+      }
+      for (const mobId of serverMobRemovalScratch) {
+        removeServerMobById(mobId);
+      }
+      pendingFullMobSnapshotId = null;
+      pendingFullMobSnapshotSeenIds.clear();
     }
-    for (const mobId of serverMobRemovalScratch) {
-      removeServerMobById(mobId);
-    }
+  } else {
+    // Compact updates invalidate any partial full-snapshot accumulation.
+    pendingFullMobSnapshotId = null;
+    pendingFullMobSnapshotSeenIds.clear();
   }
   for (const mobId of delta.despawnedMobIds) {
     const mob = serverMobsById.get(mobId);
@@ -4004,6 +4094,9 @@ const setupAuthoritativeBridge = async () => {
         });
       },
     });
+    nextServerStructureResyncAtMs =
+      performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+    serverStructureResyncInFlight = false;
     void syncCastleCoinsFromServer();
   } catch (error) {
     console.error('Failed to connect authoritative bridge', error);
@@ -6675,6 +6768,25 @@ const tick = (now: number, delta: number) => {
       z: player.mesh.position.z,
     });
   }
+  if (
+    authoritativeBridge &&
+    !serverStructureResyncInFlight &&
+    now >= nextServerStructureResyncAtMs
+  ) {
+    serverStructureResyncInFlight = true;
+    nextServerStructureResyncAtMs =
+      now + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+    void authoritativeBridge
+      .resync()
+      .catch((error) => {
+        console.error('Failed periodic authoritative snapshot resync', error);
+        nextServerStructureResyncAtMs =
+          performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS;
+      })
+      .finally(() => {
+        serverStructureResyncInFlight = false;
+      });
+  }
   for (const npc of npcs) {
     updateEntityMotion(npc, delta);
   }
@@ -7098,6 +7210,7 @@ const disposeApp = () => {
     void authoritativeBridge.disconnect();
     authoritativeBridge = null;
   }
+  serverStructureResyncInFlight = false;
 
   particleSystem.dispose();
   spawnContainerOverlay.dispose();

@@ -19,6 +19,7 @@ import {
   ENABLE_FULL_MOB_DELTAS,
   FULL_MOB_DELTA_INTERVAL_MS,
   FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS,
+  FULL_MOB_SNAPSHOT_CHUNK_SIZE,
   ENABLE_INTEREST_MANAGED_MOB_DELTAS,
   ENABLE_SERVER_TOWER_SPATIAL_DAMAGE,
   MAX_DELTA_MOBS,
@@ -1019,6 +1020,30 @@ const toDeltaMob = (mob: MobState) => ({
   maxHp: mob.maxHp,
 });
 
+const toCompactMobSnapshot = (
+  mobs: ReturnType<typeof toDeltaMob>[]
+): NonNullable<EntityDelta['mobSnapshotCompact']> => {
+  const compact: NonNullable<EntityDelta['mobSnapshotCompact']> = {
+    mobIds: [],
+    px: [],
+    pz: [],
+    vx: [],
+    vz: [],
+    hp: [],
+    maxHp: [],
+  };
+  for (const mob of mobs) {
+    compact.mobIds.push(mob.mobId);
+    compact.px.push(mob.position.x);
+    compact.pz.push(mob.position.z);
+    compact.vx.push(mob.velocity.x);
+    compact.vz.push(mob.velocity.z);
+    compact.hp.push(mob.hp);
+    compact.maxHp.push(mob.maxHp);
+  }
+  return compact;
+};
+
 const nearestPlayerDistanceSq = (mob: MobState, world: WorldState): number => {
   let best = Number.POSITIVE_INFINITY;
   for (const player of Object.values(world.players)) {
@@ -1184,25 +1209,58 @@ export const runSimulation = (
       ENABLE_FULL_MOB_DELTAS &&
       (world.meta.tickSeq % FULL_MOB_DELTA_INTERVAL_TICKS === 0 ||
         structureChangeBurstActive);
-    const baseMobs = includeFullMobList
-      ? latestMobUpserts.map(toDeltaMob)
-      : latestMobUpserts.slice(0, MAX_DELTA_MOBS).map(toDeltaMob);
-    const entityDelta: EntityDelta = {
-      type: 'entityDelta',
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion,
-      serverTimeMs: world.meta.lastTickMs,
-      tickMs: simulatedWindowMs,
-      players: [],
-      mobs: baseMobs,
-      priorityMobs:
-        !includeFullMobList && ENABLE_INTEREST_MANAGED_MOB_DELTAS
-        ? buildPriorityMobSlices(latestMobUpserts, world)
-        : undefined,
-      fullMobList: includeFullMobList,
-      despawnedMobIds: Array.from(despawnedDuringRun),
-    };
-    deltas.push(entityDelta);
+    if (includeFullMobList) {
+      const snapshotMobs = latestMobUpserts.map(toDeltaMob);
+      const chunkSize = Math.max(1, FULL_MOB_SNAPSHOT_CHUNK_SIZE);
+      const chunkCount = Math.max(1, Math.ceil(snapshotMobs.length / chunkSize));
+      const snapshotId = world.meta.tickSeq;
+      console.info('Mob snapshot payload', {
+        tickSeq: world.meta.tickSeq,
+        worldVersion: world.meta.worldVersion,
+        totalMobs: snapshotMobs.length,
+        chunkCount,
+        chunkSize,
+      });
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        const start = chunkIndex * chunkSize;
+        const end = Math.min(snapshotMobs.length, start + chunkSize);
+        const isFinalChunk = chunkIndex === chunkCount - 1;
+        const chunkMobs = snapshotMobs.slice(start, end);
+        const chunkDelta: EntityDelta = {
+          type: 'entityDelta',
+          tickSeq: world.meta.tickSeq,
+          worldVersion: world.meta.worldVersion,
+          serverTimeMs: world.meta.lastTickMs,
+          tickMs: simulatedWindowMs,
+          players: [],
+          mobs: [],
+          mobSnapshotCompact: toCompactMobSnapshot(chunkMobs),
+          fullMobList: true,
+          fullMobSnapshotId: snapshotId,
+          fullMobSnapshotChunkIndex: chunkIndex,
+          fullMobSnapshotChunkCount: chunkCount,
+          despawnedMobIds: isFinalChunk ? Array.from(despawnedDuringRun) : [],
+        };
+        deltas.push(chunkDelta);
+      }
+    } else {
+      const baseMobs = latestMobUpserts.slice(0, MAX_DELTA_MOBS).map(toDeltaMob);
+      const entityDelta: EntityDelta = {
+        type: 'entityDelta',
+        tickSeq: world.meta.tickSeq,
+        worldVersion: world.meta.worldVersion,
+        serverTimeMs: world.meta.lastTickMs,
+        tickMs: simulatedWindowMs,
+        players: [],
+        mobs: baseMobs,
+        priorityMobs: ENABLE_INTEREST_MANAGED_MOB_DELTAS
+          ? buildPriorityMobSlices(latestMobUpserts, world)
+          : undefined,
+        fullMobList: false,
+        despawnedMobIds: Array.from(despawnedDuringRun),
+      };
+      deltas.push(entityDelta);
+    }
   }
   if (latestWaveDelta) {
     deltas.push(latestWaveDelta);
