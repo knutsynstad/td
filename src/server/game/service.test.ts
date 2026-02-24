@@ -2,6 +2,7 @@ import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import { applyCommand, getCoinBalance, joinGame, resetGame, resyncGame, runLeaderLoop } from './service';
+import { loadWorldState, persistWorldState } from './store';
 
 const test = createDevvitTest();
 
@@ -78,4 +79,39 @@ test('applyCommand rejects empty buildStructures payloads', async () => {
   expect(response.accepted).toBe(false);
   expect(response.reason).toBe('no structures requested');
   expect(afterCoins).toBe(beforeCoins);
+});
+
+test('resync heals invalid map trees near castle and spawn entry lanes', async () => {
+  await resetGame();
+  const seeded = await resyncGame();
+  const world = seeded.snapshot;
+  world.structures['map-tree-castle-camper'] = {
+    structureId: 'map-tree-castle-camper',
+    ownerId: 'Map',
+    type: 'tree',
+    center: { x: 0, z: 0 },
+    hp: 100,
+    maxHp: 100,
+    createdAtMs: Date.now(),
+    metadata: { treeFootprint: 4 },
+  };
+  world.structures['map-tree-spawn-camper'] = {
+    structureId: 'map-tree-spawn-camper',
+    ownerId: 'Map',
+    type: 'tree',
+    center: { x: 0, z: -61 },
+    hp: 100,
+    maxHp: 100,
+    createdAtMs: Date.now(),
+    metadata: { treeFootprint: 3 },
+  };
+  await persistWorldState(world);
+
+  const healed = await resyncGame();
+  expect(healed.snapshot.structures['map-tree-castle-camper']).toBeUndefined();
+  expect(healed.snapshot.structures['map-tree-spawn-camper']).toBeUndefined();
+
+  const reloaded = await loadWorldState();
+  expect(reloaded.structures['map-tree-castle-camper']).toBeUndefined();
+  expect(reloaded.structures['map-tree-spawn-camper']).toBeUndefined();
 });

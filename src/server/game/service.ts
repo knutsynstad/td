@@ -31,7 +31,11 @@ import {
 } from './config';
 import { getGameChannelName } from './keys';
 import { buildPresenceLeaveDelta, runSimulation } from './simulation';
-import { buildStaticMapStructures, hasStaticMapStructures } from './staticStructures';
+import {
+  buildStaticMapStructures,
+  hasStaticMapStructures,
+  sanitizeStaticMapStructures,
+} from './staticStructures';
 import {
   acquireLeaderLock,
   addCoins,
@@ -109,16 +113,20 @@ const percentile = (values: number[], p: number): number => {
 
 const ensureStaticMap = (
   world: { structures: Record<string, StructureState>; meta: { lastTickMs: number; worldVersion: number } }
-): StructureState[] => {
-  if (hasStaticMapStructures(world.structures)) return [];
+): { upserts: StructureState[]; removes: string[] } => {
+  const removes = sanitizeStaticMapStructures(world.structures);
+  if (hasStaticMapStructures(world.structures)) {
+    if (removes.length > 0) world.meta.worldVersion += 1;
+    return { upserts: [], removes };
+  }
   const statics = buildStaticMapStructures(world.meta.lastTickMs);
   const upserts: StructureState[] = [];
   for (const [id, structure] of Object.entries(statics)) {
     world.structures[id] = structure;
     upserts.push(structure);
   }
-  if (upserts.length > 0) world.meta.worldVersion += 1;
-  return upserts;
+  if (upserts.length > 0 || removes.length > 0) world.meta.worldVersion += 1;
+  return { upserts, removes };
 };
 
 export type LeaderLoopResult = {
@@ -190,15 +198,15 @@ export const runLeaderLoop = async (
       const loadStartedAtMs = Date.now();
       const world = await loadWorldState();
       stageLoadWorldMs += Date.now() - loadStartedAtMs;
-      const staticUpserts = ensureStaticMap(world);
+      const staticSync = ensureStaticMap(world);
 
-      if (staticUpserts.length > 0) {
+      if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
         const bootstrapDelta: GameDelta = {
           type: 'structureDelta',
           tickSeq: world.meta.tickSeq,
           worldVersion: world.meta.worldVersion,
-          upserts: staticUpserts.slice(0, MAX_STRUCTURE_DELTA_UPSERTS),
-          removes: [],
+          upserts: staticSync.upserts.slice(0, MAX_STRUCTURE_DELTA_UPSERTS),
+          removes: staticSync.removes,
           requiresPathRefresh: true,
         };
         const bootstrapBroadcastStartedAtMs = Date.now();
@@ -307,12 +315,7 @@ export const joinGame = async (): Promise<JoinResponse> => {
   const nowMs = Date.now();
   await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
   const world = await loadWorldState();
-  if (!hasStaticMapStructures(world.structures)) {
-    const staticStructures = buildStaticMapStructures(world.meta.lastTickMs);
-    for (const [structureId, structure] of Object.entries(staticStructures)) {
-      world.structures[structureId] = structure;
-    }
-  }
+  ensureStaticMap(world);
   const playerCount = Object.keys(world.players).length;
   if (playerCount >= MAX_PLAYERS) {
     throw new Error('game is full');
@@ -474,11 +477,9 @@ export const getCoinBalance = async (): Promise<number> => getCoins(Date.now());
 
 export const resyncGame = async (_playerId?: string): Promise<ResyncResponse> => {
   const world = await loadWorldState();
-  if (!hasStaticMapStructures(world.structures)) {
-    const staticStructures = buildStaticMapStructures(world.meta.lastTickMs);
-    for (const [structureId, structure] of Object.entries(staticStructures)) {
-      world.structures[structureId] = structure;
-    }
+  const staticSync = ensureStaticMap(world);
+  if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
+    await persistWorldState(world);
   }
   world.meta.energy = await getCoins(Date.now());
   return {
