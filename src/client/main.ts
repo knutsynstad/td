@@ -133,12 +133,14 @@ import {
   type BallistaVisualRig
 } from './presentation/ballistaRig'
 import { createWaveAndSpawnSystem, type PreparedWave } from './game/systems/WaveAndSpawnSystem'
+import { connectAuthoritativeBridge } from './network/authoritativeBridge'
 import {
   assertEnergyInBounds,
   assertMobSpawnerReferences,
   assertSpawnerCounts,
   assertStructureStoreConsistency
 } from './game/invariants'
+import type { BankBalanceResponse, BankDepositResponse, BankWithdrawResponse } from '../shared/api'
 import { createRandomSource, deriveSeed, hashSeed } from './utils/rng'
 import {
   generateSeededWorldFeatures,
@@ -3107,7 +3109,7 @@ const player: PlayerEntity = {
   target: new THREE.Vector3(0, 0, 0),
   kind: 'player',
   baseY: PLAYER_HEIGHT * 0.5,
-  username: 'u/PlayerOne'
+  username: ''
 }
 player.mesh.position.set(4, player.baseY, 4)
 player.target.set(player.mesh.position.x, 0, player.mesh.position.z)
@@ -3128,9 +3130,71 @@ const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
   npc.mesh.position.copy(pos).setY(npc.baseY)
   scene.add(npc.mesh)
   npcs.push(npc)
+  return npc
 }
-makeNpc(new THREE.Vector3(-6, 0, 6), 0xffc857, 'u/NPC_Alpha')
-makeNpc(new THREE.Vector3(-6, 0, -6), 0xb48cff, 'u/NPC_Beta')
+
+let authoritativeBridge: Awaited<ReturnType<typeof connectAuthoritativeBridge>> | null = null
+let authoritativeSelfPlayerId = ''
+let lastNetworkHeartbeatAt = 0
+let lastMoveIntentSentAt = 0
+const MOVE_INTENT_MIN_INTERVAL_MS = 100
+const MOVE_INTENT_TARGET_EPSILON = 0.75
+const lastMoveIntentTarget = { x: 0, z: 0 }
+const remotePlayersById = new Map<string, NpcEntity>()
+
+const upsertRemoteNpc = (playerId: string, username: string, position: { x: number, z: number }) => {
+  if (playerId === authoritativeSelfPlayerId) return
+  const existing = remotePlayersById.get(playerId)
+  if (existing) {
+    existing.username = username
+    existing.target.set(position.x, 0, position.z)
+    return
+  }
+  const npc = makeNpc(new THREE.Vector3(position.x, 0, position.z), 0xffc857, username)
+  remotePlayersById.set(playerId, npc)
+}
+
+const removeRemoteNpc = (playerId: string) => {
+  const npc = remotePlayersById.get(playerId)
+  if (!npc) return
+  scene.remove(npc.mesh)
+  const index = npcs.indexOf(npc)
+  if (index >= 0) {
+    npcs.splice(index, 1)
+  }
+  remotePlayersById.delete(playerId)
+}
+
+const setupAuthoritativeBridge = async () => {
+  if (authoritativeBridge) return
+  try {
+    authoritativeBridge = await connectAuthoritativeBridge({
+      onSelfReady: (playerId, username, position) => {
+        authoritativeSelfPlayerId = playerId
+        player.username = username
+        player.mesh.position.set(position.x, player.baseY, position.z)
+        player.target.set(position.x, 0, position.z)
+        lastMoveIntentTarget.x = position.x
+        lastMoveIntentTarget.z = position.z
+      },
+      onRemoteJoin: (playerId, username, position) => {
+        upsertRemoteNpc(playerId, username, position)
+      },
+      onRemoteLeave: (playerId) => {
+        removeRemoteNpc(playerId)
+      },
+      onPlayerMove: (playerId, username, next) => {
+        if (playerId === authoritativeSelfPlayerId) {
+          return
+        }
+        upsertRemoteNpc(playerId, username, next)
+      }
+    })
+    void syncBankFromServer()
+  } catch (error) {
+    console.error('Failed to connect authoritative bridge', error)
+  }
+}
 
 const selection = createSelectionState()
 const selectedStructures = selection.selectedStructures
@@ -3866,17 +3930,99 @@ const updateCastleBankPilesVisual = () => {
   }
 }
 
-const depositToBank = (requestedAmount: number) => {
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+const isBankBalanceResponse = (value: unknown): value is BankBalanceResponse =>
+  isRecord(value) &&
+  value.type === 'bankBalance' &&
+  typeof value.postId === 'string' &&
+  typeof value.bankEnergy === 'number'
+const isBankDepositResponse = (value: unknown): value is BankDepositResponse =>
+  isRecord(value) &&
+  value.type === 'bankDeposit' &&
+  typeof value.postId === 'string' &&
+  typeof value.deposited === 'number' &&
+  typeof value.bankEnergy === 'number'
+const isBankWithdrawResponse = (value: unknown): value is BankWithdrawResponse =>
+  isRecord(value) &&
+  value.type === 'bankWithdraw' &&
+  typeof value.postId === 'string' &&
+  typeof value.withdrawn === 'number' &&
+  typeof value.bankEnergy === 'number'
+
+const fetchBankBalance = async (): Promise<number | null> => {
+  try {
+    const response = await fetch('/api/game/bank')
+    if (!response.ok) return null
+    const payload = await response.json()
+    if (!isBankBalanceResponse(payload)) return null
+    return Number.isFinite(payload.bankEnergy) ? Math.max(0, Math.floor(payload.bankEnergy)) : null
+  } catch {
+    return null
+  }
+}
+
+const requestBankDeposit = async (amount: number): Promise<number | null> => {
+  try {
+    const response = await fetch('/api/game/bank/deposit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amount })
+    })
+    if (!response.ok) return null
+    const payload = await response.json()
+    if (!isBankDepositResponse(payload)) return null
+    return Number.isFinite(payload.bankEnergy) ? Math.max(0, Math.floor(payload.bankEnergy)) : null
+  } catch {
+    return null
+  }
+}
+
+const requestBankWithdraw = async (amount: number): Promise<number | null> => {
+  try {
+    const response = await fetch('/api/game/bank/withdraw', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amount })
+    })
+    if (!response.ok) return null
+    const payload = await response.json()
+    if (!isBankWithdrawResponse(payload)) return null
+    return Number.isFinite(payload.bankEnergy) ? Math.max(0, Math.floor(payload.bankEnergy)) : null
+  } catch {
+    return null
+  }
+}
+
+const syncBankFromServer = async () => {
+  const bankEnergy = await fetchBankBalance()
+  if (bankEnergy === null) return
+  gameState.bankEnergy = bankEnergy
+  updateCastleBankPilesVisual()
+}
+
+const depositToBank = async (requestedAmount: number) => {
   const transfer = Math.min(Math.max(0, Math.floor(requestedAmount)), Math.max(0, Math.floor(gameState.energy)))
   if (transfer <= 0) return false
+  const previousBank = gameState.bankEnergy
+  const previousEnergy = gameState.energy
   gameState.bankEnergy += transfer
   gameState.energy = Math.max(0, gameState.energy - transfer)
+  updateCastleBankPilesVisual()
+  const persistedBank = await requestBankDeposit(transfer)
+  if (persistedBank === null) {
+    gameState.bankEnergy = previousBank
+    gameState.energy = previousEnergy
+    updateCastleBankPilesVisual()
+    triggerEventBanner('Deposit failed')
+    return false
+  }
+  gameState.bankEnergy = persistedBank
   updateCastleBankPilesVisual()
   triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`)
   return true
 }
 
-const withdrawFromBank = (requestedAmount: number) => {
+const withdrawFromBank = async (requestedAmount: number) => {
   const missing = Math.max(0, ENERGY_CAP - gameState.energy)
   const transfer = Math.min(
     Math.max(0, Math.floor(requestedAmount)),
@@ -3884,8 +4030,20 @@ const withdrawFromBank = (requestedAmount: number) => {
     missing
   )
   if (transfer <= 0) return false
+  const previousBank = gameState.bankEnergy
+  const previousEnergy = gameState.energy
   gameState.bankEnergy = Math.max(0, gameState.bankEnergy - transfer)
   addEnergy(transfer, true)
+  updateCastleBankPilesVisual()
+  const persistedBank = await requestBankWithdraw(transfer)
+  if (persistedBank === null) {
+    gameState.bankEnergy = previousBank
+    gameState.energy = previousEnergy
+    updateCastleBankPilesVisual()
+    triggerEventBanner('Withdraw failed')
+    return false
+  }
+  gameState.bankEnergy = persistedBank
   updateCastleBankPilesVisual()
   triggerEventBanner(`Withdrew ${Math.floor(transfer)} coins`)
   return true
@@ -4431,19 +4589,19 @@ const selectionDialog = new SelectionDialog(
     },
     onBankAdd1: () => {
       if (!getSelectedBankInRange()) return
-      depositToBank(1)
+      void depositToBank(1)
     },
     onBankAdd10: () => {
       if (!getSelectedBankInRange()) return
-      depositToBank(10)
+      void depositToBank(10)
     },
     onBankRemove1: () => {
       if (!getSelectedBankInRange()) return
-      withdrawFromBank(1)
+      void withdrawFromBank(1)
     },
     onBankRemove10: () => {
       if (!getSelectedBankInRange()) return
-      withdrawFromBank(10)
+      void withdrawFromBank(10)
     }
   }
 )
@@ -4755,6 +4913,13 @@ const canPlace = (center: THREE.Vector3, halfSize: THREE.Vector3, allowTouchingS
 }
 
 const placeBuilding = (center: THREE.Vector3) => {
+  if (authoritativeBridge && gameState.buildMode !== 'off') {
+    void authoritativeBridge.sendBuildStructure({
+      structureId: `${gameState.buildMode}-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
+      type: gameState.buildMode === 'tower' ? 'tower' : 'wall',
+      center: { x: center.x, z: center.z }
+    })
+  }
   const result = placeBuildingAt(center, gameState.buildMode, gameState.energy, {
     staticColliders,
     structureStore,
@@ -4779,6 +4944,14 @@ const getWallLinePlacement = (start: THREE.Vector3, end: THREE.Vector3, availabl
 }
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
+  if (authoritativeBridge) {
+    const center = start.clone().add(end).multiplyScalar(0.5)
+    void authoritativeBridge.sendBuildStructure({
+      structureId: `wall-line-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
+      type: 'wall',
+      center: { x: center.x, z: center.z }
+    })
+  }
   const placed = placeWallSegment(start, end, gameState.energy, {
     scene,
     structureStore,
@@ -4795,6 +4968,14 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
 }
 
 const placeWallSegments = (positions: THREE.Vector3[]) => {
+  if (authoritativeBridge && positions.length > 0) {
+    const center = positions[Math.floor(positions.length * 0.5)]!
+    void authoritativeBridge.sendBuildStructure({
+      structureId: `wall-segments-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
+      type: 'wall',
+      center: { x: center.x, z: center.z }
+    })
+  }
   const placed = placeWallSegmentsAt(positions, gameState.energy, {
     scene,
     structureStore,
@@ -5055,6 +5236,21 @@ const resetGame = (restartAt: number) => {
 const setMoveTarget = (pos: THREE.Vector3) => {
   const clamped = new THREE.Vector3(clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS), 0, clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS))
   player.target.copy(clamped)
+  if (authoritativeBridge) {
+    const nowMs = performance.now()
+    const dx = clamped.x - lastMoveIntentTarget.x
+    const dz = clamped.z - lastMoveIntentTarget.z
+    const targetDelta = Math.hypot(dx, dz)
+    if (nowMs - lastMoveIntentSentAt >= MOVE_INTENT_MIN_INTERVAL_MS || targetDelta >= MOVE_INTENT_TARGET_EPSILON) {
+      lastMoveIntentSentAt = nowMs
+      lastMoveIntentTarget.x = clamped.x
+      lastMoveIntentTarget.z = clamped.z
+      void authoritativeBridge.sendMoveIntent(
+        { x: player.mesh.position.x, z: player.mesh.position.z },
+        { x: clamped.x, z: clamped.z }
+      )
+    }
+  }
 }
 
 const hasPlayerReachedBlockedTarget = () => {
@@ -5284,6 +5480,9 @@ const prepareNextWave = () => {
 }
 
 const startPreparedWave = () => {
+  if (authoritativeBridge) {
+    void authoritativeBridge.sendStartWave()
+  }
   if (!pendingWave) return
   pendingGateOpenBySpawnerId.clear()
   gameState.wave = waveAndSpawnSystem.startPreparedWave({
@@ -5669,6 +5868,10 @@ const tick = (now: number, delta: number) => {
 
   updateNpcTargets()
   updateEntityMotion(player, delta)
+  if (authoritativeBridge && now - lastNetworkHeartbeatAt >= 1000) {
+    lastNetworkHeartbeatAt = now
+    void authoritativeBridge.heartbeat({ x: player.mesh.position.x, z: player.mesh.position.z })
+  }
   for (const npc of npcs) {
     updateEntityMotion(npc, delta)
   }
@@ -5996,12 +6199,17 @@ startGameWhenReady = () => {
   if (hasStartedGameLoop || !hasFinishedLoadingAssets) return
   hasStartedGameLoop = true
   completeLoadingAndRevealScene()
+  void setupAuthoritativeBridge()
   gameLoop.start()
 }
 let disposed = false
 const disposeApp = () => {
   if (disposed) return
   disposed = true
+  if (authoritativeBridge) {
+    void authoritativeBridge.disconnect()
+    authoritativeBridge = null
+  }
 
   particleSystem.dispose()
   spawnContainerOverlay.dispose()

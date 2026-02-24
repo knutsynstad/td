@@ -16,3 +16,23 @@ export type DecrementResponse = {
   postId: string;
   count: number;
 };
+
+export type BankBalanceResponse = {
+  type: 'bankBalance';
+  postId: string;
+  bankEnergy: number;
+};
+
+export type BankDepositResponse = {
+  type: 'bankDeposit';
+  postId: string;
+  deposited: number;
+  bankEnergy: number;
+};
+
+export type BankWithdrawResponse = {
+  type: 'bankWithdraw';
+  postId: string;
+  withdrawn: number;
+  bankEnergy: number;
+};
