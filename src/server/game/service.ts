@@ -21,6 +21,7 @@ import {
   MAX_STEPS_PER_REQUEST,
   PLAYER_TIMEOUT_MS,
   SIM_TICK_MS,
+  SLOW_TICK_LOG_THRESHOLD_MS,
   TICK_LEASE_MS,
   TICK_STALE_RECOVERY_MS,
 } from './config';
@@ -54,7 +55,6 @@ const getPlayerId = async (): Promise<string> => {
 };
 
 const broadcast = async (
-  postId: string,
   worldVersion: number,
   tickSeq: number,
   events: GameDelta[]
@@ -68,10 +68,9 @@ const broadcast = async (
     events: boundedEvents,
   };
   try {
-    await realtime.send(getGameChannelName(postId), batch);
+    await realtime.send(getGameChannelName(), batch);
   } catch (error) {
     console.error('Realtime broadcast failed', {
-      postId,
       tickSeq,
       worldVersion,
       eventCount: boundedEvents.length,
@@ -101,21 +100,15 @@ type TickOptions = {
 };
 
 const runPendingSimulation = async (
-  postId: string,
   nowMs: number,
   source: TickSource,
   options?: TickOptions
 ): Promise<TickResult> => {
+  const startedAtMs = Date.now();
   const leaseOwnerId = `${source}-${nowMs}-${Math.floor(Math.random() * 1_000_000)}`;
-  const lease = await acquireTickLease(
-    postId,
-    leaseOwnerId,
-    nowMs,
-    TICK_LEASE_MS
-  );
+  const lease = await acquireTickLease(leaseOwnerId, nowMs, TICK_LEASE_MS);
   if (!lease) {
-    console.info('Tick skipped due to active lease', { postId, source });
-    const fallback = await loadWorldState(postId);
+    const fallback = await loadWorldState();
     return {
       deltas: [],
       tickSeq: fallback.meta.tickSeq,
@@ -129,14 +122,13 @@ const runPendingSimulation = async (
   try {
     const stalePlayers = options?.removeStalePlayers
       ? await removeOldPlayersByLastSeen(
-          postId,
           nowMs - PLAYER_TIMEOUT_MS,
           options?.staleLimit ?? 250
         )
       : [];
-    const world = await loadWorldState(postId);
+    const world = await loadWorldState();
     const simulationStartTickMs = world.meta.lastTickMs;
-    const commands = await popPendingCommands(postId, nowMs);
+    const commands = await popPendingCommands(nowMs);
     const result = runSimulation(world, nowMs, commands, MAX_STEPS_PER_REQUEST);
     const simulationEndTickMs = result.world.meta.lastTickMs;
     const processedSteps = Math.max(
@@ -164,27 +156,29 @@ const runPendingSimulation = async (
       });
     }
     await persistWorldState(result.world);
-    await markTickRun(postId, nowMs);
+    await markTickRun(nowMs);
     if (deltas.length > 0) {
-      await markTickPublish(postId, result.world.meta.tickSeq);
+      await markTickPublish(result.world.meta.tickSeq);
       await broadcast(
-        postId,
         result.world.meta.worldVersion,
         result.world.meta.tickSeq,
         deltas
       );
     }
-    console.info('Tick processed', {
-      postId,
-      source,
-      tickSeq: result.world.meta.tickSeq,
-      worldVersion: result.world.meta.worldVersion,
-      processedSteps,
-      remainingSteps,
-      commandCount: commands.length,
-      stalePlayersRemoved: stalePlayers.length,
-      eventCount: deltas.length,
-    });
+    const durationMs = Date.now() - startedAtMs;
+    if (durationMs >= SLOW_TICK_LOG_THRESHOLD_MS) {
+      console.warn('Slow tick processed', {
+        source,
+        durationMs,
+        tickSeq: result.world.meta.tickSeq,
+        worldVersion: result.world.meta.worldVersion,
+        processedSteps,
+        remainingSteps,
+        commandCount: commands.length,
+        stalePlayersRemoved: stalePlayers.length,
+        eventCount: deltas.length,
+      });
+    }
     return {
       deltas,
       tickSeq: result.world.meta.tickSeq,
@@ -194,10 +188,9 @@ const runPendingSimulation = async (
       stalePlayersRemoved: stalePlayers.length,
     };
   } finally {
-    const released = await releaseTickLease(postId, leaseOwnerId, lease.token);
+    const released = await releaseTickLease(leaseOwnerId, lease.token);
     if (!released) {
       console.warn('Tick lease release skipped', {
-        postId,
         source,
         leaseToken: lease.token,
       });
@@ -205,14 +198,10 @@ const runPendingSimulation = async (
   }
 };
 
-export const joinGame = async (postId: string): Promise<JoinResponse> => {
+export const joinGame = async (): Promise<JoinResponse> => {
   const nowMs = Date.now();
-  await removeOldPlayersByLastSeen(
-    postId,
-    nowMs - PLAYER_TIMEOUT_MS,
-    MAX_PLAYERS
-  );
-  const world = await loadWorldState(postId);
+  await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
+  const world = await loadWorldState();
   const playerCount = Object.keys(world.players).length;
   if (playerCount >= MAX_PLAYERS) {
     throw new Error('game is full');
@@ -230,7 +219,7 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
   player.lastSeenMs = nowMs;
   world.players[playerId] = player;
   await persistWorldState(world);
-  await touchPlayerPresence(postId, player);
+  await touchPlayerPresence(player);
   const coins = await getCoins(nowMs);
   world.meta.energy = coins;
 
@@ -244,7 +233,7 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
       position: player.position,
     },
   };
-  await broadcast(postId, world.meta.worldVersion, world.meta.tickSeq, [
+  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
     joinDelta,
   ]);
 
@@ -252,21 +241,20 @@ export const joinGame = async (postId: string): Promise<JoinResponse> => {
     type: 'join',
     playerId,
     username,
-    channel: getGameChannelName(postId),
+    channel: getGameChannelName(),
     snapshot: world,
   };
 };
 
 export const applyCommand = async (
-  postId: string,
   envelope: CommandEnvelope
 ): Promise<CommandResponse> => {
   const nowMs = Date.now();
   const playerId = envelope.command.playerId;
   let spentBuildCoins = 0;
-  const hasToken = await consumeRateLimitToken(postId, playerId, nowMs);
+  const hasToken = await consumeRateLimitToken(playerId, nowMs);
   if (!hasToken) {
-    const world = await loadWorldState(postId);
+    const world = await loadWorldState();
     return {
       type: 'commandAck',
       accepted: false,
@@ -277,9 +265,9 @@ export const applyCommand = async (
   }
 
   if (envelope.command.type === 'buildStructure') {
-    const canBuild = await enforceStructureCap(postId);
+    const canBuild = await enforceStructureCap();
     if (!canBuild) {
-      const world = await loadWorldState(postId);
+      const world = await loadWorldState();
       return {
         type: 'commandAck',
         accepted: false,
@@ -294,7 +282,7 @@ export const applyCommand = async (
         : ENERGY_COST_WALL;
     const spendResult = await spendCoins(energyCost, nowMs);
     if (!spendResult.ok) {
-      const world = await loadWorldState(postId);
+      const world = await loadWorldState();
       return {
         type: 'commandAck',
         accepted: false,
@@ -306,12 +294,12 @@ export const applyCommand = async (
     spentBuildCoins = energyCost;
   }
 
-  const enqueueResult = await enqueueCommand(postId, nowMs, envelope);
+  const enqueueResult = await enqueueCommand(nowMs, envelope);
   if (!enqueueResult.accepted) {
     if (spentBuildCoins > 0) {
       await addCoins(spentBuildCoins, nowMs);
     }
-    const world = await loadWorldState(postId);
+    const world = await loadWorldState();
     return {
       type: 'commandAck',
       accepted: false,
@@ -321,7 +309,7 @@ export const applyCommand = async (
     };
   }
 
-  const simulation = await runPendingSimulation(postId, nowMs, 'command');
+  const simulation = await runPendingSimulation(nowMs, 'command');
 
   return {
     type: 'commandAck',
@@ -332,21 +320,20 @@ export const applyCommand = async (
 };
 
 export const heartbeatGame = async (
-  postId: string,
   playerId: string,
   position?: { x: number; z: number }
 ): Promise<HeartbeatResponse> => {
   const nowMs = Date.now();
-  const world = await loadWorldState(postId);
+  const world = await loadWorldState();
   const player = world.players[playerId];
   if (player) {
     player.lastSeenMs = nowMs;
     if (position) {
       player.position = position;
     }
-    await touchPlayerPresence(postId, player);
+    await touchPlayerPresence(player);
   }
-  const simulation = await runPendingSimulation(postId, nowMs, 'heartbeat', {
+  const simulation = await runPendingSimulation(nowMs, 'heartbeat', {
     removeStalePlayers: true,
     staleLimit: 200,
   });
@@ -360,11 +347,8 @@ export const heartbeatGame = async (
 
 export const getCoinBalance = async (): Promise<number> => getCoins(Date.now());
 
-export const resyncGame = async (
-  postId: string,
-  _playerId?: string
-): Promise<ResyncResponse> => {
-  const world = await loadWorldState(postId);
+export const resyncGame = async (_playerId?: string): Promise<ResyncResponse> => {
+  const world = await loadWorldState();
   world.meta.energy = await getCoins(Date.now());
   return {
     type: 'snapshot',
@@ -372,35 +356,27 @@ export const resyncGame = async (
   };
 };
 
-export const runMaintenance = async (
-  postId: string
-): Promise<{ stalePlayers: number }> => {
-  await trimCommandQueue(postId);
+export const runMaintenance = async (): Promise<{ stalePlayers: number }> => {
+  await trimCommandQueue();
   const nowMs = Date.now();
-  const stale = await removeOldPlayersByLastSeen(
-    postId,
-    nowMs - PLAYER_TIMEOUT_MS,
-    500
-  );
-  const health = await getTickHealth(postId);
+  const stale = await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, 500);
+  const health = await getTickHealth();
   if (nowMs - health.lastTickRunMs >= TICK_STALE_RECOVERY_MS) {
-    await runPendingSimulation(postId, nowMs, 'maintenance-recovery');
+    await runPendingSimulation(nowMs, 'maintenance-recovery');
   }
   return {
     stalePlayers: stale.length,
   };
 };
 
-export const runSchedulerTick = async (
-  postId: string
-): Promise<{
+export const runSchedulerTick = async (): Promise<{
   tickSeq: number;
   worldVersion: number;
   eventCount: number;
   remainingSteps: number;
 }> => {
   const nowMs = Date.now();
-  const result = await runPendingSimulation(postId, nowMs, 'scheduler', {
+  const result = await runPendingSimulation(nowMs, 'scheduler', {
     removeStalePlayers: true,
     staleLimit: 500,
   });

@@ -25,10 +25,10 @@ const sanitizeChannelId = (value: string): string =>
 
 const GLOBAL_GAME_ID = 'global';
 
-export const getGameChannelName = (_postId: string): string =>
+export const getGameChannelName = (): string =>
   `game_${sanitizeChannelId(GLOBAL_GAME_ID)}`;
 
-export const getGameRedisKeys = (_postId: string): GameRedisKeys => {
+export const getGameRedisKeys = (): GameRedisKeys => {
   const prefix = `g:${GLOBAL_GAME_ID}`;
   return {
     meta: `${prefix}:m`,

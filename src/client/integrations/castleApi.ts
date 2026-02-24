@@ -12,7 +12,6 @@ const isCastleCoinsBalanceResponse = (
 ): value is CastleCoinsBalanceResponse =>
   isRecord(value) &&
   value.type === 'castleCoinsBalance' &&
-  typeof value.postId === 'string' &&
   typeof value.castleCoins === 'number';
 
 const isCastleCoinsDepositResponse = (
@@ -20,7 +19,6 @@ const isCastleCoinsDepositResponse = (
 ): value is CastleCoinsDepositResponse =>
   isRecord(value) &&
   value.type === 'castleCoinsDeposit' &&
-  typeof value.postId === 'string' &&
   typeof value.deposited === 'number' &&
   typeof value.castleCoins === 'number';
 
@@ -29,7 +27,6 @@ const isCastleCoinsWithdrawResponse = (
 ): value is CastleCoinsWithdrawResponse =>
   isRecord(value) &&
   value.type === 'castleCoinsWithdraw' &&
-  typeof value.postId === 'string' &&
   typeof value.withdrawn === 'number' &&
   typeof value.castleCoins === 'number';
 

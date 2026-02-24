@@ -2,7 +2,6 @@ import type { WorldState } from '../../src/shared/game-state';
 
 export const createWorld = (nowMs = Date.now()): WorldState => ({
   meta: {
-    postId: 'global',
     tickSeq: 0,
     worldVersion: 0,
     lastTickMs: nowMs,

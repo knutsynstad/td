@@ -266,8 +266,8 @@ const defaultWave = (): WaveState => ({
   spawners: [],
 });
 
-export const loadWorldState = async (postId: string): Promise<WorldState> => {
-  const keys = getGameRedisKeys(postId);
+export const loadWorldState = async (): Promise<WorldState> => {
+  const keys = getGameRedisKeys();
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
       redis.hGetAll(keys.meta),
@@ -280,7 +280,6 @@ export const loadWorldState = async (postId: string): Promise<WorldState> => {
 
   const now = Date.now();
   const meta: WorldMeta = {
-    postId,
     tickSeq: Number(metaRaw?.tickSeq ?? '0'),
     worldVersion: Number(metaRaw?.worldVersion ?? '0'),
     lastTickMs: Number(metaRaw?.lastTickMs ?? String(now)),
@@ -336,7 +335,7 @@ export const loadWorldState = async (postId: string): Promise<WorldState> => {
 };
 
 export const persistWorldState = async (world: WorldState): Promise<void> => {
-  const keys = getGameRedisKeys(world.meta.postId);
+  const keys = getGameRedisKeys();
   const metaWrites: Record<string, string> = {
     tickSeq: String(world.meta.tickSeq),
     worldVersion: String(world.meta.worldVersion),
@@ -392,10 +391,9 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
 };
 
 export const touchPlayerPresence = async (
-  postId: string,
   player: PlayerState
 ): Promise<void> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   await Promise.all([
     redis.hSet(keys.players, { [player.playerId]: toJson(player) }),
     redis.zAdd(keys.seen, {
@@ -615,11 +613,10 @@ export const withdrawCastleCoins = async (
 };
 
 export const enqueueCommand = async (
-  postId: string,
   nowMs: number,
   envelope: CommandEnvelope
 ): Promise<{ accepted: boolean; reason?: string }> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.queue);
     const queueSize = await redis.zCard(keys.queue);
@@ -641,10 +638,9 @@ export const enqueueCommand = async (
 };
 
 export const popPendingCommands = async (
-  postId: string,
   upToMs: number
 ): Promise<CommandEnvelope[]> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.queue);
     const items = await redis.zRange(keys.queue, 0, upToMs, {
@@ -682,8 +678,8 @@ export const popPendingCommands = async (
   return [];
 };
 
-export const trimCommandQueue = async (postId: string): Promise<void> => {
-  const keys = getGameRedisKeys(postId);
+export const trimCommandQueue = async (): Promise<void> => {
+  const keys = getGameRedisKeys();
   const count = await redis.zCard(keys.queue);
   if (count <= MAX_QUEUE_COMMANDS) return;
   const overflow = count - MAX_QUEUE_COMMANDS;
@@ -691,11 +687,10 @@ export const trimCommandQueue = async (postId: string): Promise<void> => {
 };
 
 export const consumeRateLimitToken = async (
-  postId: string,
   playerId: string,
   nowMs: number
 ): Promise<boolean> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.rate);
     const raw = await redis.hGet(keys.rate, playerId);
@@ -732,11 +727,10 @@ export const consumeRateLimitToken = async (
 };
 
 export const removePlayers = async (
-  postId: string,
   playerIds: string[]
 ): Promise<void> => {
   if (playerIds.length === 0) return;
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   await Promise.all([
     redis.hDel(keys.players, playerIds),
     redis.hDel(keys.intents, playerIds),
@@ -745,12 +739,11 @@ export const removePlayers = async (
 };
 
 export const acquireTickLease = async (
-  postId: string,
   ownerId: string,
   nowMs: number,
   leaseMs: number
 ): Promise<{ ownerId: string; token: number; expiresAtMs: number } | null> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.tickLease, keys.tickLeaseToken);
     const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
@@ -781,11 +774,10 @@ export const acquireTickLease = async (
 };
 
 export const releaseTickLease = async (
-  postId: string,
   ownerId: string,
   token: number
 ): Promise<boolean> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(keys.tickLease);
     const currentLease = parseTickLeaseState(await redis.get(keys.tickLease));
@@ -807,29 +799,21 @@ export const releaseTickLease = async (
   return false;
 };
 
-export const markTickRun = async (
-  postId: string,
-  nowMs: number
-): Promise<void> => {
-  const keys = getGameRedisKeys(postId);
+export const markTickRun = async (nowMs: number): Promise<void> => {
+  const keys = getGameRedisKeys();
   await redis.set(keys.lastTickRunMs, String(nowMs));
 };
 
-export const markTickPublish = async (
-  postId: string,
-  tickSeq: number
-): Promise<void> => {
-  const keys = getGameRedisKeys(postId);
+export const markTickPublish = async (tickSeq: number): Promise<void> => {
+  const keys = getGameRedisKeys();
   await redis.set(
     keys.lastPublishTickSeq,
     String(Math.max(0, Math.floor(tickSeq)))
   );
 };
 
-export const getTickHealth = async (
-  postId: string
-): Promise<TickHealthState> => {
-  const keys = getGameRedisKeys(postId);
+export const getTickHealth = async (): Promise<TickHealthState> => {
+  const keys = getGameRedisKeys();
   const [lastTickRunRaw, lastPublishRaw] = await Promise.all([
     redis.get(keys.lastTickRunMs),
     redis.get(keys.lastPublishTickSeq),
@@ -845,23 +829,22 @@ export const getTickHealth = async (
 };
 
 export const removeOldPlayersByLastSeen = async (
-  postId: string,
   cutoffMs: number,
   limit = 250
 ): Promise<string[]> => {
-  const keys = getGameRedisKeys(postId);
+  const keys = getGameRedisKeys();
   const stale = await redis.zRange(keys.seen, 0, cutoffMs, {
     by: 'score',
     limit: { offset: 0, count: limit },
   });
   if (stale.length === 0) return [];
   const playerIds = stale.map((entry) => entry.member);
-  await removePlayers(postId, playerIds);
+  await removePlayers(playerIds);
   return playerIds;
 };
 
-export const enforceStructureCap = async (postId: string): Promise<boolean> => {
-  const keys = getGameRedisKeys(postId);
+export const enforceStructureCap = async (): Promise<boolean> => {
+  const keys = getGameRedisKeys();
   const count = await redis.hLen(keys.structures);
   return count < MAX_STRUCTURES;
 };

@@ -11,7 +11,7 @@ const app = (): Hono => {
   return hono;
 };
 
-test('scheduler tick works without explicit postId body', async () => {
+test('scheduler tick works with empty request body', async () => {
   const response = await app().request('/internal/scheduler/game-tick', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

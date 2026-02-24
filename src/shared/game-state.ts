@@ -59,7 +59,6 @@ export type WaveState = {
 };
 
 export type WorldMeta = {
-  postId: string;
   tickSeq: number;
   worldVersion: number;
   lastTickMs: number;

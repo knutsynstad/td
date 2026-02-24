@@ -4,7 +4,6 @@ import { runLoadHarness } from './loadHarness';
 
 const baseWorld = (): WorldState => ({
   meta: {
-    postId: 't3_test',
     tickSeq: 0,
     worldVersion: 0,
     lastTickMs: Date.now(),

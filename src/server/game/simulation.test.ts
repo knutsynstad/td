@@ -5,7 +5,6 @@ import { runSimulation } from './simulation';
 
 const world = (nowMs: number): WorldState => ({
   meta: {
-    postId: 'global',
     tickSeq: 0,
     worldVersion: 0,
     lastTickMs: nowMs,

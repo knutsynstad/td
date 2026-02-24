@@ -1,4 +1,3 @@
-import { context } from '@devvit/web/server';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type {
@@ -39,10 +38,6 @@ export const api = new Hono();
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
-const DEFAULT_GAME_ID = 'global';
-const requirePostId = (_c: Context): string | Response => {
-  return context.postId ?? DEFAULT_GAME_ID;
-};
 const requireObjectBody = async (
   c: Context
 ): Promise<Record<string, unknown> | Response> => {
@@ -62,13 +57,10 @@ const parsePositiveInt = (value: unknown): number => {
 };
 
 api.post('/game/join', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
-
   try {
     // Request body currently optional; reserved for future join options.
     await c.req.json<JoinRequest>().catch(() => undefined);
-    const response = await joinGame(postId);
+    const response = await joinGame();
     return c.json<JoinResponse>(response);
   } catch (error) {
     return c.json<ErrorResponse>(
@@ -82,9 +74,6 @@ api.post('/game/join', async (c) => {
 });
 
 api.post('/game/command', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
-
   const body = await c.req.json().catch(() => undefined);
   if (!isCommandRequest(body)) {
     return c.json<ErrorResponse>(
@@ -93,13 +82,11 @@ api.post('/game/command', async (c) => {
     );
   }
 
-  const response = await applyCommand(postId, body.envelope);
+  const response = await applyCommand(body.envelope);
   return c.json<CommandResponse>(response, response.accepted ? 200 : 429);
 });
 
 api.post('/game/heartbeat', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
   const bodyResult = await requireObjectBody(c);
   if (!isObject(bodyResult)) return bodyResult;
   const body = bodyResult;
@@ -120,17 +107,11 @@ api.post('/game/heartbeat', async (c) => {
     );
   }
 
-  const response = await heartbeatGame(
-    postId,
-    request.playerId,
-    request.position
-  );
+  const response = await heartbeatGame(request.playerId, request.position);
   return c.json<HeartbeatResponse>(response);
 });
 
 api.get('/game/coins', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
   const coins = await getCoinBalance();
   return c.json<CoinBalanceResponse>({
     type: 'coinBalance',
@@ -139,31 +120,24 @@ api.get('/game/coins', async (c) => {
 });
 
 api.post('/game/resync', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
   const body = await c.req.json<ResyncRequest>().catch(() => undefined);
   const request: ResyncRequest = {
     tickSeq: Number(body?.tickSeq ?? 0),
     playerId: body?.playerId ? String(body.playerId) : undefined,
   };
-  const response = await resyncGame(postId, request.playerId);
+  const response = await resyncGame(request.playerId);
   return c.json<ResyncResponse>(response);
 });
 
 api.get('/castle/coins', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
   const castleCoins = await getCastleCoins();
   return c.json<CastleCoinsBalanceResponse>({
     type: 'castleCoinsBalance',
-    postId,
     castleCoins,
   });
 });
 
 api.post('/castle/coins/deposit', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
   const bodyResult = await requireObjectBody(c);
   if (!isObject(bodyResult)) return bodyResult;
   const body = bodyResult;
@@ -183,15 +157,12 @@ api.post('/castle/coins/deposit', async (c) => {
   }
   return c.json<CastleCoinsDepositResponse>({
     type: 'castleCoinsDeposit',
-    postId,
     deposited: result.deposited,
     castleCoins: result.castleCoins,
   });
 });
 
 api.post('/castle/coins/withdraw', async (c) => {
-  const postId = requirePostId(c);
-  if (typeof postId !== 'string') return postId;
   const bodyResult = await requireObjectBody(c);
   if (!isObject(bodyResult)) return bodyResult;
   const body = bodyResult;
@@ -205,7 +176,6 @@ api.post('/castle/coins/withdraw', async (c) => {
   const result = await withdrawCastleCoins(requested, Date.now());
   return c.json<CastleCoinsWithdrawResponse>({
     type: 'castleCoinsWithdraw',
-    postId,
     withdrawn: result.withdrawn,
     castleCoins: result.castleCoins,
   });

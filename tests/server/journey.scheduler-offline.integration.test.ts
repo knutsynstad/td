@@ -8,7 +8,6 @@ devvitTest(
     const app = createTestApp();
     const now = Date.now();
     await redis.hSet('g:global:m', {
-      postId: 'global',
       tickSeq: '1',
       worldVersion: '0',
       lastTickMs: String(now - 15_000),
