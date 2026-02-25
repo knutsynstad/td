@@ -1222,6 +1222,17 @@ canvas {
   z-index: 5000;
 }
 
+.banner-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10000;
+}
+
 .event-banner {
   position: absolute;
   top: 50%;

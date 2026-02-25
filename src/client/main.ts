@@ -93,8 +93,6 @@ import {
   BALLISTA_ARROW_RADIUS,
   BALLISTA_ARROW_SPEED,
   ENERGY_CAP,
-  ENERGY_COST_DELETE_TOWER,
-  ENERGY_COST_DELETE_WALL,
   ENERGY_COST_TOWER,
   ENERGY_COST_UPGRADE_DAMAGE,
   ENERGY_COST_UPGRADE_RANGE,
@@ -282,7 +280,6 @@ app.innerHTML = `
       </div>
     </div>
     <div class="hud-overlay">
-      <div id="eventBanner" class="event-banner"></div>
       <div id="finalCountdown" class="final-countdown"></div>
     </div>
     <div class="build-mode-overlay" id="buildModeOverlay">
@@ -322,6 +319,9 @@ app.innerHTML = `
         <div class="hud-minimap-tape-section hud-minimap-tape-section--bottom" aria-hidden="true"></div>
       </div>
     </div>
+  </div>
+  <div id="bannerOverlay" class="banner-overlay">
+    <div id="eventBanner" class="event-banner"></div>
   </div>
 `;
 
@@ -4353,11 +4353,13 @@ const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
   return ENERGY_COST_UPGRADE_SPEED;
 };
 
-const getDeleteEnergyCost = (collider: DestructibleCollider): number => {
-  if (collider.type === 'bank') return 0;
-  return collider.type === 'tower'
-    ? ENERGY_COST_DELETE_TOWER
-    : ENERGY_COST_DELETE_WALL;
+const getStructureIdFromCollider = (
+  collider: DestructibleCollider
+): string | null => {
+  for (const [structureId, c] of serverStructureById.entries()) {
+    if (c === collider) return structureId;
+  }
+  return null;
 };
 
 const treeRegrowQueue: TreeRegrowCandidate[] = [];
@@ -5552,17 +5554,18 @@ const selectionDialog = new SelectionDialog(
       const colliders = getSelectedInRange();
       if (colliders.length === 0) return;
       if (colliders.some((collider) => collider.type === 'bank')) return;
-      const deleteCost = colliders.reduce(
-        (sum, collider) => sum + getDeleteEnergyCost(collider),
-        0
-      );
-      if (!spendEnergy(deleteCost)) {
-        triggerEventBanner(`Need ${deleteCost} coins`);
-        return;
-      }
-      for (const collider of colliders) {
-        queueTreeRegrow(collider);
-        structureStore.removeStructureCollider(collider);
+      if (authoritativeBridge) {
+        for (const collider of colliders) {
+          const structureId = getStructureIdFromCollider(collider);
+          if (structureId) {
+            void authoritativeBridge.sendRemoveStructure(structureId);
+          }
+        }
+      } else {
+        for (const collider of colliders) {
+          queueTreeRegrow(collider);
+          structureStore.removeStructureCollider(collider);
+        }
       }
       clearSelection();
     },
@@ -5836,9 +5839,6 @@ const updateSelectionDialog = () => {
   const selectedBankTotalRounded = isBankSelected
     ? Math.floor(gameState.bankEnergy)
     : null;
-  const deleteCost = inRange
-    .filter((collider) => collider.type !== 'bank')
-    .reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0);
   const selectedTowerTypeId = getSelectionTowerTypeId();
   const selectedStructureLabel =
     selectedType === 'tree' && selectedCollider
@@ -5931,8 +5931,7 @@ const updateSelectionDialog = () => {
       inRange.length > 0 &&
       repairCost !== null &&
       gameState.energy >= repairCost,
-    canDelete:
-      !isBankSelected && inRange.length > 0 && gameState.energy >= deleteCost,
+    canDelete: !isBankSelected && inRange.length > 0,
     repairCost,
     repairStatus,
   });

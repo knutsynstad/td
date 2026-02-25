@@ -47,6 +47,7 @@ type AuthoritativeBridge = {
       center: Vec2;
     }>
   ) => Promise<void>;
+  sendRemoveStructure: (structureId: string) => Promise<void>;
   resync: () => Promise<void>;
   heartbeat: (position: Vec2) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -265,6 +266,13 @@ export const connectAuthoritativeBridge = async (
         type: 'buildStructures',
         playerId: joinResponse.playerId,
         structures: payloads,
+      });
+    },
+    sendRemoveStructure: async (structureId) => {
+      await sendCommand({
+        type: 'removeStructure',
+        playerId: joinResponse.playerId,
+        structureId,
       });
     },
     resync,
