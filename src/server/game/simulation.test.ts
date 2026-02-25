@@ -357,9 +357,9 @@ describe('runSimulation', () => {
     const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
-      if (entityDelta.priorityMobs) {
-        expect(entityDelta.priorityMobs.nearPlayers.length).toBeGreaterThan(0);
-        expect(entityDelta.priorityMobs.castleThreats.length).toBeGreaterThan(0);
+      if (entityDelta.priorityMobsCompact) {
+        expect(entityDelta.priorityMobsCompact.nearPlayerIndices.length).toBeGreaterThan(0);
+        expect(entityDelta.priorityMobsCompact.castleThreatIndices.length).toBeGreaterThan(0);
       } else {
         expect(entityDelta.mobs.length).toBeGreaterThan(0);
       }
@@ -408,7 +408,7 @@ describe('runSimulation', () => {
       expect(entityDelta.tickSeq % intervalTicks).not.toBe(0);
       expect(entityDelta.fullMobList).toBe(false);
       expect(entityDelta.mobs.length).toBe(MAX_DELTA_MOBS);
-      expect(entityDelta.priorityMobs).toBeDefined();
+      expect(entityDelta.priorityMobsCompact).toBeDefined();
     }
   });
 
@@ -454,7 +454,7 @@ describe('runSimulation', () => {
       const entityDelta = entityDeltas[i]!;
       expect(entityDelta.tickSeq % intervalTicks).toBe(0);
       expect(entityDelta.fullMobList).toBe(true);
-      expect(entityDelta.priorityMobs).toBeUndefined();
+      expect(entityDelta.priorityMobsCompact).toBeUndefined();
       expect(entityDelta.fullMobSnapshotId).toBe(entityDelta.tickSeq);
       expect(entityDelta.fullMobSnapshotChunkCount).toBe(2);
       expect(entityDelta.fullMobSnapshotChunkIndex).toBe(i);

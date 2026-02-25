@@ -3483,9 +3483,10 @@ const removeRemoteNpc = (playerId: string) => {
   remotePlayersById.delete(playerId);
 };
 
-const syncServerWaveSpawners = (wave: SharedWaveState) => {
+const syncServerWaveSpawners = (wave: SharedWaveState, routesIncluded = true) => {
   syncAuthoritativeWaveSpawners({
     wave,
+    routesIncluded,
     worldBounds: WORLD_BOUNDS,
     castleRouteHalfWidthCells: CASTLE_ROUTE_HALF_WIDTH_CELLS,
     staticColliders,
@@ -3932,25 +3933,37 @@ const applyServerMobDelta = (delta: EntityDelta) => {
       );
     }
   }
-  // Full list already contains all entities; avoid extra pass over priority buckets.
   if (!delta.fullMobList) {
-    const priority = delta.priorityMobs;
-    if (priority) {
-      for (const item of priority.nearPlayers) {
-        if (serverMobSeenIdsScratch.has(item.mobId)) continue;
-        serverMobSeenIdsScratch.add(item.mobId);
-        applyServerMobUpdate(item, delta);
-      }
-      for (const item of priority.castleThreats) {
-        if (serverMobSeenIdsScratch.has(item.mobId)) continue;
-        serverMobSeenIdsScratch.add(item.mobId);
-        applyServerMobUpdate(item, delta);
-      }
-      for (const item of priority.recentlyDamaged) {
-        if (serverMobSeenIdsScratch.has(item.mobId)) continue;
-        serverMobSeenIdsScratch.add(item.mobId);
-        applyServerMobUpdate(item, delta);
-      }
+    const pmc = delta.priorityMobsCompact;
+    if (pmc) {
+      const poolLen = Math.min(
+        pmc.mobIds.length,
+        pmc.px.length,
+        pmc.pz.length,
+        pmc.vx.length,
+        pmc.vz.length,
+        pmc.hp.length,
+        pmc.maxHp.length
+      );
+      const applyIndex = (idx: number) => {
+        if (idx < 0 || idx >= poolLen) return;
+        const mobId = pmc.mobIds[idx]!;
+        if (serverMobSeenIdsScratch.has(mobId)) return;
+        serverMobSeenIdsScratch.add(mobId);
+        applyServerMobUpdateValues(
+          mobId,
+          pmc.px[idx]!,
+          pmc.pz[idx]!,
+          pmc.vx[idx]!,
+          pmc.vz[idx]!,
+          pmc.hp[idx]!,
+          pmc.maxHp[idx]!,
+          delta
+        );
+      };
+      for (const idx of pmc.nearPlayerIndices) applyIndex(idx);
+      for (const idx of pmc.castleThreatIndices) applyIndex(idx);
+      for (const idx of pmc.recentlyDamagedIndices) applyIndex(idx);
     }
   }
   if (delta.fullMobList) {
@@ -4011,7 +4024,7 @@ const applyServerWaveDelta = (delta: WaveDelta) => {
   serverWaveActive = delta.wave.active;
   gameState.nextWaveAt =
     delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0;
-  syncServerWaveSpawners(delta.wave);
+  syncServerWaveSpawners(delta.wave, delta.routesIncluded ?? true);
 };
 
 const applyServerSnapshot = (snapshot: SharedWorldState) => {

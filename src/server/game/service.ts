@@ -20,6 +20,7 @@ import {
   LEADER_BROADCAST_WINDOW_MS,
   LEADER_LOCK_TTL_SECONDS,
   LEADER_STALE_PLAYER_INTERVAL,
+  MAX_BATCH_BYTES,
   MAX_BATCH_EVENTS,
   MAX_PLAYERS,
   MAX_STRUCTURE_DELTA_UPSERTS,
@@ -65,20 +66,47 @@ const getPlayerId = async (): Promise<string> => {
   return username.toLowerCase();
 };
 
+const encoder = new TextEncoder();
+
+const jsonByteLength = (value: unknown): number =>
+  encoder.encode(JSON.stringify(value)).length;
+
+const BATCH_ENVELOPE_OVERHEAD = 80;
+
 const broadcast = async (
   worldVersion: number,
   tickSeq: number,
   events: GameDelta[]
 ): Promise<void> => {
   if (events.length === 0) return;
+
+  const batches: GameDelta[][] = [];
+  let currentBatch: GameDelta[] = [];
+  let currentBytes = BATCH_ENVELOPE_OVERHEAD;
+
+  for (const event of events) {
+    const eventBytes = jsonByteLength(event);
+
+    const wouldExceedBytes =
+      currentBatch.length > 0 && currentBytes + eventBytes > MAX_BATCH_BYTES;
+    const wouldExceedCount = currentBatch.length >= MAX_BATCH_EVENTS;
+
+    if (wouldExceedBytes || wouldExceedCount) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBytes = BATCH_ENVELOPE_OVERHEAD;
+    }
+
+    currentBatch.push(event);
+    currentBytes += eventBytes;
+  }
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
   try {
-    const totalBatches = Math.max(1, Math.ceil(events.length / MAX_BATCH_EVENTS));
-    for (
-      let offset = 0, batchIndex = 0;
-      offset < events.length;
-      offset += MAX_BATCH_EVENTS, batchIndex += 1
-    ) {
-      const batchEvents = events.slice(offset, offset + MAX_BATCH_EVENTS);
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+      const batchEvents = batches[batchIndex]!;
       const batch: DeltaBatch = {
         type: 'deltaBatch',
         tickSeq,
@@ -86,7 +114,7 @@ const broadcast = async (
         events: batchEvents,
       };
       const serialized = JSON.stringify(batch);
-      const messageSizeBytes = new TextEncoder().encode(serialized).length;
+      const messageSizeBytes = encoder.encode(serialized).length;
       try {
         await realtime.send(getGameChannelName(), batch);
       } catch (error) {
@@ -95,7 +123,7 @@ const broadcast = async (
           worldVersion,
           eventCount: events.length,
           batchIndex,
-          totalBatches,
+          totalBatches: batches.length,
           batchEventCount: batchEvents.length,
           messageSizeBytes,
           error,
@@ -104,7 +132,6 @@ const broadcast = async (
       }
     }
   } catch (error) {
-    // Failure details are logged at the per-batch callsite above.
     void error;
   }
 };

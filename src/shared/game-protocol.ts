@@ -113,28 +113,17 @@ export type EntityDelta = {
     hp: number[];
     maxHp: number[];
   };
-  priorityMobs?: {
-    nearPlayers: Array<{
-      mobId: string;
-      position: Vec2;
-      velocity: Vec2;
-      hp: number;
-      maxHp: number;
-    }>;
-    castleThreats: Array<{
-      mobId: string;
-      position: Vec2;
-      velocity: Vec2;
-      hp: number;
-      maxHp: number;
-    }>;
-    recentlyDamaged: Array<{
-      mobId: string;
-      position: Vec2;
-      velocity: Vec2;
-      hp: number;
-      maxHp: number;
-    }>;
+  priorityMobsCompact?: {
+    mobIds: string[];
+    px: number[];
+    pz: number[];
+    vx: number[];
+    vz: number[];
+    hp: number[];
+    maxHp: number[];
+    nearPlayerIndices: number[];
+    castleThreatIndices: number[];
+    recentlyDamagedIndices: number[];
   };
   fullMobList?: boolean;
   fullMobSnapshotId?: number;
@@ -157,6 +146,7 @@ export type WaveDelta = {
   tickSeq: number;
   worldVersion: number;
   wave: WaveState;
+  routesIncluded: boolean;
 };
 
 export type AckDelta = {

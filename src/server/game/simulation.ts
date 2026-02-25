@@ -1055,7 +1055,10 @@ const nearestPlayerDistanceSq = (mob: MobState, world: WorldState): number => {
   return best;
 };
 
-const buildPriorityMobSlices = (mobs: MobState[], world: WorldState) => {
+const buildPriorityMobSlicesCompact = (
+  mobs: MobState[],
+  world: WorldState
+): NonNullable<EntityDelta['priorityMobsCompact']> => {
   const nearPlayers = mobs
     .slice()
     .sort(
@@ -1075,10 +1078,46 @@ const buildPriorityMobSlices = (mobs: MobState[], world: WorldState) => {
     .filter((mob) => mob.hp < mob.maxHp)
     .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)
     .slice(0, DELTA_RECENTLY_DAMAGED_MOBS_BUDGET);
+
+  const poolMap = new Map<string, number>();
+  const mobIds: string[] = [];
+  const px: number[] = [];
+  const pz: number[] = [];
+  const vx: number[] = [];
+  const vz: number[] = [];
+  const hp: number[] = [];
+  const maxHp: number[] = [];
+
+  const addMob = (mob: MobState): number => {
+    const existing = poolMap.get(mob.mobId);
+    if (existing !== undefined) return existing;
+    const idx = mobIds.length;
+    poolMap.set(mob.mobId, idx);
+    mobIds.push(mob.mobId);
+    px.push(mob.position.x);
+    pz.push(mob.position.z);
+    vx.push(mob.velocity.x);
+    vz.push(mob.velocity.z);
+    hp.push(mob.hp);
+    maxHp.push(mob.maxHp);
+    return idx;
+  };
+
+  const nearPlayerIndices = nearPlayers.map(addMob);
+  const castleThreatIndices = castleThreats.map(addMob);
+  const recentlyDamagedIndices = recentlyDamaged.map(addMob);
+
   return {
-    nearPlayers: nearPlayers.map(toDeltaMob),
-    castleThreats: castleThreats.map(toDeltaMob),
-    recentlyDamaged: recentlyDamaged.map(toDeltaMob),
+    mobIds,
+    px,
+    pz,
+    vx,
+    vz,
+    hp,
+    maxHp,
+    nearPlayerIndices,
+    castleThreatIndices,
+    recentlyDamagedIndices,
   };
 };
 
@@ -1104,6 +1143,7 @@ export const runSimulation = (
   };
   const deltas: GameDelta[] = [];
   let waveChanged = ensureInitialWaveSchedule(world);
+  let routesChanged = waveChanged;
   const commandChanges = applyCommands(world, commands, nowMs);
   const structureUpserts = commandChanges.structureUpserts.slice();
   const structureRemoves = commandChanges.structureRemoves.slice();
@@ -1111,6 +1151,7 @@ export const runSimulation = (
   if (world.wave.spawners.some((spawner) => spawner.route.length === 0)) {
     recomputeSpawnerRoutes(world);
     waveChanged = true;
+    routesChanged = true;
   }
   const autoRemovedStructureIds = autoUnblockFullyBlockedPaths(world);
   if (autoRemovedStructureIds.length > 0) {
@@ -1118,6 +1159,7 @@ export const runSimulation = (
       if (!structureRemoves.includes(removedId)) structureRemoves.push(removedId);
     }
     waveChanged = true;
+    routesChanged = true;
   }
   if (structureUpserts.length > 0 || structureRemoves.length > 0) {
     world.meta.lastStructureChangeTickSeq = world.meta.tickSeq;
@@ -1140,6 +1182,7 @@ export const runSimulation = (
   ) {
     recomputeSpawnerRoutes(world);
     waveChanged = true;
+    routesChanged = true;
     const structureDelta: StructureDelta = {
       type: 'structureDelta',
       tickSeq: world.meta.tickSeq,
@@ -1182,6 +1225,7 @@ export const runSimulation = (
         tickSeq: world.meta.tickSeq,
         worldVersion: world.meta.worldVersion,
         wave: world.wave,
+        routesIncluded: routesChanged,
       };
     }
   }
@@ -1192,6 +1236,7 @@ export const runSimulation = (
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion,
       wave: world.wave,
+      routesIncluded: routesChanged,
     };
   }
 
@@ -1253,8 +1298,8 @@ export const runSimulation = (
         tickMs: simulatedWindowMs,
         players: [],
         mobs: baseMobs,
-        priorityMobs: ENABLE_INTEREST_MANAGED_MOB_DELTAS
-          ? buildPriorityMobSlices(latestMobUpserts, world)
+        priorityMobsCompact: ENABLE_INTEREST_MANAGED_MOB_DELTAS
+          ? buildPriorityMobSlicesCompact(latestMobUpserts, world)
           : undefined,
         fullMobList: false,
         despawnedMobIds: Array.from(despawnedDuringRun),
@@ -1263,6 +1308,18 @@ export const runSimulation = (
     }
   }
   if (latestWaveDelta) {
+    if (!latestWaveDelta.routesIncluded) {
+      latestWaveDelta = {
+        ...latestWaveDelta,
+        wave: {
+          ...latestWaveDelta.wave,
+          spawners: latestWaveDelta.wave.spawners.map((s) => ({
+            ...s,
+            route: [],
+          })),
+        },
+      };
+    }
     deltas.push(latestWaveDelta);
   }
 

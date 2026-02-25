@@ -10,6 +10,7 @@ import type { LanePathResult } from '../world/pathfinding/laneAStar';
 
 type SyncAuthoritativeWaveSpawnersOptions = {
   wave: WaveState;
+  routesIncluded: boolean;
   worldBounds: number;
   castleRouteHalfWidthCells: number;
   staticColliders: StaticCollider[];
@@ -61,6 +62,7 @@ export const syncAuthoritativeWaveSpawners = (
 ) => {
   const {
     wave,
+    routesIncluded,
     worldBounds,
     castleRouteHalfWidthCells,
     staticColliders,
@@ -127,47 +129,50 @@ export const syncAuthoritativeWaveSpawners = (
     spawner.spawnRatePerSecond = entry.spawnRatePerSecond;
     spawner.spawnAccumulator = entry.spawnAccumulator;
 
-    const routePoints = entry.route.map(
-      (point) => new THREE.Vector3(point.x, 0, point.z)
-    );
-    const displayPoints = toCastleDisplayPoints(routePoints);
-    const stagingPreviewPoints = [
-      getStagingIslandCenter(spawner.position),
-      getSpawnerGatePoint(spawner.position),
-      getSpawnerBridgeExitPoint(spawner.position),
-    ];
-    const fullDisplayPoints = [...stagingPreviewPoints, ...displayPoints];
-    const connector = buildPathTilesFromPoints(
-      [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
-      staticColliders,
-      worldBounds,
-      castleRouteHalfWidthCells
-    );
-    const corridor = buildPathTilesFromPoints(
-      displayPoints,
-      staticColliders,
-      worldBounds,
-      castleRouteHalfWidthCells
-    );
-    spawner.routeState = entry.routeState;
-    spawnerPathlineCache.set(spawner.id, {
-      points: displayPoints,
-      state: entry.routeState,
-    });
-    if (entry.routeState === 'reachable') {
-      const merged = new Map<string, THREE.Vector3>();
-      for (const tile of connector.tiles) {
-        merged.set(`${tile.x},${tile.z}`, new THREE.Vector3(tile.x, 0, tile.z));
+    const hasRouteData = routesIncluded && entry.route.length > 0;
+    if (hasRouteData || topologyChanged) {
+      const routePoints = entry.route.map(
+        (point) => new THREE.Vector3(point.x, 0, point.z)
+      );
+      const displayPoints = toCastleDisplayPoints(routePoints);
+      const stagingPreviewPoints = [
+        getStagingIslandCenter(spawner.position),
+        getSpawnerGatePoint(spawner.position),
+        getSpawnerBridgeExitPoint(spawner.position),
+      ];
+      const fullDisplayPoints = [...stagingPreviewPoints, ...displayPoints];
+      const connector = buildPathTilesFromPoints(
+        [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
+        staticColliders,
+        worldBounds,
+        castleRouteHalfWidthCells
+      );
+      const corridor = buildPathTilesFromPoints(
+        displayPoints,
+        staticColliders,
+        worldBounds,
+        castleRouteHalfWidthCells
+      );
+      spawner.routeState = entry.routeState;
+      spawnerPathlineCache.set(spawner.id, {
+        points: displayPoints,
+        state: entry.routeState,
+      });
+      if (entry.routeState === 'reachable') {
+        const merged = new Map<string, THREE.Vector3>();
+        for (const tile of connector.tiles) {
+          merged.set(`${tile.x},${tile.z}`, new THREE.Vector3(tile.x, 0, tile.z));
+        }
+        for (const tile of corridor.tiles) {
+          merged.set(`${tile.x},${tile.z}`, new THREE.Vector3(tile.x, 0, tile.z));
+        }
+        pathTilePositions.set(spawner.id, Array.from(merged.values()));
+      } else {
+        pathTilePositions.set(spawner.id, []);
       }
-      for (const tile of corridor.tiles) {
-        merged.set(`${tile.x},${tile.z}`, new THREE.Vector3(tile.x, 0, tile.z));
-      }
-      pathTilePositions.set(spawner.id, Array.from(merged.values()));
-    } else {
-      pathTilePositions.set(spawner.id, []);
+      upsertSpawnerRouteOverlay(spawner.id, fullDisplayPoints, entry.routeState);
+      upsertSpawnContainerOverlay(spawner.id, getSpawnContainerCorners(spawner.position));
     }
-    upsertSpawnerRouteOverlay(spawner.id, fullDisplayPoints, entry.routeState);
-    upsertSpawnContainerOverlay(spawner.id, getSpawnContainerCorners(spawner.position));
     upsertStagingIslandsOverlay(
       getSpawnerAnchorId(spawner.position),
       getStagingIslandCenter(spawner.position),
