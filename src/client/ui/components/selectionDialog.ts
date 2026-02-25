@@ -3,7 +3,7 @@ import type {
   TowerTypeId,
   TowerUpgradeId,
 } from '../../domains/gameplay/towers/towerTypes';
-import { buildCoinCostMarkup } from './coinCost';
+import { buildCoinCostMarkup, getCoinIconUrl } from './coinCost';
 
 type SelectionDialogState = {
   selectedCount: number;
@@ -283,12 +283,13 @@ export class SelectionDialog {
     const statusMarkup = noUpgradesLeftMarkup
       ? `<div class="selection-dialog__group selection-dialog__group--status">${noUpgradesLeftMarkup}</div>`
       : '';
+    const coinIcon = `<img class="coin-cost__icon selection-dialog__bank-coin-icon" src="${getCoinIconUrl()}" alt="" aria-hidden="true" />`;
     const bankActionsMarkup = isBankSelected
       ? `<div class="selection-dialog__bank-adjust-grid">
-          <button class="selection-dialog__bank-adjust-btn" data-bank-remove-10 ${canBankRemove10 ? '' : 'disabled'}>-10</button>
-          <button class="selection-dialog__bank-adjust-btn" data-bank-remove-1 ${canBankRemove1 ? '' : 'disabled'}>-1</button>
-          <button class="selection-dialog__bank-adjust-btn" data-bank-add-1 ${canBankAdd1 ? '' : 'disabled'}>+1</button>
-          <button class="selection-dialog__bank-adjust-btn" data-bank-add-10 ${canBankAdd10 ? '' : 'disabled'}>+10</button>
+          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--withdraw" data-bank-remove-1 ${canBankRemove1 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Take</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>1</span></span></button>
+          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--deposit" data-bank-add-1 ${canBankAdd1 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Add</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>1</span></span></button>
+          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--withdraw" data-bank-remove-10 ${canBankRemove10 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Take</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>10</span></span></button>
+          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--deposit" data-bank-add-10 ${canBankAdd10 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Add</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>10</span></span></button>
         </div>`
       : '';
 

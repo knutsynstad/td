@@ -5832,9 +5832,9 @@ const updateSelectionDialog = () => {
     selectedStructureLabel,
     bankTotal: selectedBankTotalRounded,
     canBankAdd1: canDeposit,
-    canBankAdd10: canDeposit,
+    canBankAdd10: canDeposit && maxDepositable >= 10,
     canBankRemove1: canWithdraw,
-    canBankRemove10: canWithdraw,
+    canBankRemove10: canWithdraw && maxWithdrawable >= 10,
     showRepair: !isNatureSelected,
     buildingCoords: selectedCollider
       ? {

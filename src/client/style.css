@@ -621,37 +621,65 @@ canvas {
   grid-column: 1 / -1;
 }
 
-.selection-dialog__action-bar--bank
-  .selection-dialog__action[data-bank-deposit] {
-  background: rgba(33, 138, 76, 0.9);
-}
-
-.selection-dialog__action-bar--bank
-  .selection-dialog__action[data-bank-withdraw] {
-  background: rgba(45, 112, 176, 0.9);
-}
-
 .selection-dialog__bank-adjust-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: minmax(38px, 1fr);
   gap: var(--dialog-gap);
   margin-top: var(--dialog-gap-tight);
 }
 
 .selection-dialog__bank-adjust-btn {
   min-height: 38px;
+  width: 100%;
   border-radius: 0;
-  border: 1px solid rgba(44, 24, 16, 0.4);
-  background: rgba(232, 220, 190, 0.9);
-  color: #2c1810;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-size: var(--dialog-font-md);
   font-weight: 700;
   cursor: pointer;
+  color: #ffffff;
+}
+
+.selection-dialog__bank-adjust-btn--withdraw {
+  background: rgba(180, 50, 50, 0.9);
+}
+
+.selection-dialog__bank-adjust-btn--deposit {
+  background: rgba(33, 138, 76, 0.9);
+}
+
+.selection-dialog__bank-adjust-label {
+  font-weight: 900;
+}
+
+.selection-dialog__bank-coin-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.selection-dialog__bank-adjust-btn .selection-dialog__bank-coin-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .selection-dialog__bank-adjust-btn:disabled {
-  opacity: 0.5;
+  background: rgba(0, 0, 0, 0.15);
+  color: rgba(0, 0, 0, 0.5);
   cursor: not-allowed;
+}
+
+.selection-dialog__bank-adjust-btn:disabled .selection-dialog__bank-adjust-label {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.selection-dialog__bank-adjust-btn:disabled .selection-dialog__bank-coin-group {
+  filter: grayscale(1);
+  opacity: 0.8;
 }
 
 .selection-dialog__stat-value-box {
