@@ -73,6 +73,7 @@ import {
   snapCenterToBuildGrid,
   type BuildMode,
 } from './domains/gameplay/buildingPlacement';
+import { getNatureLabel } from '../shared/natureLabels';
 import {
   clearSelectionState,
   createSelectionState,
@@ -5840,10 +5841,16 @@ const updateSelectionDialog = () => {
     .reduce((sum, collider) => sum + getDeleteEnergyCost(collider), 0);
   const selectedTowerTypeId = getSelectionTowerTypeId();
   const selectedStructureLabel =
-    selectedType === 'tree'
-      ? 'Tree'
-      : selectedType === 'rock'
-        ? 'Rock'
+    selectedType === 'tree' && selectedCollider
+      ? getNatureLabel(
+          'tree',
+          Math.floor(selectedCollider.center.x * 31 + selectedCollider.center.z)
+        )
+      : selectedType === 'rock' && selectedCollider
+        ? getNatureLabel(
+            'rock',
+            Math.floor(selectedCollider.center.x * 31 + selectedCollider.center.z)
+          )
         : selectedType === 'bank'
           ? 'Castle'
           : 'Wall';
