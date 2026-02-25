@@ -2,12 +2,15 @@ import type {
   CommandEnvelope,
   EntityDelta,
   GameDelta,
+  MobPool,
+  MobSlices,
   StructureDelta,
   WaveDelta,
 } from '../../shared/game-protocol';
 import type {
   MobState,
   StructureState,
+  WorldMeta,
   WorldState,
 } from '../../shared/game-state';
 import {
@@ -576,11 +579,13 @@ const getNearestRouteIndex = (
   return bestIdx;
 };
 
-const makeMob = (tickSeq: number, spawnerId: string): MobState => {
+const makeMob = (meta: WorldMeta, spawnerId: string): MobState => {
   const side = toSideDef(spawnerId);
   const spawn = getSpawnerSpawnPoint(side);
+  const seq = meta.nextMobSeq;
+  meta.nextMobSeq = seq + 1;
   return {
-    mobId: `${spawnerId}-mob-${tickSeq}-${Math.floor(Math.random() * 10_000)}`,
+    mobId: String(seq),
     position: spawn,
     velocity: { x: 0, z: 0 },
     hp: 100,
@@ -895,7 +900,7 @@ const updateWave = (
       spawner.totalCount - spawner.spawnedCount
     );
     for (let i = 0; i < spawnCount; i += 1) {
-      const mob = makeMob(world.meta.tickSeq, spawner.spawnerId);
+      const mob = makeMob(world.meta, spawner.spawnerId);
       world.mobs[mob.mobId] = mob;
       spawner.spawnedCount += 1;
       spawner.aliveCount += 1;
@@ -1012,37 +1017,8 @@ const applyCommands = (
   return { structureUpserts, structureRemoves, waveChanged, movedPlayers };
 };
 
-const toDeltaMob = (mob: MobState) => ({
-  mobId: mob.mobId,
-  position: { x: mob.position.x, z: mob.position.z },
-  velocity: { x: mob.velocity.x, z: mob.velocity.z },
-  hp: mob.hp,
-  maxHp: mob.maxHp,
-});
-
-const toCompactMobSnapshot = (
-  mobs: ReturnType<typeof toDeltaMob>[]
-): NonNullable<EntityDelta['mobSnapshotCompact']> => {
-  const compact: NonNullable<EntityDelta['mobSnapshotCompact']> = {
-    mobIds: [],
-    px: [],
-    pz: [],
-    vx: [],
-    vz: [],
-    hp: [],
-    maxHp: [],
-  };
-  for (const mob of mobs) {
-    compact.mobIds.push(mob.mobId);
-    compact.px.push(mob.position.x);
-    compact.pz.push(mob.position.z);
-    compact.vx.push(mob.velocity.x);
-    compact.vz.push(mob.velocity.z);
-    compact.hp.push(mob.hp);
-    compact.maxHp.push(mob.maxHp);
-  }
-  return compact;
-};
+const Q = 100;
+const quantize = (v: number): number => Math.round(v * Q);
 
 const nearestPlayerDistanceSq = (mob: MobState, world: WorldState): number => {
   let best = Number.POSITIVE_INFINITY;
@@ -1055,69 +1031,124 @@ const nearestPlayerDistanceSq = (mob: MobState, world: WorldState): number => {
   return best;
 };
 
-const buildPriorityMobSlicesCompact = (
-  mobs: MobState[],
-  world: WorldState
-): NonNullable<EntityDelta['priorityMobsCompact']> => {
-  const nearPlayers = mobs
-    .slice()
-    .sort(
-      (a, b) =>
-        nearestPlayerDistanceSq(a, world) - nearestPlayerDistanceSq(b, world)
-    )
-    .slice(0, DELTA_NEAR_MOBS_BUDGET);
-  const castleThreats = mobs
-    .slice()
-    .sort(
-      (a, b) =>
-        distance(a.position.x, a.position.z, 0, 0) -
-        distance(b.position.x, b.position.z, 0, 0)
-    )
-    .slice(0, DELTA_CASTLE_THREAT_MOBS_BUDGET);
-  const recentlyDamaged = mobs
-    .filter((mob) => mob.hp < mob.maxHp)
-    .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)
-    .slice(0, DELTA_RECENTLY_DAMAGED_MOBS_BUDGET);
+type MobPoolBuilder = {
+  poolMap: Map<string, number>;
+  ids: number[];
+  px: number[];
+  pz: number[];
+  vx: number[];
+  vz: number[];
+  hp: number[];
+  maxHp: number[];
+};
 
-  const poolMap = new Map<string, number>();
-  const mobIds: string[] = [];
+const createMobPoolBuilder = (): MobPoolBuilder => ({
+  poolMap: new Map(),
+  ids: [],
+  px: [],
+  pz: [],
+  vx: [],
+  vz: [],
+  hp: [],
+  maxHp: [],
+});
+
+const addMobToPool = (builder: MobPoolBuilder, mob: MobState): number => {
+  const existing = builder.poolMap.get(mob.mobId);
+  if (existing !== undefined) return existing;
+  const idx = builder.ids.length;
+  builder.poolMap.set(mob.mobId, idx);
+  builder.ids.push(Number(mob.mobId));
+  builder.px.push(quantize(mob.position.x));
+  builder.pz.push(quantize(mob.position.z));
+  builder.vx.push(quantize(mob.velocity.x));
+  builder.vz.push(quantize(mob.velocity.z));
+  builder.hp.push(mob.hp);
+  builder.maxHp.push(mob.maxHp);
+  return idx;
+};
+
+const buildMobPoolFromList = (
+  mobs: MobState[],
+  includeMaxHp: boolean
+): MobPool => {
+  const ids: number[] = [];
   const px: number[] = [];
   const pz: number[] = [];
   const vx: number[] = [];
   const vz: number[] = [];
   const hp: number[] = [];
-  const maxHp: number[] = [];
-
-  const addMob = (mob: MobState): number => {
-    const existing = poolMap.get(mob.mobId);
-    if (existing !== undefined) return existing;
-    const idx = mobIds.length;
-    poolMap.set(mob.mobId, idx);
-    mobIds.push(mob.mobId);
-    px.push(mob.position.x);
-    pz.push(mob.position.z);
-    vx.push(mob.velocity.x);
-    vz.push(mob.velocity.z);
+  const maxHp: number[] | undefined = includeMaxHp ? [] : undefined;
+  for (const mob of mobs) {
+    ids.push(Number(mob.mobId));
+    px.push(quantize(mob.position.x));
+    pz.push(quantize(mob.position.z));
+    vx.push(quantize(mob.velocity.x));
+    vz.push(quantize(mob.velocity.z));
     hp.push(mob.hp);
-    maxHp.push(mob.maxHp);
-    return idx;
+    maxHp?.push(mob.maxHp);
+  }
+  return { ids, px, pz, vx, vz, hp, maxHp };
+};
+
+const buildUnifiedMobDelta = (
+  allMobs: MobState[],
+  world: WorldState
+): { pool: MobPool; slices: MobSlices } => {
+  const builder = createMobPoolBuilder();
+
+  const baseMobs = allMobs.slice(0, MAX_DELTA_MOBS);
+  const baseIndices = baseMobs.map((m) => addMobToPool(builder, m));
+
+  let nearPlayerIndices: number[] = [];
+  let castleThreatIndices: number[] = [];
+  let recentlyDamagedIndices: number[] = [];
+
+  if (ENABLE_INTEREST_MANAGED_MOB_DELTAS) {
+    const nearPlayers = allMobs
+      .slice()
+      .sort(
+        (a, b) =>
+          nearestPlayerDistanceSq(a, world) - nearestPlayerDistanceSq(b, world)
+      )
+      .slice(0, DELTA_NEAR_MOBS_BUDGET);
+    const castleThreats = allMobs
+      .slice()
+      .sort(
+        (a, b) =>
+          distance(a.position.x, a.position.z, 0, 0) -
+          distance(b.position.x, b.position.z, 0, 0)
+      )
+      .slice(0, DELTA_CASTLE_THREAT_MOBS_BUDGET);
+    const recentlyDamaged = allMobs
+      .filter((mob) => mob.hp < mob.maxHp)
+      .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)
+      .slice(0, DELTA_RECENTLY_DAMAGED_MOBS_BUDGET);
+
+    nearPlayerIndices = nearPlayers.map((m) => addMobToPool(builder, m));
+    castleThreatIndices = castleThreats.map((m) => addMobToPool(builder, m));
+    recentlyDamagedIndices = recentlyDamaged.map((m) =>
+      addMobToPool(builder, m)
+    );
+  }
+
+  const pool: MobPool = {
+    ids: builder.ids,
+    px: builder.px,
+    pz: builder.pz,
+    vx: builder.vx,
+    vz: builder.vz,
+    hp: builder.hp,
   };
 
-  const nearPlayerIndices = nearPlayers.map(addMob);
-  const castleThreatIndices = castleThreats.map(addMob);
-  const recentlyDamagedIndices = recentlyDamaged.map(addMob);
-
   return {
-    mobIds,
-    px,
-    pz,
-    vx,
-    vz,
-    hp,
-    maxHp,
-    nearPlayerIndices,
-    castleThreatIndices,
-    recentlyDamagedIndices,
+    pool,
+    slices: {
+      base: baseIndices,
+      nearPlayers: nearPlayerIndices,
+      castleThreats: castleThreatIndices,
+      recentlyDamaged: recentlyDamagedIndices,
+    },
   };
 };
 
@@ -1172,7 +1203,6 @@ export const runSimulation = (
       serverTimeMs: world.meta.lastTickMs,
       tickMs: SIM_TICK_MS,
       players: commandChanges.movedPlayers.slice(0, MAX_DELTA_PLAYERS),
-      mobs: [],
       despawnedMobIds: [],
     });
   }
@@ -1254,23 +1284,26 @@ export const runSimulation = (
       ENABLE_FULL_MOB_DELTAS &&
       (world.meta.tickSeq % FULL_MOB_DELTA_INTERVAL_TICKS === 0 ||
         structureChangeBurstActive);
+    const despawnedIds = Array.from(despawnedDuringRun).map(Number);
     if (includeFullMobList) {
-      const snapshotMobs = latestMobUpserts.map(toDeltaMob);
       const chunkSize = Math.max(1, FULL_MOB_SNAPSHOT_CHUNK_SIZE);
-      const chunkCount = Math.max(1, Math.ceil(snapshotMobs.length / chunkSize));
+      const chunkCount = Math.max(
+        1,
+        Math.ceil(latestMobUpserts.length / chunkSize)
+      );
       const snapshotId = world.meta.tickSeq;
       console.info('Mob snapshot payload', {
         tickSeq: world.meta.tickSeq,
         worldVersion: world.meta.worldVersion,
-        totalMobs: snapshotMobs.length,
+        totalMobs: latestMobUpserts.length,
         chunkCount,
         chunkSize,
       });
       for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
         const start = chunkIndex * chunkSize;
-        const end = Math.min(snapshotMobs.length, start + chunkSize);
+        const end = Math.min(latestMobUpserts.length, start + chunkSize);
         const isFinalChunk = chunkIndex === chunkCount - 1;
-        const chunkMobs = snapshotMobs.slice(start, end);
+        const chunkMobs = latestMobUpserts.slice(start, end);
         const chunkDelta: EntityDelta = {
           type: 'entityDelta',
           tickSeq: world.meta.tickSeq,
@@ -1278,18 +1311,20 @@ export const runSimulation = (
           serverTimeMs: world.meta.lastTickMs,
           tickMs: simulatedWindowMs,
           players: [],
-          mobs: [],
-          mobSnapshotCompact: toCompactMobSnapshot(chunkMobs),
+          mobPool: buildMobPoolFromList(chunkMobs, true),
           fullMobList: true,
           fullMobSnapshotId: snapshotId,
           fullMobSnapshotChunkIndex: chunkIndex,
           fullMobSnapshotChunkCount: chunkCount,
-          despawnedMobIds: isFinalChunk ? Array.from(despawnedDuringRun) : [],
+          despawnedMobIds: isFinalChunk ? despawnedIds : [],
         };
         deltas.push(chunkDelta);
       }
     } else {
-      const baseMobs = latestMobUpserts.slice(0, MAX_DELTA_MOBS).map(toDeltaMob);
+      const { pool, slices } = buildUnifiedMobDelta(
+        latestMobUpserts,
+        world
+      );
       const entityDelta: EntityDelta = {
         type: 'entityDelta',
         tickSeq: world.meta.tickSeq,
@@ -1297,12 +1332,10 @@ export const runSimulation = (
         serverTimeMs: world.meta.lastTickMs,
         tickMs: simulatedWindowMs,
         players: [],
-        mobs: baseMobs,
-        priorityMobsCompact: ENABLE_INTEREST_MANAGED_MOB_DELTAS
-          ? buildPriorityMobSlicesCompact(latestMobUpserts, world)
-          : undefined,
+        mobPool: pool,
+        mobSlices: slices,
         fullMobList: false,
-        despawnedMobIds: Array.from(despawnedDuringRun),
+        despawnedMobIds: despawnedIds,
       };
       deltas.push(entityDelta);
     }

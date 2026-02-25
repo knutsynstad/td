@@ -85,6 +85,7 @@ export type WorldMeta = {
   seed: number;
   energy: number;
   lives: number;
+  nextMobSeq: number;
 };
 
 export type WorldState = {

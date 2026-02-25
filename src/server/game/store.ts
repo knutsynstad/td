@@ -328,6 +328,7 @@ const defaultMeta = (nowMs: number, energy: number): WorldMeta => ({
   seed: nowMs,
   energy: clampCoins(energy),
   lives: 1,
+  nextMobSeq: 1,
 });
 
 export const loadWorldState = async (): Promise<WorldState> => {
@@ -356,6 +357,7 @@ export const loadWorldState = async (): Promise<WorldState> => {
       Math.min(ENERGY_CAP, Number(metaRaw?.energy ?? String(ENERGY_CAP)))
     ),
     lives: Number(metaRaw?.lives ?? '1'),
+    nextMobSeq: Number(metaRaw?.nextMobSeq ?? '1'),
   };
 
   const players = parseMapFromHash<PlayerState>(playersRaw, parsePlayerState);
@@ -422,6 +424,7 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
     seed: String(world.meta.seed),
     energy: String(world.meta.energy),
     lives: String(world.meta.lives),
+    nextMobSeq: String(world.meta.nextMobSeq),
   };
 
   const playersWrites: Record<string, string> = {};

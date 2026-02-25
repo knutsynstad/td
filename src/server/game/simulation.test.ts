@@ -18,6 +18,7 @@ const world = (nowMs: number): WorldState => ({
     seed: 1,
     energy: 100,
     lives: 1,
+    nextMobSeq: 1,
   },
   players: {},
   intents: {},
@@ -146,8 +147,8 @@ describe('runSimulation', () => {
         route: [{ x: 20, z: 20 }],
       },
     ];
-    gameWorld.mobs['stuck-mob'] = {
-      mobId: 'stuck-mob',
+    gameWorld.mobs['99999'] = {
+      mobId: '99999',
       position: { x: 20, z: 20 },
       velocity: { x: 0, z: 0 },
       hp: 100,
@@ -161,11 +162,11 @@ describe('runSimulation', () => {
     const maxSteps = Math.ceil((runUntilMs - nowMs) / 100) + 5;
     const result = runSimulation(gameWorld, runUntilMs, [], maxSteps);
 
-    expect(result.world.mobs['stuck-mob']).toBeUndefined();
+    expect(result.world.mobs['99999']).toBeUndefined();
     const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
-      expect(entityDelta.despawnedMobIds).toContain('stuck-mob');
+      expect(entityDelta.despawnedMobIds).toContain(99999);
     }
   });
 
@@ -187,8 +188,8 @@ describe('runSimulation', () => {
         route: [{ x: 0, z: -61 }, { x: 0, z: 7 }],
       },
     ];
-    gameWorld.mobs['blocked-route-mob'] = {
-      mobId: 'blocked-route-mob',
+    gameWorld.mobs['88888'] = {
+      mobId: '88888',
       position: { x: 0, z: -50 },
       velocity: { x: 0, z: 0 },
       hp: 100,
@@ -198,8 +199,8 @@ describe('runSimulation', () => {
     };
 
     const result = runSimulation(gameWorld, nowMs + 100, [], 1);
-    expect(result.world.mobs['blocked-route-mob']).toBeDefined();
-    const moved = result.world.mobs['blocked-route-mob']!;
+    expect(result.world.mobs['88888']).toBeDefined();
+    const moved = result.world.mobs['88888']!;
     expect(moved.position.z).toBeLessThan(-50);
   });
 
@@ -343,8 +344,8 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < 16; i += 1) {
-      gameWorld.mobs[`m-${i}`] = {
-        mobId: `m-${i}`,
+      gameWorld.mobs[String(i + 1)] = {
+        mobId: String(i + 1),
         position: { x: i - 8, z: i - 7 },
         velocity: { x: 0, z: 0 },
         hp: i % 3 === 0 ? 70 : 100,
@@ -357,11 +358,11 @@ describe('runSimulation', () => {
     const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
-      if (entityDelta.priorityMobsCompact) {
-        expect(entityDelta.priorityMobsCompact.nearPlayerIndices.length).toBeGreaterThan(0);
-        expect(entityDelta.priorityMobsCompact.castleThreatIndices.length).toBeGreaterThan(0);
-      } else {
-        expect(entityDelta.mobs.length).toBeGreaterThan(0);
+      if (entityDelta.mobSlices) {
+        expect(entityDelta.mobSlices.nearPlayers.length).toBeGreaterThan(0);
+        expect(entityDelta.mobSlices.castleThreats.length).toBeGreaterThan(0);
+      } else if (entityDelta.mobPool) {
+        expect(entityDelta.mobPool.ids.length).toBeGreaterThan(0);
       }
     }
   });
@@ -391,8 +392,8 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
-      gameWorld.mobs[`compact-${i}`] = {
-        mobId: `compact-${i}`,
+      gameWorld.mobs[String(i + 1)] = {
+        mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
         velocity: { x: 0, z: 0 },
         hp: 100,
@@ -407,8 +408,8 @@ describe('runSimulation', () => {
     if (entityDelta?.type === 'entityDelta') {
       expect(entityDelta.tickSeq % intervalTicks).not.toBe(0);
       expect(entityDelta.fullMobList).toBe(false);
-      expect(entityDelta.mobs.length).toBe(MAX_DELTA_MOBS);
-      expect(entityDelta.priorityMobsCompact).toBeDefined();
+      expect(entityDelta.mobSlices?.base.length).toBe(MAX_DELTA_MOBS);
+      expect(entityDelta.mobSlices).toBeDefined();
     }
   });
 
@@ -437,8 +438,8 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25; i += 1) {
-      gameWorld.mobs[`full-${i}`] = {
-        mobId: `full-${i}`,
+      gameWorld.mobs[String(i + 1)] = {
+        mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
         velocity: { x: 0, z: 0 },
         hp: 100,
@@ -454,23 +455,23 @@ describe('runSimulation', () => {
       const entityDelta = entityDeltas[i]!;
       expect(entityDelta.tickSeq % intervalTicks).toBe(0);
       expect(entityDelta.fullMobList).toBe(true);
-      expect(entityDelta.priorityMobsCompact).toBeUndefined();
+      expect(entityDelta.mobSlices).toBeUndefined();
       expect(entityDelta.fullMobSnapshotId).toBe(entityDelta.tickSeq);
       expect(entityDelta.fullMobSnapshotChunkCount).toBe(2);
       expect(entityDelta.fullMobSnapshotChunkIndex).toBe(i);
-      expect(entityDelta.mobs).toHaveLength(0);
-      expect(entityDelta.mobSnapshotCompact).toBeDefined();
-      if (entityDelta.mobSnapshotCompact) {
-        const compact = entityDelta.mobSnapshotCompact;
-        expect(compact.mobIds.length).toBe(compact.px.length);
-        expect(compact.mobIds.length).toBe(compact.pz.length);
-        expect(compact.mobIds.length).toBe(compact.vx.length);
-        expect(compact.mobIds.length).toBe(compact.vz.length);
-        expect(compact.mobIds.length).toBe(compact.hp.length);
-        expect(compact.mobIds.length).toBe(compact.maxHp.length);
+      expect(entityDelta.mobPool).toBeDefined();
+      if (entityDelta.mobPool) {
+        const pool = entityDelta.mobPool;
+        expect(pool.ids.length).toBe(pool.px.length);
+        expect(pool.ids.length).toBe(pool.pz.length);
+        expect(pool.ids.length).toBe(pool.vx.length);
+        expect(pool.ids.length).toBe(pool.vz.length);
+        expect(pool.ids.length).toBe(pool.hp.length);
+        expect(pool.maxHp).toBeDefined();
+        expect(pool.ids.length).toBe(pool.maxHp!.length);
       }
     }
-    const allMobIds = new Set(entityDeltas.flatMap((delta) => delta.mobSnapshotCompact?.mobIds ?? []));
+    const allMobIds = new Set(entityDeltas.flatMap((delta) => delta.mobPool?.ids ?? []));
     expect(allMobIds.size).toBe(FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25);
     expect(entityDeltas[0]?.despawnedMobIds).toHaveLength(0);
   });
@@ -495,8 +496,8 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
-      gameWorld.mobs[`burst-${i}`] = {
-        mobId: `burst-${i}`,
+      gameWorld.mobs[String(i + 1)] = {
+        mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
         velocity: { x: 0, z: 0 },
         hp: 100,

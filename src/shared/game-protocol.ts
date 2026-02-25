@@ -86,6 +86,23 @@ export type PresenceDelta = {
   };
 };
 
+export type MobPool = {
+  ids: number[];
+  px: number[];
+  pz: number[];
+  vx: number[];
+  vz: number[];
+  hp: number[];
+  maxHp?: number[];
+};
+
+export type MobSlices = {
+  base: number[];
+  nearPlayers: number[];
+  castleThreats: number[];
+  recentlyDamaged: number[];
+};
+
 export type EntityDelta = {
   type: 'entityDelta';
   tickSeq: number;
@@ -97,39 +114,13 @@ export type EntityDelta = {
     username: string;
     interpolation: EntityInterpolation;
   }>;
-  mobs: Array<{
-    mobId: string;
-    position: Vec2;
-    velocity: Vec2;
-    hp: number;
-    maxHp: number;
-  }>;
-  mobSnapshotCompact?: {
-    mobIds: string[];
-    px: number[];
-    pz: number[];
-    vx: number[];
-    vz: number[];
-    hp: number[];
-    maxHp: number[];
-  };
-  priorityMobsCompact?: {
-    mobIds: string[];
-    px: number[];
-    pz: number[];
-    vx: number[];
-    vz: number[];
-    hp: number[];
-    maxHp: number[];
-    nearPlayerIndices: number[];
-    castleThreatIndices: number[];
-    recentlyDamagedIndices: number[];
-  };
+  mobPool?: MobPool;
+  mobSlices?: MobSlices;
   fullMobList?: boolean;
   fullMobSnapshotId?: number;
   fullMobSnapshotChunkIndex?: number;
   fullMobSnapshotChunkCount?: number;
-  despawnedMobIds: string[];
+  despawnedMobIds: number[];
 };
 
 export type StructureDelta = {

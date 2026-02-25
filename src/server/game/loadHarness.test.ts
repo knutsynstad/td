@@ -10,6 +10,7 @@ const baseWorld = (): WorldState => ({
     seed: 1,
     energy: 500,
     lives: 1,
+    nextMobSeq: 1,
   },
   players: {},
   intents: {},

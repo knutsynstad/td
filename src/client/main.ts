@@ -3752,6 +3752,7 @@ const removeServerMobById = (mobId: string) => {
   serverMobsById.delete(mobId);
   serverMobInterpolationById.delete(mobId);
   serverMobSampleById.delete(mobId);
+  serverMobMaxHpCache.delete(mobId);
 };
 
 const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
@@ -3792,21 +3793,11 @@ const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
   serverMobsById.set(mobState.mobId, mob);
 };
 
-const applyServerMobUpdate = (
-  item: EntityDelta['mobs'][number],
-  delta: EntityDelta
-) => {
-  applyServerMobUpdateValues(
-    item.mobId,
-    item.position.x,
-    item.position.z,
-    item.velocity.x,
-    item.velocity.z,
-    item.hp,
-    item.maxHp,
-    delta
-  );
-};
+const DQ = 1 / 100;
+const dequantize = (v: number): number => v * DQ;
+
+const DEFAULT_MOB_MAX_HP = 100;
+const serverMobMaxHpCache = new Map<string, number>();
 
 const applyServerMobUpdateValues = (
   mobId: string,
@@ -3815,9 +3806,15 @@ const applyServerMobUpdateValues = (
   velX: number,
   velZ: number,
   hp: number,
-  maxHp: number,
+  maxHp: number | undefined,
   delta: EntityDelta
 ) => {
+  const resolvedMaxHp =
+    maxHp ?? serverMobMaxHpCache.get(mobId) ?? DEFAULT_MOB_MAX_HP;
+  if (maxHp !== undefined) {
+    serverMobMaxHpCache.set(mobId, maxHp);
+  }
+
   const existing = serverMobsById.get(mobId);
   if (!existing) {
     upsertServerMobFromSnapshot({
@@ -3825,7 +3822,7 @@ const applyServerMobUpdateValues = (
       position: { x: posX, z: posZ },
       velocity: { x: velX, z: velZ },
       hp,
-      maxHp,
+      maxHp: resolvedMaxHp,
       spawnerId: '',
       routeIndex: 0,
     });
@@ -3839,7 +3836,7 @@ const applyServerMobUpdateValues = (
   }
 
   existing.hp = hp;
-  existing.maxHp = maxHp;
+  existing.maxHp = resolvedMaxHp;
   const prev = serverMobSampleById.get(mobId);
   const currentPos = serverMobDeltaPosScratch.set(
     posX,
@@ -3898,74 +3895,61 @@ const applyServerMobUpdateValues = (
   }
 };
 
+const applyMobPoolEntries = (
+  pool: NonNullable<EntityDelta['mobPool']>,
+  indices: number[] | undefined,
+  delta: EntityDelta,
+  hasMaxHp: boolean
+) => {
+  const poolLen = Math.min(
+    pool.ids.length,
+    pool.px.length,
+    pool.pz.length,
+    pool.vx.length,
+    pool.vz.length,
+    pool.hp.length
+  );
+  const iter = indices ?? Array.from({ length: poolLen }, (_, i) => i);
+  for (const idx of iter) {
+    if (idx < 0 || idx >= poolLen) continue;
+    const mobId = String(pool.ids[idx]!);
+    if (serverMobSeenIdsScratch.has(mobId)) continue;
+    serverMobSeenIdsScratch.add(mobId);
+    applyServerMobUpdateValues(
+      mobId,
+      dequantize(pool.px[idx]!),
+      dequantize(pool.pz[idx]!),
+      dequantize(pool.vx[idx]!),
+      dequantize(pool.vz[idx]!),
+      pool.hp[idx]!,
+      hasMaxHp && pool.maxHp ? pool.maxHp[idx] : undefined,
+      delta
+    );
+  }
+};
+
 const applyServerMobDelta = (delta: EntityDelta) => {
   syncServerClockSkew(delta.serverTimeMs);
   serverMobSeenIdsScratch.clear();
-  for (const item of delta.mobs) {
-    if (serverMobSeenIdsScratch.has(item.mobId)) continue;
-    serverMobSeenIdsScratch.add(item.mobId);
-    applyServerMobUpdate(item, delta);
-  }
-  const compact = delta.mobSnapshotCompact;
-  if (compact) {
-    const length = Math.min(
-      compact.mobIds.length,
-      compact.px.length,
-      compact.pz.length,
-      compact.vx.length,
-      compact.vz.length,
-      compact.hp.length,
-      compact.maxHp.length
-    );
-    for (let i = 0; i < length; i += 1) {
-      const mobId = compact.mobIds[i]!;
-      if (serverMobSeenIdsScratch.has(mobId)) continue;
-      serverMobSeenIdsScratch.add(mobId);
-      applyServerMobUpdateValues(
-        mobId,
-        compact.px[i]!,
-        compact.pz[i]!,
-        compact.vx[i]!,
-        compact.vz[i]!,
-        compact.hp[i]!,
-        compact.maxHp[i]!,
-        delta
-      );
+
+  const pool = delta.mobPool;
+  if (pool) {
+    const isFullSnapshot = !!delta.fullMobList;
+    if (isFullSnapshot) {
+      applyMobPoolEntries(pool, undefined, delta, true);
+    } else {
+      const slices = delta.mobSlices;
+      if (slices) {
+        applyMobPoolEntries(pool, slices.base, delta, false);
+        applyMobPoolEntries(pool, slices.nearPlayers, delta, false);
+        applyMobPoolEntries(pool, slices.castleThreats, delta, false);
+        applyMobPoolEntries(pool, slices.recentlyDamaged, delta, false);
+      } else {
+        applyMobPoolEntries(pool, undefined, delta, false);
+      }
     }
   }
-  if (!delta.fullMobList) {
-    const pmc = delta.priorityMobsCompact;
-    if (pmc) {
-      const poolLen = Math.min(
-        pmc.mobIds.length,
-        pmc.px.length,
-        pmc.pz.length,
-        pmc.vx.length,
-        pmc.vz.length,
-        pmc.hp.length,
-        pmc.maxHp.length
-      );
-      const applyIndex = (idx: number) => {
-        if (idx < 0 || idx >= poolLen) return;
-        const mobId = pmc.mobIds[idx]!;
-        if (serverMobSeenIdsScratch.has(mobId)) return;
-        serverMobSeenIdsScratch.add(mobId);
-        applyServerMobUpdateValues(
-          mobId,
-          pmc.px[idx]!,
-          pmc.pz[idx]!,
-          pmc.vx[idx]!,
-          pmc.vz[idx]!,
-          pmc.hp[idx]!,
-          pmc.maxHp[idx]!,
-          delta
-        );
-      };
-      for (const idx of pmc.nearPlayerIndices) applyIndex(idx);
-      for (const idx of pmc.castleThreatIndices) applyIndex(idx);
-      for (const idx of pmc.recentlyDamagedIndices) applyIndex(idx);
-    }
-  }
+
   if (delta.fullMobList) {
     const chunkCount = Math.max(1, delta.fullMobSnapshotChunkCount ?? 1);
     const chunkIndex = Math.max(0, delta.fullMobSnapshotChunkIndex ?? 0);
@@ -4006,16 +3990,17 @@ const applyServerMobDelta = (delta: EntityDelta) => {
       pendingFullMobSnapshotSeenIds.clear();
     }
   } else {
-    // Compact updates invalidate any partial full-snapshot accumulation.
     pendingFullMobSnapshotId = null;
     pendingFullMobSnapshotSeenIds.clear();
   }
-  for (const mobId of delta.despawnedMobIds) {
+  for (const numId of delta.despawnedMobIds) {
+    const mobId = String(numId);
     const mob = serverMobsById.get(mobId);
     if (mob) {
       spawnMobDeathVisual(mob);
     }
     removeServerMobById(mobId);
+    serverMobMaxHpCache.delete(mobId);
   }
 };
 
