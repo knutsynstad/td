@@ -4776,20 +4776,6 @@ const worldToScreen = (
   return { x, y };
 };
 
-const updateViewportFogCenter = () => {
-  const anchor = worldToScreen(
-    player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5)
-  );
-  if (!anchor) return;
-  const xPct = Math.max(0, Math.min(100, (anchor.x / window.innerWidth) * 100));
-  const yPct = Math.max(
-    0,
-    Math.min(100, (anchor.y / window.innerHeight) * 100)
-  );
-  viewportFogEl.style.setProperty('--fog-center-x', `${xPct}%`);
-  viewportFogEl.style.setProperty('--fog-center-y', `${yPct}%`);
-};
-
 const addEnergy = (amount: number, withPop = false) => {
   if (isServerAuthoritative()) return;
   gameState.energy = Math.min(ENERGY_CAP, gameState.energy + amount);
@@ -5327,12 +5313,42 @@ const updateFloatingDamageTexts = (delta: number) => {
   }
 };
 
+type HealthBarElements = { shell: HTMLDivElement; fill: HTMLDivElement };
+const healthBarMap = new Map<StaticCollider, HealthBarElements>();
+const createHealthBar = (): HealthBarElements => {
+  const shell = document.createElement('div');
+  shell.style.position = 'absolute';
+  shell.style.transform = 'translate(-50%, -100%)';
+  shell.style.width = '42px';
+  shell.style.height = '6px';
+  shell.style.border = '1px solid rgba(255,255,255,0.85)';
+  shell.style.borderRadius = '999px';
+  shell.style.background = 'rgba(0,0,0,0.55)';
+  shell.style.overflow = 'hidden';
+  shell.style.pointerEvents = 'none';
+  const fill = document.createElement('div');
+  fill.style.height = '100%';
+  fill.style.transition = 'width 80ms linear';
+  shell.appendChild(fill);
+  return { shell, fill };
+};
+
 const updateHealthBars = () => {
-  // Clear existing health bars
-  healthBarContainer.innerHTML = '';
+  const activeEntries: [StaticCollider, { hp: number; maxHp: number }][] = [];
   for (const [collider, state] of structureStore.structureStates.entries()) {
     if (collider.type !== 'wall' && collider.type !== 'tower') continue;
     if (state.maxHp <= 0 || state.hp >= state.maxHp) continue;
+    activeEntries.push([collider, { hp: state.hp, maxHp: state.maxHp }]);
+  }
+  const activeColliders = new Set(activeEntries.map(([c]) => c));
+  for (const collider of healthBarMap.keys()) {
+    if (!activeColliders.has(collider)) {
+      const { shell } = healthBarMap.get(collider)!;
+      shell.remove();
+      healthBarMap.delete(collider);
+    }
+  }
+  for (const [collider, { hp, maxHp }] of activeEntries) {
     const barAnchor = new THREE.Vector3(
       collider.center.x,
       collider.center.y + collider.halfSize.y + 0.55,
@@ -5340,59 +5356,59 @@ const updateHealthBars = () => {
     );
     const screenPos = worldToScreen(barAnchor);
     if (!screenPos) continue;
-
-    const hpRatio = Math.max(0, Math.min(1, state.hp / state.maxHp));
-    const shell = document.createElement('div');
-    shell.style.position = 'absolute';
-    shell.style.left = `${screenPos.x}px`;
-    shell.style.top = `${screenPos.y}px`;
-    shell.style.transform = 'translate(-50%, -100%)';
-    shell.style.width = '42px';
-    shell.style.height = '6px';
-    shell.style.border = '1px solid rgba(255,255,255,0.85)';
-    shell.style.borderRadius = '999px';
-    shell.style.background = 'rgba(0,0,0,0.55)';
-    shell.style.overflow = 'hidden';
-    shell.style.pointerEvents = 'none';
-
-    const fill = document.createElement('div');
-    fill.style.width = `${Math.max(0, Math.round(hpRatio * 100))}%`;
-    fill.style.height = '100%';
-    fill.style.background =
+    let bar = healthBarMap.get(collider);
+    if (!bar) {
+      bar = createHealthBar();
+      healthBarMap.set(collider, bar);
+      healthBarContainer.appendChild(bar.shell);
+    }
+    bar.shell.style.left = `${screenPos.x}px`;
+    bar.shell.style.top = `${screenPos.y}px`;
+    const hpRatio = Math.max(0, Math.min(1, hp / maxHp));
+    bar.fill.style.width = `${Math.max(0, Math.round(hpRatio * 100))}%`;
+    bar.fill.style.background =
       hpRatio < 0.35 ? '#e35a5a' : hpRatio < 0.75 ? '#e0bf50' : '#5dd37a';
-    fill.style.transition = 'width 80ms linear';
-    shell.appendChild(fill);
-    healthBarContainer.appendChild(shell);
   }
 };
 
-const updateUsernameLabels = () => {
-  // Clear existing labels
-  usernameContainer.innerHTML = '';
+const usernameLabelPool: HTMLDivElement[] = [];
+const createUsernameLabel = (): HTMLDivElement => {
+  const label = document.createElement('div');
+  label.style.position = 'absolute';
+  label.style.transform = 'translate(-50%, -100%)';
+  label.style.color = '#fff';
+  label.style.fontFamily = 'inherit';
+  label.style.fontSize = '12px';
+  label.style.fontWeight = '600';
+  label.style.textShadow = '0 1px 3px rgba(0,0,0,0.8)';
+  label.style.whiteSpace = 'nowrap';
+  label.style.pointerEvents = 'none';
+  return label;
+};
 
-  const entities = [player, ...npcs];
-  for (const entity of entities) {
-    if (!entity.username) continue;
+const updateUsernameLabels = () => {
+  const entities = [player, ...npcs].filter((e) => e.username);
+  while (usernameLabelPool.length < entities.length) {
+    usernameLabelPool.push(createUsernameLabel());
+  }
+  for (let i = 0; i < entities.length; i++) {
+    const entity = entities[i]!;
+    const label = usernameLabelPool[i]!;
     const screenPos = worldToScreen(
       entity.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5 + 1.0)
     );
-    if (!screenPos) continue;
-
-    const label = document.createElement('div');
+    if (!screenPos) {
+      label.style.display = 'none';
+      continue;
+    }
     label.textContent = entity.username;
-    label.style.position = 'absolute';
     label.style.left = `${screenPos.x}px`;
     label.style.top = `${screenPos.y}px`;
-    label.style.transform = 'translate(-50%, -100%)';
-    label.style.color = '#fff';
-    label.style.fontFamily = 'inherit';
-    label.style.fontSize = '12px';
-    label.style.fontWeight = '600';
-    label.style.textShadow = '0 1px 3px rgba(0,0,0,0.8)';
-    label.style.whiteSpace = 'nowrap';
-    label.style.pointerEvents = 'none';
-
-    usernameContainer.appendChild(label);
+    label.style.display = '';
+    if (!label.parentNode) usernameContainer.appendChild(label);
+  }
+  for (let i = entities.length; i < usernameLabelPool.length; i++) {
+    usernameLabelPool[i]!.style.display = 'none';
   }
 };
 
@@ -7228,7 +7244,6 @@ const tick = (now: number, delta: number) => {
     player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5)
   );
   camera.updateMatrixWorld();
-  updateViewportFogCenter();
   const renderStartedAtMs = performance.now();
   updateMobInstanceRender(now);
   frameRenderMs += performance.now() - renderStartedAtMs;
