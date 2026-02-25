@@ -284,6 +284,13 @@ app.innerHTML = `
       <div id="eventBanner" class="event-banner"></div>
       <div id="finalCountdown" class="final-countdown"></div>
     </div>
+    <div class="build-mode-overlay" id="buildModeOverlay">
+      <div class="build-mode-header">
+        <span class="build-mode-title" id="buildModeTitle">Place Wall</span>
+        <span class="build-mode-hint" id="buildModeHint"></span>
+      </div>
+      <button class="build-mode-cancel" id="buildModeCancel">Cancel</button>
+    </div>
     <div class="hud-corner hud-corner--bottom-right">
       <div class="hud-actions">
         <div class="build-buttons">
@@ -354,6 +361,12 @@ const coinHudCanvasEl =
   document.querySelector<HTMLCanvasElement>('#coinHudCanvas')!;
 const minimapCanvasEl =
   document.querySelector<HTMLCanvasElement>('#hudMinimap')!;
+const buildModeTitleEl =
+  document.querySelector<HTMLSpanElement>('#buildModeTitle')!;
+const buildModeHintEl =
+  document.querySelector<HTMLSpanElement>('#buildModeHint')!;
+const buildModeCancelBtn =
+  document.querySelector<HTMLButtonElement>('#buildModeCancel')!;
 const loadingScreenEl =
   document.querySelector<HTMLDivElement>('#loadingScreen')!;
 const loadingProgressFillEl = document.querySelector<HTMLDivElement>(
@@ -792,6 +805,11 @@ class WorldGrid {
 
   setVisible(visible: boolean) {
     this.group.visible = visible;
+  }
+
+  setBuildMode(active: boolean) {
+    this.lineMaterial.color.setHex(active ? 0xffffff : 0x000000);
+    this.lineMaterial.opacity = active ? 0.18 : 0.15;
   }
 
   dispose() {
@@ -5384,24 +5402,55 @@ const canAffordBuildMode = (mode: BuildMode) => {
   return true;
 };
 
+const SCENE_BG_DEFAULT = 0x10151a;
+const SCENE_BG_BUILD = 0x081018;
+const HEMI_SKY_DEFAULT = 0xbfd6ff;
+const HEMI_SKY_BUILD = 0x5a80c0;
+
 const setBuildMode = (mode: BuildMode) => {
   if (mode !== 'off' && !canAffordBuildMode(mode)) {
     triggerEventBanner('Not enough coins');
     return;
   }
   if (gameState.buildMode === mode) {
-    // Toggle off if clicking same button
     gameState.buildMode = 'off';
   } else {
     gameState.buildMode = mode;
   }
+
+  const active = gameState.buildMode !== 'off';
+
   buildWallBtn.classList.toggle('active', gameState.buildMode === 'wall');
   buildTowerBtn.classList.toggle('active', gameState.buildMode === 'tower');
-  buildPreview.visible = gameState.buildMode !== 'off';
-  if (gameState.buildMode !== 'off') {
+  buildPreview.visible = active;
+
+  hudEl.classList.toggle('is-build-mode', active);
+  viewportFogEl.classList.toggle('is-build-mode', active);
+
+  if (active) {
     clearSelectionState(selection);
     selectedTower = selection.selectedTower;
+
+    const isWall = gameState.buildMode === 'wall';
+    buildModeTitleEl.textContent = isWall ? 'Place Wall' : 'Place Tower';
+    buildModeHintEl.textContent = isWall
+      ? 'Drag to place a line'
+      : 'Tap to place';
+
+    (scene.background as THREE.Color).setHex(SCENE_BG_BUILD);
+    hemi.color.setHex(HEMI_SKY_BUILD);
+
+    worldGrid.setBuildMode(true);
+    worldGrid.setVisible(true);
+    worldGrid.update(getVisibleGroundBounds(camera));
+  } else {
+    (scene.background as THREE.Color).setHex(SCENE_BG_DEFAULT);
+    hemi.color.setHex(HEMI_SKY_DEFAULT);
+
+    worldGrid.setBuildMode(false);
+    worldGrid.setVisible(debugViewState.worldGrid);
   }
+
   isDraggingWall = false;
   wallDragStart = null;
   wallDragEnd = null;
@@ -5884,6 +5933,7 @@ const updateSelectionDialog = () => {
 
 buildWallBtn.addEventListener('click', () => setBuildMode('wall'));
 buildTowerBtn.addEventListener('click', () => setBuildMode('tower'));
+buildModeCancelBtn.addEventListener('click', () => setBuildMode('off'));
 minimapToggleBtn.addEventListener('click', () => {
   if (isMinimapExpanded) return;
   clearSelection();
@@ -7175,7 +7225,7 @@ const tick = (now: number, delta: number) => {
   const visibleBounds = getVisibleGroundBounds(camera);
   updateGroundFromBounds(visibleBounds);
   updateWaterFromBounds(visibleBounds);
-  if (debugViewState.worldGrid) {
+  if (debugViewState.worldGrid || gameState.buildMode !== 'off') {
     worldGrid.update(visibleBounds);
   }
 

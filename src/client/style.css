@@ -339,6 +339,98 @@ canvas {
   pointer-events: none;
 }
 
+.hud.is-build-mode .hud-corner--bottom-right,
+.hud.is-build-mode .hud-corner--bottom-left,
+.hud.is-build-mode .hud-corner--top-left {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease-out;
+}
+
+.build-mode-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: var(--hud-padding-top) var(--hud-padding) var(--hud-padding);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.build-mode-overlay .build-mode-cancel {
+  justify-self: center;
+  align-self: end;
+}
+
+.hud.is-build-mode .build-mode-overlay {
+  opacity: 1;
+}
+
+.build-mode-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.build-mode-title {
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.build-mode-hint {
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1;
+  color: #ffffff;
+  opacity: 0.6;
+}
+
+.build-mode-cancel {
+  pointer-events: auto;
+  min-width: 120px;
+  min-height: 48px;
+  padding: 12px 28px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    background 0.15s ease-out,
+    transform 0.1s ease-out;
+}
+
+.build-mode-cancel:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.build-mode-cancel:active {
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.viewport-fog.is-build-mode {
+  background:
+    linear-gradient(rgba(20, 45, 100, 0.22), rgba(20, 45, 100, 0.22)),
+    radial-gradient(
+      ellipse at var(--fog-center-x) var(--fog-center-y),
+      rgba(16, 21, 26, 0) 0%,
+      rgba(16, 21, 26, 0) 36%,
+      rgba(16, 21, 26, 0.14) 56%,
+      rgba(16, 21, 26, 0.32) 78%,
+      rgba(16, 21, 26, 0.52) 100%
+    );
+  transition: background 0.3s ease-out;
+}
+
 .debug-menu {
   position: fixed;
   top: 20px;
