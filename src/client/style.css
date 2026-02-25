@@ -149,7 +149,7 @@ canvas {
   overflow: visible;
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, calc(-50% + 80px)) rotate(6deg);
+  transform: translate(-50%, calc(-50% + 80px)) rotate(3deg);
   visibility: hidden;
   background:
     linear-gradient(
