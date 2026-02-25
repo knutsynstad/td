@@ -212,7 +212,11 @@ export const runLeaderLoop = async (
         break;
       }
 
-      await refreshLeaderLock(LEADER_LOCK_TTL_SECONDS);
+      const stillRefreshed = await refreshLeaderLock(ownerToken, LEADER_LOCK_TTL_SECONDS);
+      if (!stillRefreshed) {
+        console.warn('Leader lock lost during refresh', { ownerToken });
+        break;
+      }
 
       const tickStartMs = Date.now();
       const nowMs = tickStartMs;

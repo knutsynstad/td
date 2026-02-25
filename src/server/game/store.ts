@@ -825,14 +825,11 @@ export const acquireLeaderLock = async (
   ttlSeconds: number
 ): Promise<boolean> => {
   const keys = getGameRedisKeys();
-  try {
-    await redis.set(keys.leaderLock, ownerToken, {
-      expiration: new Date(Date.now() + ttlSeconds * 1000),
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  const result = await redis.set(keys.leaderLock, ownerToken, {
+    expiration: new Date(Date.now() + ttlSeconds * 1000),
+    nx: true,
+  });
+  return Boolean(result);
 };
 
 export const verifyLeaderLock = async (
@@ -844,20 +841,29 @@ export const verifyLeaderLock = async (
 };
 
 export const refreshLeaderLock = async (
+  ownerToken: string,
   ttlSeconds: number
-): Promise<void> => {
+): Promise<boolean> => {
   const keys = getGameRedisKeys();
+  const current = await redis.get(keys.leaderLock);
+  if (current !== ownerToken) return false;
   await redis.expire(keys.leaderLock, ttlSeconds);
+  return true;
 };
 
 export const releaseLeaderLock = async (
   ownerToken: string
 ): Promise<void> => {
   const keys = getGameRedisKeys();
+  const tx = await redis.watch(keys.leaderLock);
   const current = await redis.get(keys.leaderLock);
-  if (current === ownerToken) {
-    await redis.del(keys.leaderLock);
+  if (current !== ownerToken) {
+    await tx.unwatch();
+    return;
   }
+  await tx.multi();
+  await tx.del(keys.leaderLock);
+  await tx.exec();
 };
 
 export const markTickPublish = async (tickSeq: number): Promise<void> => {
