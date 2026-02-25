@@ -13,7 +13,7 @@
   -webkit-font-smoothing: antialiased;
   --hud-button-size: 72px;
   --hud-minimap-size: var(--hud-button-size);
-  --hud-minimap-expanded-size: min(72vw, 620px);
+  --hud-minimap-expanded-size: min(calc(100vw - 64px), calc(100vh - 64px));
   --hud-minimap-collapsed-offset: 32px;
   --hud-minimap-paper: rgba(232, 208, 160, 0.97);
   --hud-minimap-paper-dark: rgba(177, 139, 84, 0.5);
@@ -1073,6 +1073,7 @@ canvas {
   top: 50%;
   width: var(--hud-minimap-expanded-size);
   height: var(--hud-minimap-expanded-size);
+  transform: translate(-50%, -50%) rotate(1deg);
   z-index: 2600;
   box-shadow:
     3px 3px 2px rgba(128, 97, 54, 0.5),
