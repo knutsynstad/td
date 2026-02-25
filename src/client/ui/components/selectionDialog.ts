@@ -221,7 +221,7 @@ export class SelectionDialog {
       });
     }
     if (towerDetails) {
-      infoItems.push({ label: 'DPS', value: towerDetails.dps.toFixed(1) });
+      infoItems.push({ label: 'Damage per second', value: towerDetails.dps.toFixed(1) });
       infoItems.push({
         label: 'Kills',
         value: String(towerDetails.killCount),

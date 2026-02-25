@@ -5418,8 +5418,9 @@ const setMinimapExpanded = (expanded: boolean) => {
   isMinimapExpanded = expanded;
   minimapEmbellishTargetAlpha = expanded ? 1 : 0;
   minimapWrapEl.classList.toggle('is-expanded', expanded);
+  if (expanded) minimapWrapEl.classList.remove('is-hover');
   hudStatusStackEl.style.display = expanded ? 'none' : '';
-  hudEnergyEl.style.display = expanded ? 'none' : '';
+  updateHudEnergyVisibility();
   hudActionsEl.style.display = expanded ? 'none' : '';
   minimapToggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   minimapToggleBtn.setAttribute(
@@ -5706,10 +5707,27 @@ const setSelectionDialogHudMode = (dialogVisible: boolean) => {
   hudEl.classList.toggle('is-dialog-mode', dialogVisible);
 };
 
+const updateHudEnergyVisibility = () => {
+  if (isMinimapExpanded) {
+    hudEnergyEl.style.display = 'none';
+    return;
+  }
+  if (isSelectionDialogHudMode) {
+    const [collider] = selectedStructures.values();
+    const type = collider?.type;
+    const hideForSelection =
+      type === 'tree' || type === 'rock' || type === 'wall';
+    hudEnergyEl.style.display = hideForSelection ? 'none' : '';
+    return;
+  }
+  hudEnergyEl.style.display = '';
+};
+
 const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size;
   if (selectedCount === 0) {
     setSelectionDialogHudMode(false);
+    updateHudEnergyVisibility();
     hudActionsEl.style.display = isMinimapExpanded ? 'none' : '';
     selectionDialog.update({
       selectedCount: 0,
@@ -5736,6 +5754,7 @@ const updateSelectionDialog = () => {
   }
   const inRange = getSelectedInRange();
   setSelectionDialogHudMode(inRange.length > 0);
+  updateHudEnergyVisibility();
   hudActionsEl.style.display = isMinimapExpanded
     ? 'none'
     : selectedCount > 0 && inRange.length > 0
@@ -5869,6 +5888,12 @@ minimapToggleBtn.addEventListener('click', () => {
   if (isMinimapExpanded) return;
   clearSelection();
   setMinimapExpanded(true);
+});
+minimapWrapEl.addEventListener('pointerenter', () => {
+  if (!isMinimapExpanded) minimapWrapEl.classList.add('is-hover');
+});
+minimapWrapEl.addEventListener('pointerleave', () => {
+  minimapWrapEl.classList.remove('is-hover');
 });
 minimapWrapEl.addEventListener('transitionend', (event) => {
   if (event.propertyName !== 'width' && event.propertyName !== 'height') return;
