@@ -30,3 +30,18 @@ test('heartbeat rejects missing playerId', async () => {
   });
   expect(response.status).toBe(400);
 });
+
+test('preview returns wave, mobsLeft, playerCount', async () => {
+  const response = await app().request('/api/game/preview', {
+    method: 'GET',
+  });
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    wave: number;
+    mobsLeft: number;
+    playerCount: number;
+  };
+  expect(typeof body.wave).toBe('number');
+  expect(typeof body.mobsLeft).toBe('number');
+  expect(typeof body.playerCount).toBe('number');
+});

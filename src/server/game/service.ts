@@ -525,6 +525,21 @@ export const heartbeatGame = async (
 
 export const getCoinBalance = async (): Promise<number> => getCoins(Date.now());
 
+export type GamePreview = {
+  wave: number;
+  mobsLeft: number;
+  playerCount: number;
+};
+
+export const getGamePreview = async (): Promise<GamePreview> => {
+  const world = await loadWorldState();
+  return {
+    wave: world.wave.wave,
+    mobsLeft: Object.keys(world.mobs).length,
+    playerCount: Object.keys(world.players).length,
+  };
+};
+
 export const resyncGame = async (_playerId?: string): Promise<ResyncResponse> => {
   const world = await loadWorldState();
   const staticSync = ensureStaticMap(world);

@@ -14,3 +14,9 @@ export type CastleCoinsWithdrawResponse = {
   withdrawn: number;
   castleCoins: number;
 };
+
+export type GamePreviewResponse = {
+  wave: number;
+  mobsLeft: number;
+  playerCount: number;
+};

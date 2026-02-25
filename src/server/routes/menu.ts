@@ -22,6 +22,10 @@ menuRoutes.post('/create-post', async (c) => {
       subredditName,
       title: 'Tower Defense',
       entry: 'default',
+      splash: {
+        backgroundUri: 'transparent.png',
+        appDisplayName: 'Defend the Castle',
+      },
     });
     return c.json<MenuActionResponse>({
       showToast: 'Created a new Tower Defense post',

@@ -15,10 +15,12 @@ import type {
   CastleCoinsBalanceResponse,
   CastleCoinsDepositResponse,
   CastleCoinsWithdrawResponse,
+  GamePreviewResponse,
 } from '../../shared/api';
 import {
   applyCommand,
   getCoinBalance,
+  getGamePreview,
   heartbeatGame,
   joinGame,
   resetGame,
@@ -118,6 +120,18 @@ api.get('/game/coins', async (c) => {
     type: 'coinBalance',
     coins,
   });
+});
+
+api.get('/game/preview', async (c) => {
+  try {
+    const preview = await getGamePreview();
+    return c.json<GamePreviewResponse>(preview);
+  } catch (error) {
+    return c.json<GamePreviewResponse>(
+      { wave: 0, mobsLeft: 0, playerCount: 0 },
+      200
+    );
+  }
 });
 
 api.post('/game/resync', async (c) => {
