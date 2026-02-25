@@ -11,7 +11,7 @@
     "dev:devvit": "devvit playtest",
     "dev:server": "vite build --watch",
     "dev:vite": "vite --port 7474",
-    "icon:gen": "vite --open /tools/icon-generator.html",
+    "icon:gen": "vite --config vite.icon.config.ts",
     "launch": "npm run build && npm run deploy && devvit publish",
     "lint": "eslint ./src",
     "lint:fix": "eslint --fix ./src",

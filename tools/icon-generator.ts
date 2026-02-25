@@ -10,12 +10,13 @@ type Preset = {
   label: string;
   modelUrl: string;
   outputName: string;
+  /** Scale multiplier for model size in frame (default 1) */
+  scale?: number;
 };
 
-const ICON_SIZE = 128;
-const OUTLINE_PX = 8;
-const MARGIN_PX = 2;
-const FILL_RATIO = 1 - (OUTLINE_PX + MARGIN_PX) / (ICON_SIZE * 0.5);
+const ICON_SIZE = 256;
+/** Frame fill (1 = edge-to-edge, 0.97 = tiny padding). */
+const FILL_RATIO = 0.97;
 
 const presets: Preset[] = [
   {
@@ -23,6 +24,7 @@ const presets: Preset[] = [
     label: 'Coin',
     modelUrl: coinModelUrl,
     outputName: 'coin-icon.png',
+    scale: 1.2,
   },
   {
     id: 'tower',
@@ -96,8 +98,7 @@ app.innerHTML = `
       margin: 6px 0 12px;
     }
     .icon-generator__preview-wrap {
-      display: inline-grid;
-      place-items: center;
+      display: inline-block;
       width: 256px;
       height: 256px;
       background-image:
@@ -107,12 +108,10 @@ app.innerHTML = `
         linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.06) 75%);
       background-size: 24px 24px;
       background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
     }
     .icon-generator__preview {
-      width: 128px;
-      height: 128px;
+      width: 256px;
+      height: 256px;
       image-rendering: auto;
       display: block;
     }
@@ -147,13 +146,15 @@ app.innerHTML = `
     <div class="icon-generator__actions">
       <button id="renderBtn" type="button">Render</button>
       <button id="downloadBtn" type="button">Download PNG</button>
+      <button id="saveBtn" type="button">Save to project</button>
+      <button id="saveAllBtn" type="button">Save all presets</button>
     </div>
     <div class="icon-generator__preview-wrap">
-      <canvas id="previewCanvas" class="icon-generator__preview" width="128" height="128"></canvas>
+      <canvas id="previewCanvas" class="icon-generator__preview" width="256" height="256"></canvas>
     </div>
     <div id="statusText" class="icon-generator__status"></div>
     <div class="icon-generator__hint">
-      Standalone asset tool. Generated PNGs should be saved to <code>src/client/assets/ui/</code>.
+      Saves go to <code>src/client/assets/ui/</code>
     </div>
   </section>
 `;
@@ -165,6 +166,8 @@ const modelUrlInput =
   document.querySelector<HTMLInputElement>('#modelUrlInput');
 const renderBtn = document.querySelector<HTMLButtonElement>('#renderBtn');
 const downloadBtn = document.querySelector<HTMLButtonElement>('#downloadBtn');
+const saveBtn = document.querySelector<HTMLButtonElement>('#saveBtn');
+const saveAllBtn = document.querySelector<HTMLButtonElement>('#saveAllBtn');
 const previewCanvas =
   document.querySelector<HTMLCanvasElement>('#previewCanvas');
 const statusText = document.querySelector<HTMLDivElement>('#statusText');
@@ -174,6 +177,8 @@ if (
   !modelUrlInput ||
   !renderBtn ||
   !downloadBtn ||
+  !saveBtn ||
+  !saveAllBtn ||
   !previewCanvas ||
   !statusText
 ) {
@@ -199,26 +204,34 @@ outputNameInput.value = urlParams.get('out') ?? initialPreset.outputName;
 
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+const rendererCanvas = document.createElement('canvas');
 const renderer = new THREE.WebGLRenderer({
-  canvas: previewCanvas,
+  canvas: rendererCanvas,
   antialias: true,
   alpha: true,
   preserveDrawingBuffer: true,
+  powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(1);
 renderer.setSize(ICON_SIZE, ICON_SIZE, false);
 renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.5;
 
-const ambient = new THREE.AmbientLight(0xffffff, 1.35);
+const ambient = new THREE.AmbientLight(0xffffff, 0.85);
 scene.add(ambient);
-const keyLight = new THREE.DirectionalLight(0xfff7e5, 1.65);
-keyLight.position.set(1.9, 2.6, 1.8);
+
+const keyLight = new THREE.DirectionalLight(0xfff8ed, 2.8);
+keyLight.position.set(1.8, 2.2, 2.5);
 scene.add(keyLight);
-const rimLight = new THREE.DirectionalLight(0xe8f0ff, 0.75);
-rimLight.position.set(-1.5, 1.2, -2);
+
+const fillLight = new THREE.DirectionalLight(0xf0f8ff, 1.4);
+fillLight.position.set(-1.2, 0.8, 2);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xe0eaff, 1.4);
+rimLight.position.set(-0.8, 1.2, -2);
 scene.add(rimLight);
 
 const root = new THREE.Group();
@@ -228,15 +241,18 @@ const gltfLoader = new GLTFLoader();
 const tmpBox = new THREE.Box3();
 const tmpCenter = new THREE.Vector3();
 const tmpSize = new THREE.Vector3();
-const isoAngle = Math.PI / 6;
-const isoRot = Math.PI / 4;
+const isoAngle = Math.PI / 8;
+const isoRot = Math.PI / 6;
 const isoDirection = new THREE.Vector3(
   Math.cos(isoRot) * Math.cos(isoAngle),
   Math.sin(isoAngle),
   Math.sin(isoRot) * Math.cos(isoAngle)
 ).normalize();
 
-const normalizeModel = (source: THREE.Object3D) => {
+const normalizeModel = (
+  source: THREE.Object3D,
+  scaleMultiplier = 1
+) => {
   const model = source.clone(true);
   tmpBox.setFromObject(model);
   if (tmpBox.isEmpty()) return model;
@@ -247,7 +263,7 @@ const normalizeModel = (source: THREE.Object3D) => {
   tmpBox.getSize(tmpSize);
   const maxAxis = Math.max(tmpSize.x, tmpSize.y, tmpSize.z, 0.001);
   const desiredAxis = 1;
-  const uniformScale = desiredAxis / maxAxis;
+  const uniformScale = (desiredAxis / maxAxis) * scaleMultiplier;
   model.scale.multiplyScalar(uniformScale);
   model.traverse((node) => {
     if (!(node instanceof THREE.Mesh)) return;
@@ -263,114 +279,156 @@ const normalizeModel = (source: THREE.Object3D) => {
       material.colorWrite = true;
       material.needsUpdate = true;
     }
-    node.castShadow = true;
-    node.receiveShadow = true;
+    node.castShadow = false;
+    node.receiveShadow = false;
   });
   return model;
 };
 
-const createOutlinedModel = (source: THREE.Object3D) => {
-  const model = source.clone(true);
-  const outline = source.clone(true);
-  outline.scale.multiplyScalar(1.12);
-  outline.renderOrder = 0;
-  outline.traverse((node) => {
-    if (!(node instanceof THREE.Mesh)) return;
-    const outlineMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      side: THREE.BackSide,
-      transparent: false,
-      depthTest: true,
-      depthWrite: true,
-    });
-    node.material = outlineMaterial;
-    node.castShadow = false;
-    node.receiveShadow = false;
-  });
-  model.renderOrder = 1;
-  const wrapped = new THREE.Group();
-  wrapped.add(outline);
-  wrapped.add(model);
-  return wrapped;
+const OUTLINE_THICKNESS = 5;
+
+/** 2D screen-space outline: dilate silhouette, outline = dilated - original. */
+const applyOutline2D = (pixels: Uint8Array, size: number) => {
+  const alpha = new Uint8Array(size * size);
+  for (let i = 0; i < size * size; i += 1) {
+    alpha[i] = pixels[i * 4 + 3] > 127 ? 255 : 0;
+  }
+  const dilated = new Uint8Array(alpha);
+  for (let r = 0; r < OUTLINE_THICKNESS; r += 1) {
+    const prev = new Uint8Array(dilated);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const i = y * size + x;
+        if (prev[i]) continue;
+        const hasNeighbor = [
+          [-1, 0], [1, 0], [0, -1], [0, 1],
+          [-1, -1], [-1, 1], [1, -1], [1, 1],
+        ].some(([dx, dy]) => {
+          const nx = x + dx;
+          const ny = y + dy;
+          return nx >= 0 && nx < size && ny >= 0 && ny < size && prev[ny * size + nx];
+        });
+        if (hasNeighbor) dilated[i] = 255;
+      }
+    }
+  }
+  for (let i = 0; i < size * size; i += 1) {
+    if (dilated[i] && !alpha[i]) {
+      pixels[i * 4] = 0;
+      pixels[i * 4 + 1] = 0;
+      pixels[i * 4 + 2] = 0;
+      pixels[i * 4 + 3] = 255;
+    }
+  }
 };
+
+const createOutlinedModel = (source: THREE.Object3D) => source.clone(true);
+
+const RENDER_SCALE = 8;
+
+const renderToOutlinedPixels = () => {
+  const w = ICON_SIZE * RENDER_SCALE;
+  const h = ICON_SIZE * RENDER_SCALE;
+  const renderTarget = new THREE.WebGLRenderTarget(w, h, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    depthBuffer: true,
+    stencilBuffer: false,
+  });
+  renderer.setSize(w, h, false);
+  const previousTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(renderTarget);
+  renderer.clear();
+  renderer.render(scene, camera);
+  const hiRes = new Uint8Array(w * h * 4);
+  renderer.readRenderTargetPixels(renderTarget, 0, 0, w, h, hiRes);
+  renderer.setRenderTarget(previousTarget);
+  renderer.setSize(ICON_SIZE, ICON_SIZE, false);
+  renderTarget.dispose();
+
+  const pixels = new Uint8Array(ICON_SIZE * ICON_SIZE * 4);
+  const n = RENDER_SCALE * RENDER_SCALE;
+  for (let oy = 0; oy < ICON_SIZE; oy += 1) {
+    for (let ox = 0; ox < ICON_SIZE; ox += 1) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let dy = 0; dy < RENDER_SCALE; dy += 1) {
+        for (let dx = 0; dx < RENDER_SCALE; dx += 1) {
+          const sx = ox * RENDER_SCALE + dx;
+          const sy = oy * RENDER_SCALE + dy;
+          const i = sy * w * 4 + sx * 4;
+          r += hiRes[i];
+          g += hiRes[i + 1];
+          b += hiRes[i + 2];
+          a += hiRes[i + 3];
+        }
+      }
+      const o = oy * ICON_SIZE * 4 + ox * 4;
+      pixels[o] = r / n;
+      pixels[o + 1] = g / n;
+      pixels[o + 2] = b / n;
+      pixels[o + 3] = a / n;
+    }
+  }
+  applyOutline2D(pixels, ICON_SIZE);
+  return pixels;
+};
+
+const pixelsToDataUrl = (pixels: Uint8Array) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = ICON_SIZE;
+  canvas.height = ICON_SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Unable to create 2D context');
+  const imageData = ctx.createImageData(ICON_SIZE, ICON_SIZE);
+  const out = imageData.data;
+  for (let y = 0; y < ICON_SIZE; y += 1) {
+    const srcY = ICON_SIZE - 1 - y;
+    const srcRowOffset = srcY * ICON_SIZE * 4;
+    const dstRowOffset = y * ICON_SIZE * 4;
+    out.set(pixels.subarray(srcRowOffset, srcRowOffset + ICON_SIZE * 4), dstRowOffset);
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+};
+
+const viewPoint = new THREE.Vector3();
 
 const fitCameraToModel = (target: THREE.Object3D) => {
   tmpBox.setFromObject(target);
   if (tmpBox.isEmpty()) return;
-
-  const corners: THREE.Vector3[] = [];
-  for (const x of [tmpBox.min.x, tmpBox.max.x]) {
-    for (const y of [tmpBox.min.y, tmpBox.max.y]) {
-      for (const z of [tmpBox.min.z, tmpBox.max.z]) {
-        corners.push(new THREE.Vector3(x, y, z));
-      }
-    }
-  }
 
   const radius = tmpBox.getBoundingSphere(new THREE.Sphere()).radius;
   camera.position.copy(isoDirection).multiplyScalar(Math.max(2.6, radius * 5));
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld(true);
 
+  // Use all mesh vertices for accurate extent (bbox corners can under-report for thin/curved shapes)
   let maxExtent = 0.001;
-  for (const corner of corners) {
-    const viewCorner = corner.clone().applyMatrix4(camera.matrixWorldInverse);
-    maxExtent = Math.max(
-      maxExtent,
-      Math.abs(viewCorner.x),
-      Math.abs(viewCorner.y)
-    );
-  }
+  target.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || !obj.geometry) return;
+    const geo = obj.geometry;
+    const posAttr = geo.getAttribute('position');
+    if (!posAttr) return;
+    const matrix = obj.matrixWorld;
+    for (let i = 0; i < posAttr.count; i += 1) {
+      viewPoint.fromBufferAttribute(posAttr, i).applyMatrix4(matrix);
+      viewPoint.applyMatrix4(camera.matrixWorldInverse);
+      maxExtent = Math.max(
+        maxExtent,
+        Math.abs(viewPoint.x),
+        Math.abs(viewPoint.y)
+      );
+    }
+  });
 
-  const safeFillRatio = Math.max(0.5, Math.min(FILL_RATIO, 0.92));
-  camera.zoom = safeFillRatio / maxExtent;
+  camera.zoom = FILL_RATIO / maxExtent;
   camera.updateProjectionMatrix();
 };
 
-const exportIconDataUrl = () => {
-  const renderTarget = new THREE.WebGLRenderTarget(ICON_SIZE, ICON_SIZE, {
-    format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
-    depthBuffer: true,
-    stencilBuffer: false,
-  });
-  const previousTarget = renderer.getRenderTarget();
-  renderer.setRenderTarget(renderTarget);
-  renderer.clear();
-  renderer.render(scene, camera);
-  const pixels = new Uint8Array(ICON_SIZE * ICON_SIZE * 4);
-  renderer.readRenderTargetPixels(
-    renderTarget,
-    0,
-    0,
-    ICON_SIZE,
-    ICON_SIZE,
-    pixels
-  );
-  renderer.setRenderTarget(previousTarget);
-  renderTarget.dispose();
-
-  const exportCanvas = document.createElement('canvas');
-  exportCanvas.width = ICON_SIZE;
-  exportCanvas.height = ICON_SIZE;
-  const exportCtx = exportCanvas.getContext('2d');
-  if (!exportCtx) {
-    throw new Error('Unable to create export canvas context.');
-  }
-  const imageData = exportCtx.createImageData(ICON_SIZE, ICON_SIZE);
-  const out = imageData.data;
-  for (let y = 0; y < ICON_SIZE; y += 1) {
-    const srcY = ICON_SIZE - 1 - y;
-    const srcRowOffset = srcY * ICON_SIZE * 4;
-    const dstRowOffset = y * ICON_SIZE * 4;
-    out.set(
-      pixels.subarray(srcRowOffset, srcRowOffset + ICON_SIZE * 4),
-      dstRowOffset
-    );
-  }
-  exportCtx.putImageData(imageData, 0, 0);
-  return exportCanvas.toDataURL('image/png');
-};
+const exportIconDataUrl = () => pixelsToDataUrl(renderToOutlinedPixels());
 
 let lastRenderName = outputNameInput.value.trim() || 'item-icon.png';
 
@@ -384,12 +442,25 @@ const renderModel = async () => {
   try {
     const gltf = await gltfLoader.loadAsync(modelUrl);
     root.clear();
-    const model = normalizeModel(gltf.scene);
+    const preset = presetById.get(presetSelect.value);
+    const scaleMultiplier = preset?.scale ?? 1;
+    const model = normalizeModel(gltf.scene, scaleMultiplier);
     root.add(model);
-    const wrapped = createOutlinedModel(model);
-    root.add(wrapped);
-    fitCameraToModel(wrapped);
-    renderer.render(scene, camera);
+    root.add(createOutlinedModel(model));
+    fitCameraToModel(root);
+    const pixels = renderToOutlinedPixels();
+    const ctx = previewCanvas.getContext('2d');
+    if (ctx) {
+      const imageData = ctx.createImageData(ICON_SIZE, ICON_SIZE);
+      for (let y = 0; y < ICON_SIZE; y += 1) {
+        const srcY = ICON_SIZE - 1 - y;
+        imageData.data.set(
+          pixels.subarray(srcY * ICON_SIZE * 4, (srcY + 1) * ICON_SIZE * 4),
+          y * ICON_SIZE * 4
+        );
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
     lastRenderName = outputNameInput.value.trim() || 'item-icon.png';
     statusText.textContent = `Rendered ${lastRenderName} (${ICON_SIZE}x${ICON_SIZE}, transparent).`;
   } catch (error) {
@@ -418,6 +489,59 @@ const downloadPng = async () => {
   }
 };
 
+const saveToProject = async (filename: string, dataUrl: string) => {
+  const res = await fetch('/__save-icon', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, dataUrl }),
+  });
+  const json = (await res.json()) as { path?: string; error?: string };
+  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  return json.path;
+};
+
+const saveCurrentToProject = async () => {
+  if (!root.children[0]) {
+    await renderModel();
+    if (!root.children[0]) return;
+  }
+  const filename = outputNameInput.value.trim() || lastRenderName || 'item-icon.png';
+  try {
+    statusText.textContent = `Saving ${filename}...`;
+    const path = await saveToProject(filename, exportIconDataUrl());
+    statusText.textContent = `Saved to ${path}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    statusText.textContent = `Save failed: ${message}`;
+  }
+};
+
+const saveAllPresetsToProject = async () => {
+  const failed: string[] = [];
+  let saved = 0;
+  for (const preset of presets) {
+    try {
+      presetSelect.value = preset.id;
+      modelUrlInput.value = preset.modelUrl;
+      outputNameInput.value = preset.outputName;
+      statusText.textContent = `Rendering ${preset.outputName}...`;
+      await renderModel();
+      if (!root.children[0]) {
+        failed.push(preset.outputName);
+        continue;
+      }
+      await saveToProject(preset.outputName, exportIconDataUrl());
+      saved += 1;
+    } catch {
+      failed.push(preset.outputName);
+    }
+  }
+  statusText.textContent =
+    failed.length === 0
+      ? `Saved ${saved} icons to src/client/assets/ui/`
+      : `Saved ${saved}. Failed: ${failed.join(', ')}`;
+};
+
 presetSelect.addEventListener('change', () => {
   const preset = presetById.get(presetSelect.value);
   if (!preset) return;
@@ -433,5 +557,8 @@ renderBtn.addEventListener('click', () => {
 downloadBtn.addEventListener('click', () => {
   void downloadPng();
 });
+
+saveBtn.addEventListener('click', () => void saveCurrentToProject());
+saveAllBtn.addEventListener('click', () => void saveAllPresetsToProject());
 
 void renderModel();
