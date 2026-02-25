@@ -296,7 +296,7 @@ app.innerHTML = `
             <span id="towerCount" class="hud-badge">${buildCoinCostMarkup(ENERGY_COST_TOWER, 'Coin cost')}</span>
           </button>
         </div>
-        <button id="shootButton" class="shoot-button">Shoot</button>
+        <button id="shootButton" class="shoot-button"><span class="button-label">Shoot</span></button>
       </div>
     </div>
     <div class="hud-corner hud-corner--bottom-left">

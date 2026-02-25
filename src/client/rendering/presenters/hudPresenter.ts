@@ -88,10 +88,10 @@ export const updateHud = (
     1,
     state.shootCooldown / opts.shootCooldownMax
   );
-  const clipPercent = (1 - cooldownPercent) * 100;
+  const readyPercent = (1 - cooldownPercent) * 100;
   elements.shootButton.style.setProperty(
     '--cooldown-clip',
-    `inset(0 0 0 ${clipPercent}%)`
+    `inset(0 ${100 - readyPercent}% 0 0)`
   );
   elements.shootButton.classList.toggle('unlocked', cooldownPercent <= 0.01);
   elements.buildWallBtn.style.setProperty(
