@@ -433,7 +433,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10151a);
 
 const aspect = window.innerWidth / window.innerHeight;
-const orthoSize = 12;
+const orthoSize = 10;
 const camera = new THREE.OrthographicCamera(
   -orthoSize * aspect,
   orthoSize * aspect,
