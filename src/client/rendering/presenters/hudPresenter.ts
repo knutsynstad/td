@@ -1,5 +1,3 @@
-import { buildCoinCostMarkup } from '../../ui/components/coinCost';
-
 type HudElements = {
   wallCountEl: HTMLSpanElement;
   towerCountEl: HTMLSpanElement;
@@ -39,14 +37,6 @@ export const updateHud = (
   state: HudState,
   opts: HudOptions
 ): void => {
-  elements.wallCountEl.innerHTML = buildCoinCostMarkup(
-    opts.energyCostWall,
-    'Coin cost'
-  );
-  elements.towerCountEl.innerHTML = buildCoinCostMarkup(
-    opts.energyCostTower,
-    'Coin cost'
-  );
   elements.energyCountEl.textContent = `${Math.floor(state.energy)}`;
   elements.buildWallBtn.disabled = state.energy < opts.energyCostWall;
   elements.buildTowerBtn.disabled = state.energy < opts.energyCostTower;
