@@ -338,6 +338,7 @@ const nextWaveSecondaryEl = nextWaveRowEl.querySelector<HTMLDivElement>(
   '.hud-status__secondary'
 )!;
 const eventBannerEl = document.querySelector<HTMLDivElement>('#eventBanner')!;
+const hudEl = document.getElementById('hud')!;
 const hudActionsEl = document.querySelector<HTMLDivElement>('.hud-actions')!;
 const hudStatusStackEl =
   document.querySelector<HTMLDivElement>('.hud-status-stack')!;
@@ -5697,10 +5698,18 @@ setDebugMenuOpen(false);
 
 const SELECTION_DIALOG_UPDATE_INTERVAL_MS = 100;
 let nextSelectionDialogUpdateAt = 0;
+let isSelectionDialogHudMode = false;
+
+const setSelectionDialogHudMode = (dialogVisible: boolean) => {
+  if (isSelectionDialogHudMode === dialogVisible) return;
+  isSelectionDialogHudMode = dialogVisible;
+  hudEl.classList.toggle('is-dialog-mode', dialogVisible);
+};
 
 const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size;
   if (selectedCount === 0) {
+    setSelectionDialogHudMode(false);
     hudActionsEl.style.display = isMinimapExpanded ? 'none' : '';
     selectionDialog.update({
       selectedCount: 0,
@@ -5726,6 +5735,7 @@ const updateSelectionDialog = () => {
     return;
   }
   const inRange = getSelectedInRange();
+  setSelectionDialogHudMode(inRange.length > 0);
   hudActionsEl.style.display = isMinimapExpanded
     ? 'none'
     : selectedCount > 0 && inRange.length > 0
@@ -6220,8 +6230,11 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   }
   const point = getGroundPoint(event);
   if (!point) return;
+  const hadSelection = selectedStructures.size > 0;
   clearSelection();
-  setMoveTarget(point);
+  if (!hadSelection) {
+    setMoveTarget(point);
+  }
 });
 
 renderer.domElement.addEventListener('pointermove', (event) => {

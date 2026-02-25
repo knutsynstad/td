@@ -1,7 +1,4 @@
-import {
-  getTowerType,
-  getTowerUpgrade,
-} from '../../domains/gameplay/towers/towerTypes';
+import { getTowerType } from '../../domains/gameplay/towers/towerTypes';
 import type {
   TowerTypeId,
   TowerUpgradeId,
@@ -61,6 +58,7 @@ type SelectionDialogActions = {
 
 export class SelectionDialog {
   private root: HTMLDivElement;
+  private formSlot: HTMLDivElement;
   private state: SelectionDialogState;
   private actions: SelectionDialogActions;
   private lastRenderKey = '';
@@ -77,6 +75,16 @@ export class SelectionDialog {
     this.actions = actions;
     this.root = document.createElement('div');
     this.root.className = 'selection-dialog';
+    const tapeTop = document.createElement('div');
+    tapeTop.className = 'selection-dialog__tape selection-dialog__tape--top';
+    tapeTop.setAttribute('aria-hidden', 'true');
+    const tapeBottom = document.createElement('div');
+    tapeBottom.className =
+      'selection-dialog__tape selection-dialog__tape--bottom';
+    tapeBottom.setAttribute('aria-hidden', 'true');
+    this.formSlot = document.createElement('div');
+    this.formSlot.className = 'selection-dialog__form';
+    this.root.append(tapeTop, this.formSlot, tapeBottom);
     this.root.addEventListener('click', this.handleClick);
     parent.appendChild(this.root);
     this.render();
@@ -130,8 +138,8 @@ export class SelectionDialog {
       this.lastRenderKey = '';
       if (!this.isHidden) {
         this.isHidden = true;
-        this.root.style.display = 'none';
-        this.root.innerHTML = '';
+        this.root.classList.remove('is-visible');
+        this.formSlot.innerHTML = '';
       }
       return;
     }
@@ -168,22 +176,18 @@ export class SelectionDialog {
       canDelete,
       canRepair,
       repairCost,
-      repairStatus,
     } = this.state;
     if (selectedCount === 0 || inRangeCount === 0) {
       this.isHidden = true;
-      this.root.style.display = 'none';
-      this.root.innerHTML = '';
+      this.root.classList.remove('is-visible');
+      this.formSlot.innerHTML = '';
       return;
     }
     this.isHidden = false;
-    this.root.style.display = '';
+    this.root.classList.add('is-visible');
     const typeLabel = selectedTowerTypeId
       ? getTowerType(selectedTowerTypeId).label
       : selectedStructureLabel;
-    const titleMarkup = buildingCoords
-      ? `<span class="selection-dialog__title-main">${typeLabel}</span> <span class="selection-dialog__coords">${buildingCoords.x},${buildingCoords.z}</span>`
-      : `<span class="selection-dialog__title-main">${typeLabel}</span>`;
     const upgradesById = new Map(
       upgradeOptions.map((option) => [option.id, option])
     );
@@ -192,103 +196,85 @@ export class SelectionDialog {
       const rounded = Number(value.toFixed(maxDecimals));
       return String(rounded);
     };
-    const summaryItems: Array<{ label: string; value: string }> = [];
+    const infoItems: Array<{ label: string; value: string }> = [];
+    if (buildingCoords) {
+      infoItems.push({
+        label: 'Coords',
+        value: `${buildingCoords.x},${buildingCoords.z}`,
+      });
+    }
     if (isBankSelected && bankTotal !== null) {
-      summaryItems.push({
+      infoItems.push({
         label: 'Coin Balance',
         value: `${Math.floor(bankTotal)}`,
       });
     }
     if (buildingHealth) {
-      summaryItems.push({
+      const hp = Math.max(0, Math.ceil(buildingHealth.hp));
+      const pct =
+        buildingHealth.maxHp > 0
+          ? Math.round((buildingHealth.hp / buildingHealth.maxHp) * 100)
+          : 100;
+      infoItems.push({
         label: 'Health',
-        value: `${Math.max(0, Math.ceil(buildingHealth.hp))}/${buildingHealth.maxHp}`,
+        value: `${hp} (${pct}%)`,
       });
     }
     if (towerDetails) {
-      summaryItems.push({ label: 'DPS', value: towerDetails.dps.toFixed(1) });
-      summaryItems.push({
+      infoItems.push({ label: 'DPS', value: towerDetails.dps.toFixed(1) });
+      infoItems.push({
         label: 'Kills',
         value: String(towerDetails.killCount),
       });
     }
-    const summaryMarkup = summaryItems.length
-      ? `<div class="selection-dialog__summary-row">
-          ${summaryItems
-            .map(
-              (item) => `
-            <div class="selection-dialog__summary-item">
-              <div class="selection-dialog__summary-value">${item.value}</div>
-              <div class="selection-dialog__summary-label">${item.label}</div>
-            </div>
-          `
-            )
-            .join('')}
-        </div>`
-      : '';
+    const infoListMarkup =
+      infoItems.length > 0
+        ? `<ul class="selection-dialog__info-list">
+            ${infoItems
+              .map(
+                (item) =>
+                  `<li class="selection-dialog__info-item">${item.label}: ${item.value}</li>`
+              )
+              .join('')}
+          </ul>`
+        : '';
     const statsMarkup =
       !isBankSelected && towerDetails
-        ? `<div class="selection-dialog__group selection-dialog__group--stats">
-          <div class="selection-dialog__stats">
-            ${(() => {
-              const renderStatRow = (
-                upgradeId: TowerUpgradeId,
-                label: string,
-                value: string,
-                level: number
-              ) => {
-                const maxLevel = getTowerUpgrade(upgradeId).maxLevel;
-                const safeLevel = Math.max(0, Math.min(level, maxLevel));
-                const levelSegments = Array.from(
-                  { length: maxLevel },
-                  (_, idx) => `
-                  <span class="selection-dialog__stat-level-segment ${idx < safeLevel ? 'is-active' : ''}"></span>
-                `
-                ).join('');
-                const upgrade = upgradesById.get(upgradeId);
-                const controlsMarkup = (() => {
-                  if (!upgrade) return '';
-                  const disabled = upgradesDisabled || !upgrade.canAfford;
-                  const buttonLabel = `Upgrade ${buildCoinCostMarkup(upgrade.cost, 'Coin cost')}`;
-                  return `<button class="selection-dialog__stat-upgrade" data-upgrade="${upgradeId}" ${disabled ? 'disabled' : ''}>${buttonLabel}</button>`;
-                })();
-                return `
-                  <div class="selection-dialog__stat-item">
-                    <div class="selection-dialog__stat-row">
-                      <span class="selection-dialog__stat-label">${label}: ${value}</span>
-                      <span class="selection-dialog__stat-controls">
-                        ${controlsMarkup}
-                      </span>
-                    </div>
-                    <div class="selection-dialog__stat-level-wrap" aria-label="${label} level progress">
-                      <span class="selection-dialog__stat-level-bar">${levelSegments}</span>
-                    </div>
+        ? (() => {
+            const renderStatCol = (
+              upgradeId: TowerUpgradeId,
+              label: string,
+              value: string
+            ) => {
+              const upgrade = upgradesById.get(upgradeId);
+              const disabled = !upgrade || upgradesDisabled || !upgrade.canAfford;
+              const upgradeContent = upgrade
+                ? `<span class="selection-dialog__stat-upgrade-line">Upgrade</span><span class="selection-dialog__stat-upgrade-cost">${buildCoinCostMarkup(upgrade.cost, 'Coin cost')}</span>`
+                : '<span class="selection-dialog__stat-upgrade-line">Max</span>';
+              return `
+                <div class="selection-dialog__stat-col">
+                  <div class="selection-dialog__stat-col-body">
+                    <span class="selection-dialog__stat-value">${value}</span>
+                    <span class="selection-dialog__stat-label">${label}</span>
                   </div>
-                `;
-              };
-              return [
-                renderStatRow(
-                  'range',
-                  'Range',
-                  `${formatStatNumber(towerDetails.range, 2)}m`,
-                  towerDetails.rangeLevel
-                ),
-                renderStatRow(
-                  'damage',
-                  'Damage',
-                  String(towerDetails.damage),
-                  towerDetails.damageLevel
-                ),
-                renderStatRow(
-                  'speed',
-                  'Speed',
-                  `${formatStatNumber(towerDetails.speed, 2)}/s`,
-                  towerDetails.speedLevel
-                ),
-              ].join('');
-            })()}
-          </div>
-        </div>`
+                  <button class="selection-dialog__stat-upgrade-btn" data-upgrade="${upgradeId}" ${disabled ? 'disabled' : ''}>${upgradeContent}</button>
+                </div>
+              `;
+            };
+            return `<div class="selection-dialog__stats-row">
+              ${renderStatCol(
+                'range',
+                'Range',
+                `${formatStatNumber(towerDetails.range, 2)}m`
+              )}
+              ${renderStatCol('damage', 'Damage', String(towerDetails.damage))}
+              ${renderStatCol(
+                'speed',
+                'Speed',
+                `${formatStatNumber(towerDetails.speed, 2)}/s`
+              )}
+            </div>`;
+          })()
         : '';
     const noUpgradesLeftMarkup =
       !isBankSelected && towerDetails && upgradeOptions.length === 0
@@ -297,19 +283,6 @@ export class SelectionDialog {
     const statusMarkup = noUpgradesLeftMarkup
       ? `<div class="selection-dialog__group selection-dialog__group--status">${noUpgradesLeftMarkup}</div>`
       : '';
-    const repairStatusLabel =
-      repairStatus === 'critical'
-        ? 'Critical'
-        : repairStatus === 'needs_repair'
-          ? 'Needs Repair'
-          : 'Healthy';
-    const repairInfoMarkup =
-      !isBankSelected && showRepair
-        ? `<div class="selection-dialog__meta selection-dialog__repair-meta">
-          <span class="selection-dialog__repair-status selection-dialog__repair-status--${repairStatus ?? 'healthy'}">${repairStatusLabel}</span>
-          ${repairCost !== null ? `<span class="selection-dialog__repair-cost">Repair ${buildCoinCostMarkup(repairCost, 'Coin cost')}</span>` : ''}
-        </div>`
-        : '';
     const bankActionsMarkup = isBankSelected
       ? `<div class="selection-dialog__bank-adjust-grid">
           <button class="selection-dialog__bank-adjust-btn" data-bank-remove-10 ${canBankRemove10 ? '' : 'disabled'}>-10</button>
@@ -319,27 +292,29 @@ export class SelectionDialog {
         </div>`
       : '';
 
-    this.root.innerHTML = `
-      <div class="selection-dialog__title">${titleMarkup}</div>
-      ${summaryMarkup}
-      ${repairInfoMarkup}
+    const deleteBtnMarkup =
+      !isBankSelected
+        ? `<button class="selection-dialog__delete-btn" data-delete ${canDelete ? '' : 'disabled'} aria-label="Delete"><svg class="selection-dialog__delete-icon" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm80-160h80v-360h-80v360Zm160 0h80v-360h-80v360Z"/></svg></button>`
+        : '';
+
+    this.formSlot.innerHTML = `
+      <div class="selection-dialog__header">
+        <div class="selection-dialog__title">${typeLabel}</div>
+        ${deleteBtnMarkup}
+      </div>
+      ${infoListMarkup}
       ${statsMarkup}
       ${statusMarkup}
       ${
         isBankSelected
           ? bankActionsMarkup
-          : `<div class="selection-dialog__action-bar">
-             <button class="selection-dialog__action selection-dialog__danger" data-delete ${canDelete ? '' : 'disabled'}>
-               Delete
-             </button>
-             ${
-               showRepair
-                 ? `<button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-                    ${repairCost !== null ? `Repair ${buildCoinCostMarkup(repairCost, 'Coin cost')}` : 'Repair'}
-                  </button>`
-                 : ''
-             }
-           </div>`
+          : showRepair
+            ? `<div class="selection-dialog__action-bar">
+                 <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
+                   ${canRepair && repairCost !== null ? `Repair ${buildCoinCostMarkup(repairCost, 'Coin cost')}` : 'Repair'}
+                 </button>
+               </div>`
+            : ''
       }
     `;
   }
