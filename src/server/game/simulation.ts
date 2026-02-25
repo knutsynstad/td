@@ -1097,7 +1097,10 @@ const buildUnifiedMobDelta = (
 ): { pool: MobPool; slices: MobSlices } => {
   const builder = createMobPoolBuilder();
 
-  const baseMobs = allMobs.slice(0, MAX_DELTA_MOBS);
+  const pageCount = Math.max(1, Math.ceil(allMobs.length / MAX_DELTA_MOBS));
+  const pageIndex = world.meta.tickSeq % pageCount;
+  const pageStart = pageIndex * MAX_DELTA_MOBS;
+  const baseMobs = allMobs.slice(pageStart, pageStart + MAX_DELTA_MOBS);
   const baseIndices = baseMobs.map((m) => addMobToPool(builder, m));
 
   let nearPlayerIndices: number[] = [];

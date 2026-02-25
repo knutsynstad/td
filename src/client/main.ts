@@ -3430,7 +3430,6 @@ const SERVER_MOB_DEAD_STALE_REMOVE_MS = 1000;
 const SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS = 8000;
 const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
 const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
-const SERVER_MOB_FROZEN_REMOVE_MS = SERVER_MOB_EXTRAPOLATION_MAX_MS + 350;
 const SERVER_HEARTBEAT_INTERVAL_MS = 200;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS = 45_000;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS = 7_500;
@@ -3989,8 +3988,7 @@ const applyServerMobDelta = (delta: EntityDelta) => {
       pendingFullMobSnapshotId = null;
       pendingFullMobSnapshotSeenIds.clear();
     }
-  } else {
-    pendingFullMobSnapshotId = null;
+  } else if (pendingFullMobSnapshotId === null) {
     pendingFullMobSnapshotSeenIds.clear();
   }
   for (const numId of delta.despawnedMobIds) {
@@ -4061,12 +4059,6 @@ const updateServerMobInterpolation = (now: number) => {
       Number.isFinite(sample.velocity.x) &&
       Number.isFinite(sample.velocity.z);
     if (!sampleIsFinite) {
-      staleMobIds.push(mobId);
-      continue;
-    }
-    // If a mob has not received fresh authoritative samples past the
-    // extrapolation horizon, prefer removing it over showing a frozen ghost.
-    if (staleMs > SERVER_MOB_FROZEN_REMOVE_MS) {
       staleMobIds.push(mobId);
       continue;
     }
