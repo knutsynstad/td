@@ -20,6 +20,7 @@ import rockModelUrl from './assets/models/rock.glb?url';
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url';
 import treeModelUrl from './assets/models/tree.glb?url';
 import wallModelUrl from './assets/models/wall.glb?url';
+import playerModelUrl from './assets/models/player.glb?url';
 import { screenToWorldOnGround } from './domains/world/coords';
 import { SelectionDialog } from './ui/components/selectionDialog';
 import { StructureStore } from './domains/gameplay/structureStore';
@@ -114,7 +115,6 @@ import {
   PLAYER_COLLISION_RADIUS,
   PLAYER_HEIGHT,
   PLAYER_SPEED,
-  PLAYER_WIDTH,
   REPAIR_CRITICAL_HP_RATIO,
   REPAIR_DISCOUNT_RATE,
   REPAIR_WARNING_HP_RATIO,
@@ -2098,7 +2098,7 @@ const updateCastleColliderFromObject = (object: THREE.Object3D) => {
 };
 
 const gltfLoader = new GLTFLoader();
-const REQUIRED_MODEL_LOADS = 14;
+const REQUIRED_MODEL_LOADS = 15;
 let completedModelLoads = 0;
 let hasFinishedLoadingAssets = false;
 let hasRevealedScene = false;
@@ -2177,6 +2177,8 @@ let arrowModelTemplate: THREE.Object3D | null = null;
 let treeModelTemplate: THREE.Object3D | null = null;
 let coinModelTemplate: THREE.Object3D | null = null;
 let wallModelTemplate: THREE.Object3D | null = null;
+let playerModelTemplate: THREE.Object3D | null = null;
+const playerFacingOffset = { value: 0 };
 const arrowFacingAnchorLocalPos = new THREE.Vector3();
 const arrowFacingForwardLocal = new THREE.Vector3(0, 1, 0);
 const towerBallistaRigs = new Map<Tower, BallistaVisualRig>();
@@ -2257,6 +2259,32 @@ const prepareCoinModel = (source: THREE.Object3D) => {
     child.receiveShadow = true;
   });
   return model;
+};
+
+const preparePlayerModel = (source: THREE.Object3D) => {
+  const model = source.clone(true);
+  const bounds = new THREE.Box3().setFromObject(model);
+  if (!bounds.isEmpty()) {
+    const center = new THREE.Vector3();
+    bounds.getCenter(center);
+    // Pivot at bottom (authored at 0); mesh.position.y = 0 places bottom on ground
+    model.position.set(-center.x, -bounds.min.y, -center.z);
+  }
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.castShadow = true;
+    child.receiveShadow = true;
+  });
+  return model;
+};
+
+const disposeCapsuleMesh = (obj: THREE.Object3D) => {
+  if (obj instanceof THREE.Mesh && obj.geometry && obj.material) {
+    obj.geometry.dispose();
+    const mat = obj.material;
+    if (Array.isArray(mat)) for (const m of mat) m.dispose();
+    else mat.dispose();
+  }
 };
 
 const applyTowerVisualToMesh = (mesh: THREE.Mesh, tower?: Tower) => {
@@ -2615,6 +2643,41 @@ loadModelWithProgress(
   },
   (error) => {
     console.error('Failed to load mob model:', error);
+  }
+);
+
+loadModelWithProgress(
+  playerModelUrl,
+  (gltf) => {
+    playerModelTemplate = preparePlayerModel(gltf.scene);
+    playerModelTemplate.updateMatrixWorld(true);
+    playerFacingOffset.value = computeFacingYawFromTemplate(playerModelTemplate);
+
+    const swapPlayerMesh = () => {
+      const savedX = player.mesh.position.x;
+      const savedZ = player.mesh.position.z;
+      scene.remove(player.mesh);
+      disposeCapsuleMesh(player.mesh);
+      player.mesh = playerModelTemplate!.clone(true);
+      player.mesh.position.set(savedX, player.baseY, savedZ);
+      scene.add(player.mesh);
+    };
+
+    const swapNpcMesh = (npc: NpcEntity) => {
+      const savedX = npc.mesh.position.x;
+      const savedZ = npc.mesh.position.z;
+      scene.remove(npc.mesh);
+      disposeCapsuleMesh(npc.mesh);
+      npc.mesh = playerModelTemplate!.clone(true);
+      npc.mesh.position.set(savedX, npc.baseY, savedZ);
+      scene.add(npc.mesh);
+    };
+
+    swapPlayerMesh();
+    for (const npc of npcs) swapNpcMesh(npc);
+  },
+  (error) => {
+    console.error('Failed to load player model:', error);
   }
 );
 
@@ -3252,29 +3315,14 @@ const raycaster = new THREE.Raycaster();
 raycaster.layers.enable(HITBOX_LAYER);
 const pointer = new THREE.Vector2();
 
-const makeCapsule = (color: number) => {
-  const mesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(
-      PLAYER_WIDTH * 0.5,
-      PLAYER_HEIGHT - PLAYER_WIDTH,
-      4,
-      10
-    ),
-    new THREE.MeshStandardMaterial({ color })
-  );
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
-};
-
 const player: PlayerEntity = {
-  mesh: makeCapsule(0x62ff9a),
+  mesh: new THREE.Group(),
   radius: PLAYER_COLLISION_RADIUS,
   speed: PLAYER_SPEED,
   velocity: new THREE.Vector3(),
   target: new THREE.Vector3(0, 0, 0),
   kind: 'player',
-  baseY: PLAYER_HEIGHT * 0.5,
+  baseY: 0,
   username: '',
 };
 player.mesh.position.set(
@@ -3286,15 +3334,19 @@ player.target.set(player.mesh.position.x, 0, player.mesh.position.z);
 scene.add(player.mesh);
 
 const npcs: NpcEntity[] = [];
-const makeNpc = (pos: THREE.Vector3, color: number, username: string) => {
+const makeNpc = (pos: THREE.Vector3, _color: number, username: string) => {
+  const mesh =
+    playerModelTemplate !== null
+      ? playerModelTemplate.clone(true)
+      : new THREE.Group();
   const npc: NpcEntity = {
-    mesh: makeCapsule(color),
+    mesh,
     radius: PLAYER_COLLISION_RADIUS,
     speed: NPC_SPEED,
     velocity: new THREE.Vector3(),
     target: pos.clone(),
     kind: 'npc',
-    baseY: PLAYER_HEIGHT * 0.5,
+    baseY: 0,
     username,
   };
   npc.mesh.position.copy(pos).setY(npc.baseY);
@@ -4695,7 +4747,9 @@ const worldToScreen = (
 };
 
 const updateViewportFogCenter = () => {
-  const anchor = worldToScreen(player.mesh.position.clone().setY(player.baseY));
+  const anchor = worldToScreen(
+    player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5)
+  );
   if (!anchor) return;
   const xPct = Math.max(0, Math.min(100, (anchor.x / window.innerWidth) * 100));
   const yPct = Math.max(
@@ -5290,7 +5344,7 @@ const updateUsernameLabels = () => {
   for (const entity of entities) {
     if (!entity.username) continue;
     const screenPos = worldToScreen(
-      entity.mesh.position.clone().setY(entity.baseY + 1.0)
+      entity.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5 + 1.0)
     );
     if (!screenPos) continue;
 
@@ -6120,6 +6174,7 @@ const motionSystem = createEntityMotionSystem({
   staticColliders,
   spatialGrid,
   npcs,
+  playerFacingOffset,
   constants: {
     mobBerserkAttackCooldown: MOB_SIEGE_ATTACK_COOLDOWN,
     mobBerserkDamage: MOB_SIEGE_DAMAGE,
@@ -7005,7 +7060,7 @@ const tick = (now: number, delta: number) => {
   const arrowLength = hasPlayerReachedBlockedTarget() ? 0 : arrowDir.length();
   if (!isKeyboardMoving && arrowLength >= 1.0) {
     arrowDir.normalize();
-    arrow.position.copy(player.mesh.position);
+    arrow.position.copy(player.mesh.position).setY(0.5);
     arrow.setDirection(arrowDir);
     arrow.setLength(Math.min(arrowLength, 12), 0.6, 0.5);
     arrow.visible = true;
@@ -7018,7 +7073,7 @@ const tick = (now: number, delta: number) => {
     if (gameState.shootCooldown <= 0 && arrowModelTemplate) {
       playerLaunchPosScratch
         .copy(player.mesh.position)
-        .setY(player.baseY + 0.35);
+        .setY(PLAYER_HEIGHT * 0.5 + 0.35);
       playerTargetPosScratch
         .copy(selected.mesh.position)
         .setY(selected.baseY + 0.3);
@@ -7065,7 +7120,9 @@ const tick = (now: number, delta: number) => {
   dir.shadow.camera.updateMatrixWorld();
 
   camera.position.copy(player.mesh.position).add(cameraOffset);
-  camera.lookAt(player.mesh.position);
+  camera.lookAt(
+    player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5)
+  );
   camera.updateMatrixWorld();
   updateViewportFogCenter();
   const renderStartedAtMs = performance.now();

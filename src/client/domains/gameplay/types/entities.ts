@@ -27,7 +27,7 @@ export type DestructibleCollider = StaticCollider & {
 };
 
 type EntityBase = {
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
   radius: number;
   speed: number;
   velocity: THREE.Vector3;

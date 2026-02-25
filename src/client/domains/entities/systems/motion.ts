@@ -29,6 +29,7 @@ type MotionContext = {
   spatialGrid: SpatialGrid;
   npcs: Entity[];
   constants: MobConstants;
+  playerFacingOffset: { value: number };
   random: () => number;
   spawnCubeEffects: (pos: THREE.Vector3) => void;
   onStructureDestroyed?: (collider: DestructibleCollider) => void;
@@ -376,6 +377,15 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     entity.mesh.position.x = clamp(entity.mesh.position.x, minBound, maxBound);
     entity.mesh.position.z = clamp(entity.mesh.position.z, minBound, maxBound);
     entity.mesh.position.y = entity.baseY;
+
+    if (entity.kind === 'player' || entity.kind === 'npc') {
+      const vx = entity.velocity.x;
+      const vz = entity.velocity.z;
+      if (vx * vx + vz * vz > 1e-6) {
+        entity.mesh.rotation.y =
+          Math.atan2(vx, vz) - context.playerFacingOffset.value + Math.PI;
+      }
+    }
   };
 
   const updateNpcTargets = () => {

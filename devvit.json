@@ -1,6 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
-  "name": "td-kmx",
+  "name": "castle-game",
   "post": {
     "dir": "dist/client",
     "entrypoints": {
@@ -52,6 +52,6 @@
     "build": "vite build"
   },
   "dev": {
-    "subreddit": "td_kmx_dev"
+    "subreddit": "castle_game_dev"
   }
 }
