@@ -4658,13 +4658,11 @@ const drawMinimap = () => {
   if (width <= 0 || height <= 0) return;
   const minDimension = Math.min(width, height);
   const baseMarkerScale = Math.max(1, minDimension / 84);
-  const markerScale = isMinimapExpanded
-    ? baseMarkerScale * 0.5
-    : baseMarkerScale;
+  // Scale down markers on large maps; smooth as canvas resizes during expand/collapse
+  const markerScale = baseMarkerScale * Math.min(1, 200 / minDimension);
 
   minimapCtx.clearRect(0, 0, width, height);
-  minimapCtx.fillStyle = 'rgba(224, 202, 156, 0.96)';
-  minimapCtx.fillRect(0, 0, width, height);
+  // No fill - paper effect (wrap bg + ::before) shows through
 
   // Keep minimap orientation aligned with the camera view.
   const forward3 = camera.getWorldDirection(new THREE.Vector3());

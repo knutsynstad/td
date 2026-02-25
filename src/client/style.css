@@ -1057,7 +1057,7 @@ canvas {
       var(--hud-minimap-paper-transparent)
     );
   opacity: calc(0.78 + (var(--hud-minimap-embellish-alpha) * 0.22));
-  z-index: 2;
+  z-index: 0;
 }
 
 .hud-minimap-wrap::after {
@@ -1100,7 +1100,7 @@ canvas {
   width: 100%;
   opacity: calc(var(--hud-minimap-embellish-alpha) * 0.92);
   pointer-events: none;
-  z-index: 4;
+  z-index: 0;
 }
 
 .hud-minimap-tape-section::before,
