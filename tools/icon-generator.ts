@@ -4,6 +4,8 @@ import coinModelUrl from '../src/client/assets/models/coin.glb?url';
 import towerModelUrl from '../src/client/assets/models/tower-ballista.glb?url';
 import wallModelUrl from '../src/client/assets/models/wall.glb?url';
 import treeModelUrl from '../src/client/assets/models/tree.glb?url';
+import swordModelUrl from '../src/client/assets/models/sword.glb?url';
+import arrowModelUrl from '../src/client/assets/models/arrow.glb?url';
 
 type Preset = {
   id: string;
@@ -12,11 +14,17 @@ type Preset = {
   outputName: string;
   /** Scale multiplier for model size in frame (default 1) */
   scale?: number;
+  /** Camera zoom multiplier - makes model appear larger (default 1) */
+  zoom?: number;
+  /** Rotation around Y axis in radians */
+  rotationY?: number;
+  /** Rotation around Z axis in radians (diagonal in screen plane) */
+  rotationZ?: number;
 };
 
 const ICON_SIZE = 256;
-/** Frame fill (1 = edge-to-edge, 0.97 = tiny padding). */
-const FILL_RATIO = 0.97;
+/** Frame fill (1 = edge-to-edge). */
+const FILL_RATIO = 1;
 
 const presets: Preset[] = [
   {
@@ -31,6 +39,7 @@ const presets: Preset[] = [
     label: 'Tower',
     modelUrl: towerModelUrl,
     outputName: 'tower-icon.png',
+    scale: 1.85,
   },
   {
     id: 'wall',
@@ -43,11 +52,41 @@ const presets: Preset[] = [
     label: 'Tree',
     modelUrl: treeModelUrl,
     outputName: 'tree-icon.png',
+    scale: 3.9,
+  },
+  {
+    id: 'sword',
+    label: 'Sword',
+    modelUrl: swordModelUrl,
+    outputName: 'sword-icon.png',
+    zoom: 1.1,
+    rotationZ: (80 * Math.PI) / 180,
+  },
+  {
+    id: 'arrow',
+    label: 'Arrow',
+    modelUrl: arrowModelUrl,
+    outputName: 'arrow-icon.png',
+    zoom: 1.1,
+    rotationZ: (-10 * Math.PI) / 180,
   },
 ];
 
 const app = document.querySelector<HTMLDivElement>('#icon-generator-app');
 if (!app) throw new Error('Missing icon generator root element.');
+
+const presetSlotsHtml = presets
+  .map(
+    (p) => `
+    <div class="icon-generator__item">
+      <div class="icon-generator__slot" data-preset-id="${p.id}">
+        <div class="icon-generator__spinner"></div>
+        <canvas class="icon-generator__preview" width="256" height="256"></canvas>
+      </div>
+      <div class="icon-generator__label">${p.outputName}</div>
+    </div>`
+  )
+  .join('');
 
 app.innerHTML = `
   <style>
@@ -62,23 +101,20 @@ app.innerHTML = `
       max-width: 820px;
       margin: 24px auto;
       padding: 20px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.12);
     }
-    .icon-generator__controls {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 14px;
+    .icon-generator__header h1 {
+      margin: 0 0 2px 0;
+      font-size: 1.5rem;
+      font-weight: 600;
     }
-    .icon-generator__field {
-      display: grid;
-      gap: 6px;
-      font-size: 0.86rem;
+    .icon-generator__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    .icon-generator input,
-    .icon-generator select,
+    .icon-generator__header-right {
+      flex-shrink: 0;
+    }
     .icon-generator button {
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.2);
@@ -87,20 +123,32 @@ app.innerHTML = `
       height: 34px;
       padding: 0 10px;
       font: inherit;
-    }
-    .icon-generator button {
       cursor: pointer;
       font-weight: 600;
     }
-    .icon-generator__actions {
+    .icon-generator__grid {
       display: flex;
-      gap: 10px;
-      margin: 6px 0 12px;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 20px;
+      margin-bottom: 12px;
     }
-    .icon-generator__preview-wrap {
-      display: inline-block;
+    .icon-generator__item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .icon-generator__label {
+      font-size: 0.8rem;
+      color: rgba(232, 237, 244, 0.65);
+    }
+    .icon-generator__slot {
+      position: relative;
       width: 256px;
       height: 256px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       background-image:
         linear-gradient(45deg, rgba(255, 255, 255, 0.06) 25%, transparent 25%),
         linear-gradient(-45deg, rgba(255, 255, 255, 0.06) 25%, transparent 25%),
@@ -109,98 +157,65 @@ app.innerHTML = `
       background-size: 24px 24px;
       background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
     }
+    .icon-generator__spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #e8edf4;
+      border-radius: 50%;
+      animation: icon-generator-spin 0.8s linear infinite;
+    }
+    .icon-generator__preview {
+      display: none;
+    }
+    .icon-generator__slot[data-loaded] .icon-generator__spinner {
+      display: none;
+    }
+    .icon-generator__slot[data-loaded] .icon-generator__preview {
+      display: block;
+    }
     .icon-generator__preview {
       width: 256px;
       height: 256px;
       image-rendering: auto;
-      display: block;
     }
-    .icon-generator__status {
-      margin-top: 10px;
-      font-size: 0.85rem;
-      opacity: 0.9;
-      min-height: 1.2em;
+    @keyframes icon-generator-spin {
+      to { transform: rotate(360deg); }
     }
     .icon-generator__hint {
-      font-size: 0.78rem;
-      opacity: 0.7;
-      margin-top: 8px;
+      font-size: 0.8rem;
+      font-weight: 400;
+      color: rgba(232, 237, 244, 0.65);
+      margin-top: 2px;
     }
   </style>
   <section class="icon-generator">
-    <h1>Model Icon Generator</h1>
-    <div class="icon-generator__controls">
-      <label class="icon-generator__field">
-        Preset
-        <select id="presetSelect"></select>
-      </label>
-      <label class="icon-generator__field">
-        Output file name
-        <input id="outputNameInput" type="text" />
-      </label>
-      <label class="icon-generator__field" style="grid-column: 1 / -1;">
-        Model URL (override)
-        <input id="modelUrlInput" type="text" />
-      </label>
+    <div class="icon-generator__header">
+      <div>
+        <h1>Model Icon Generator</h1>
+        <div class="icon-generator__hint">
+          Saves go to <code>src/client/assets/ui/</code>
+        </div>
+      </div>
+      <div class="icon-generator__header-right">
+        <button id="saveAllBtn" type="button">Save Icons</button>
+      </div>
     </div>
-    <div class="icon-generator__actions">
-      <button id="renderBtn" type="button">Render</button>
-      <button id="downloadBtn" type="button">Download PNG</button>
-      <button id="saveBtn" type="button">Save to project</button>
-      <button id="saveAllBtn" type="button">Save all presets</button>
-    </div>
-    <div class="icon-generator__preview-wrap">
-      <canvas id="previewCanvas" class="icon-generator__preview" width="256" height="256"></canvas>
-    </div>
-    <div id="statusText" class="icon-generator__status"></div>
-    <div class="icon-generator__hint">
-      Saves go to <code>src/client/assets/ui/</code>
+    <div class="icon-generator__grid">
+      ${presetSlotsHtml}
     </div>
   </section>
 `;
 
-const presetSelect = document.querySelector<HTMLSelectElement>('#presetSelect');
-const outputNameInput =
-  document.querySelector<HTMLInputElement>('#outputNameInput');
-const modelUrlInput =
-  document.querySelector<HTMLInputElement>('#modelUrlInput');
-const renderBtn = document.querySelector<HTMLButtonElement>('#renderBtn');
-const downloadBtn = document.querySelector<HTMLButtonElement>('#downloadBtn');
-const saveBtn = document.querySelector<HTMLButtonElement>('#saveBtn');
 const saveAllBtn = document.querySelector<HTMLButtonElement>('#saveAllBtn');
-const previewCanvas =
-  document.querySelector<HTMLCanvasElement>('#previewCanvas');
-const statusText = document.querySelector<HTMLDivElement>('#statusText');
-if (
-  !presetSelect ||
-  !outputNameInput ||
-  !modelUrlInput ||
-  !renderBtn ||
-  !downloadBtn ||
-  !saveBtn ||
-  !saveAllBtn ||
-  !previewCanvas ||
-  !statusText
-) {
-  throw new Error('Icon generator controls were not created.');
-}
+if (!saveAllBtn) throw new Error('Save all button not found.');
 
-for (const preset of presets) {
-  const option = document.createElement('option');
-  option.value = preset.id;
-  option.textContent = preset.label;
-  presetSelect.append(option);
-}
-
-const urlParams = new URLSearchParams(window.location.search);
-const requestedPreset = urlParams.get('preset');
-const presetById = new Map(presets.map((preset) => [preset.id, preset]));
-const initialPreset = requestedPreset
-  ? (presetById.get(requestedPreset) ?? presets[0])
-  : presets[0];
-presetSelect.value = initialPreset.id;
-modelUrlInput.value = urlParams.get('model') ?? initialPreset.modelUrl;
-outputNameInput.value = urlParams.get('out') ?? initialPreset.outputName;
+const getSlot = (presetId: string) =>
+  document.querySelector<HTMLElement>(
+    `.icon-generator__slot[data-preset-id="${presetId}"]`
+  );
+const getCanvas = (presetId: string) =>
+  getSlot(presetId)?.querySelector<HTMLCanvasElement>('.icon-generator__preview');
 
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
@@ -219,7 +234,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.5;
 
-const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+const ambient = new THREE.AmbientLight(0xffffff, 2);
 scene.add(ambient);
 
 const keyLight = new THREE.DirectionalLight(0xfff8ed, 2.8);
@@ -285,7 +300,7 @@ const normalizeModel = (
   return model;
 };
 
-const OUTLINE_THICKNESS = 5;
+const OUTLINE_THICKNESS = 8;
 
 /** 2D screen-space outline: dilate silhouette, outline = dilated - original. */
 const applyOutline2D = (pixels: Uint8Array, size: number) => {
@@ -317,7 +332,7 @@ const applyOutline2D = (pixels: Uint8Array, size: number) => {
       pixels[i * 4] = 0;
       pixels[i * 4 + 1] = 0;
       pixels[i * 4 + 2] = 0;
-      pixels[i * 4 + 3] = 255;
+      pixels[i * 4 + 3] = 127;
     }
   }
 };
@@ -396,7 +411,7 @@ const pixelsToDataUrl = (pixels: Uint8Array) => {
 
 const viewPoint = new THREE.Vector3();
 
-const fitCameraToModel = (target: THREE.Object3D) => {
+const fitCameraToModel = (target: THREE.Object3D, zoomMultiplier = 1) => {
   tmpBox.setFromObject(target);
   if (tmpBox.isEmpty()) return;
 
@@ -424,33 +439,41 @@ const fitCameraToModel = (target: THREE.Object3D) => {
     }
   });
 
-  camera.zoom = FILL_RATIO / maxExtent;
+  // Pad extent so outline (drawn in pixels) is never clipped
+  const outlinePadding = (2 * OUTLINE_THICKNESS) / ICON_SIZE;
+  camera.zoom =
+    (FILL_RATIO / (maxExtent + outlinePadding)) * zoomMultiplier;
   camera.updateProjectionMatrix();
 };
 
-const exportIconDataUrl = () => pixelsToDataUrl(renderToOutlinedPixels());
+const renderedDataUrlByPreset = new Map<string, string>();
 
-let lastRenderName = outputNameInput.value.trim() || 'item-icon.png';
-
-const renderModel = async () => {
-  const modelUrl = modelUrlInput.value.trim();
-  if (!modelUrl) {
-    statusText.textContent = 'Model URL is required.';
-    return;
-  }
-  statusText.textContent = `Loading ${modelUrl}...`;
+const renderPreset = async (preset: Preset) => {
   try {
-    const gltf = await gltfLoader.loadAsync(modelUrl);
+    const gltf = await gltfLoader.loadAsync(preset.modelUrl);
     root.clear();
-    const preset = presetById.get(presetSelect.value);
-    const scaleMultiplier = preset?.scale ?? 1;
+    const scaleMultiplier = preset.scale ?? 1;
     const model = normalizeModel(gltf.scene, scaleMultiplier);
+    if (preset.rotationY != null) {
+      model.rotation.y = preset.rotationY;
+    }
+    if (preset.rotationZ != null) {
+      model.rotation.z = preset.rotationZ;
+    }
+    tmpBox.setFromObject(model);
+    tmpBox.getCenter(tmpCenter);
+    model.position.sub(tmpCenter);
     root.add(model);
     root.add(createOutlinedModel(model));
-    fitCameraToModel(root);
+    fitCameraToModel(root, preset.zoom ?? 1);
     const pixels = renderToOutlinedPixels();
-    const ctx = previewCanvas.getContext('2d');
-    if (ctx) {
+    const dataUrl = pixelsToDataUrl(pixels);
+    renderedDataUrlByPreset.set(preset.id, dataUrl);
+
+    const canvas = getCanvas(preset.id);
+    const slot = getSlot(preset.id);
+    if (canvas && slot && canvas.getContext('2d')) {
+      const ctx = canvas.getContext('2d')!;
       const imageData = ctx.createImageData(ICON_SIZE, ICON_SIZE);
       for (let y = 0; y < ICON_SIZE; y += 1) {
         const srcY = ICON_SIZE - 1 - y;
@@ -460,32 +483,10 @@ const renderModel = async () => {
         );
       }
       ctx.putImageData(imageData, 0, 0);
+      slot.setAttribute('data-loaded', '');
     }
-    lastRenderName = outputNameInput.value.trim() || 'item-icon.png';
-    statusText.textContent = `Rendered ${lastRenderName} (${ICON_SIZE}x${ICON_SIZE}, transparent).`;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    statusText.textContent = `Failed to render model: ${message}`;
-  }
-};
-
-const downloadPng = async () => {
-  if (!root.children[0]) {
-    await renderModel();
-    if (!root.children[0]) return;
-  }
-  const outName =
-    outputNameInput.value.trim() || lastRenderName || 'item-icon.png';
-  try {
-    const dataUrl = exportIconDataUrl();
-    const anchor = document.createElement('a');
-    anchor.href = dataUrl;
-    anchor.download = outName;
-    anchor.click();
-    statusText.textContent = `Downloaded ${outName}.`;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    statusText.textContent = `PNG export failed: ${message}`;
+  } catch {
+    renderedDataUrlByPreset.delete(preset.id);
   }
 };
 
@@ -500,65 +501,34 @@ const saveToProject = async (filename: string, dataUrl: string) => {
   return json.path;
 };
 
-const saveCurrentToProject = async () => {
-  if (!root.children[0]) {
-    await renderModel();
-    if (!root.children[0]) return;
-  }
-  const filename = outputNameInput.value.trim() || lastRenderName || 'item-icon.png';
-  try {
-    statusText.textContent = `Saving ${filename}...`;
-    const path = await saveToProject(filename, exportIconDataUrl());
-    statusText.textContent = `Saved to ${path}`;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    statusText.textContent = `Save failed: ${message}`;
-  }
-};
-
 const saveAllPresetsToProject = async () => {
   const failed: string[] = [];
   let saved = 0;
   for (const preset of presets) {
+    const dataUrl = renderedDataUrlByPreset.get(preset.id);
+    if (!dataUrl) {
+      failed.push(preset.outputName);
+      continue;
+    }
     try {
-      presetSelect.value = preset.id;
-      modelUrlInput.value = preset.modelUrl;
-      outputNameInput.value = preset.outputName;
-      statusText.textContent = `Rendering ${preset.outputName}...`;
-      await renderModel();
-      if (!root.children[0]) {
-        failed.push(preset.outputName);
-        continue;
-      }
-      await saveToProject(preset.outputName, exportIconDataUrl());
+      await saveToProject(preset.outputName, dataUrl);
       saved += 1;
     } catch {
       failed.push(preset.outputName);
     }
   }
-  statusText.textContent =
-    failed.length === 0
-      ? `Saved ${saved} icons to src/client/assets/ui/`
-      : `Saved ${saved}. Failed: ${failed.join(', ')}`;
+  if (failed.length === 0) {
+    saveAllBtn.textContent = `Saved ${saved} icons`;
+  } else {
+    saveAllBtn.textContent = `Saved ${saved}. Failed: ${failed.join(', ')}`;
+  }
 };
 
-presetSelect.addEventListener('change', () => {
-  const preset = presetById.get(presetSelect.value);
-  if (!preset) return;
-  modelUrlInput.value = preset.modelUrl;
-  outputNameInput.value = preset.outputName;
-  void renderModel();
-});
-
-renderBtn.addEventListener('click', () => {
-  void renderModel();
-});
-
-downloadBtn.addEventListener('click', () => {
-  void downloadPng();
-});
-
-saveBtn.addEventListener('click', () => void saveCurrentToProject());
 saveAllBtn.addEventListener('click', () => void saveAllPresetsToProject());
 
-void renderModel();
+const renderAllPresets = async () => {
+  for (const preset of presets) {
+    await renderPreset(preset);
+  }
+};
+void renderAllPresets();
