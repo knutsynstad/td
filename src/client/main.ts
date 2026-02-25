@@ -6193,6 +6193,7 @@ const motionSystem = createEntityMotionSystem({
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if ((event.target as HTMLElement).closest('#hud, .selection-dialog')) return;
+  if (isMinimapExpanded) return;
   activePointerId = event.pointerId;
   renderer.domElement.setPointerCapture(event.pointerId);
   if (gameState.buildMode !== 'off') {
