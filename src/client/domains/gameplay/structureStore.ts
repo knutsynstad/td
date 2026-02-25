@@ -11,6 +11,10 @@ type ObstacleDeltaCallback = (
   added: StaticCollider[],
   removed?: StaticCollider[]
 ) => void;
+type BeforeRemoveStructureCallback = (
+  pos: THREE.Vector3,
+  type: DestructibleCollider['type']
+) => void;
 type StructureMetadata = Pick<
   ClientStructureState,
   | 'playerBuilt'
@@ -32,19 +36,22 @@ export class StructureStore {
   private readonly towers: Tower[];
   private readonly onRemoveTower: RemoveTowerCallback;
   private readonly onObstacleDelta: ObstacleDeltaCallback;
+  private readonly onBeforeRemoveStructure?: BeforeRemoveStructureCallback;
 
   constructor(
     scene: THREE.Scene,
     staticColliders: StaticCollider[],
     towers: Tower[],
     onRemoveTower: RemoveTowerCallback,
-    onObstacleDelta: ObstacleDeltaCallback
+    onObstacleDelta: ObstacleDeltaCallback,
+    onBeforeRemoveStructure?: BeforeRemoveStructureCallback
   ) {
     this.scene = scene;
     this.staticColliders = staticColliders;
     this.towers = towers;
     this.onRemoveTower = onRemoveTower;
     this.onObstacleDelta = onObstacleDelta;
+    this.onBeforeRemoveStructure = onBeforeRemoveStructure;
   }
 
   addWallCollider(
@@ -148,6 +155,21 @@ export class StructureStore {
   removeStructureCollider(collider: DestructibleCollider) {
     const state = this.structureStates.get(collider);
     if (!state) return;
+
+    if (this.onBeforeRemoveStructure) {
+      const poofTypes: DestructibleCollider['type'][] = [
+        'tree',
+        'rock',
+        'wall',
+        'tower',
+      ];
+      if (poofTypes.includes(collider.type)) {
+        this.onBeforeRemoveStructure(
+          state.mesh.position.clone(),
+          collider.type
+        );
+      }
+    }
 
     const disposeMesh = (mesh: THREE.Mesh) => {
       mesh.traverse((node) => {

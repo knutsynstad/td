@@ -20,6 +20,7 @@ import rockModelUrl from './assets/models/rock.glb?url';
 import towerBallistaModelUrl from './assets/models/tower-ballista.glb?url';
 import treeModelUrl from './assets/models/tree.glb?url';
 import wallModelUrl from './assets/models/wall.glb?url';
+import smokeModelUrl from './assets/models/smoke.glb?url';
 import playerModelUrl from './assets/models/player.glb?url';
 import { screenToWorldOnGround } from './domains/world/coords';
 import { SelectionDialog } from './ui/components/selectionDialog';
@@ -46,6 +47,7 @@ import type {
 } from './domains/gameplay/types/entities';
 import { SpatialGrid } from './domains/world/spatialGrid';
 import { createParticleSystem } from './rendering/effects/particles';
+import { createSmokePoofEffect } from './rendering/effects/smokePoof';
 import {
   clamp,
   distanceToColliderSurface,
@@ -2656,6 +2658,10 @@ loadModelWithProgress(
   }
 );
 
+gltfLoader.load(smokeModelUrl, (gltf) => {
+  smokePoofEffect.setSmokeTemplate(prepareStaticModelPreserveScale(gltf.scene));
+});
+
 loadModelWithProgress(
   mobModelUrl,
   (gltf) => {
@@ -2751,6 +2757,7 @@ type PlayerArrowProjectile = {
 };
 const activePlayerArrowProjectiles: PlayerArrowProjectile[] = [];
 let selectedTower: Tower | null = null;
+const smokePoofEffect = createSmokePoofEffect(scene);
 const structureStore = new StructureStore(
   scene,
   staticColliders,
@@ -2764,7 +2771,8 @@ const structureStore = new StructureStore(
       activeArrowProjectiles.splice(i, 1);
     }
   },
-  (added, removed = []) => applyObstacleDelta(added, removed)
+  (added, removed = []) => applyObstacleDelta(added, removed),
+  (pos) => smokePoofEffect.spawnSmokePoof(pos)
 );
 
 const markPersistentMapFeature = (mesh: THREE.Mesh) => {
@@ -6973,6 +6981,7 @@ const tick = (now: number, delta: number) => {
   frameSpatialMs += performance.now() - spatialStartedAtMs;
 
   updateParticles(delta);
+  smokePoofEffect.updateSmokePoofs(delta);
   updateMobDeathVisuals(delta);
   updateEnergyTrails(delta);
   updateFloatingDamageTexts(delta);
