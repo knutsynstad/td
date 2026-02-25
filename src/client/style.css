@@ -1049,7 +1049,7 @@ canvas {
   font-size: 0.95rem;
   font-weight: 900;
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.24);
-  color: inherit;
+  color: #ffffff;
   background: rgba(30, 37, 45, 0.9);
   cursor: pointer;
   transition: transform 0.1s ease-out;
@@ -1095,8 +1095,9 @@ canvas {
   padding: 0;
   border-radius: 0;
   background: transparent;
-  color: rgba(230, 238, 247, 0.7);
-  font-size: 0.8rem;
+  color: #c9a227;
+  font-size: 14px;
+  line-height: 16px;
   font-weight: 600;
   letter-spacing: 0.01em;
   display: inline-flex;
@@ -1110,8 +1111,8 @@ canvas {
 }
 
 .hud-badge .coin-cost__icon {
-  width: 1.1em;
-  height: 1.1em;
+  width: 16px;
+  height: 16px;
 }
 
 .hud-button:hover:not(:disabled) {
