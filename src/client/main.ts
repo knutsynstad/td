@@ -25,6 +25,40 @@ import playerModelUrl from './assets/models/player.glb?url';
 import { screenToWorldOnGround } from './domains/world/coords';
 import { SelectionDialog } from './ui/components/selectionDialog';
 import { StructureStore } from './domains/gameplay/structureStore';
+import { InstancedModelLayer } from './rendering/overlays/instancedModelLayer';
+import { WorldGrid } from './rendering/overlays/worldGrid';
+import { WorldBorder } from './rendering/overlays/worldBorder';
+import { FlowFieldDebugOverlay } from './rendering/overlays/flowFieldDebug';
+import { SpawnContainerOverlay } from './rendering/overlays/spawnContainer';
+import { StagingIslandsOverlay } from './rendering/overlays/stagingIslands';
+import {
+  classifyPathTile,
+  directionToYaw,
+  edgeTileYawOffset,
+  cornerTileYawOffset,
+  snapYawToQuarterTurn,
+  parseGridKey,
+  type PathTileVariant,
+  type PathTileClassification,
+} from './rendering/overlays/pathTileClassification';
+import {
+  getVisibleGroundBounds,
+  buildCoastlineLandKeys,
+  buildWaterDistanceField,
+  buildWaterSurfaceGeometry,
+  type WaterDistanceField,
+} from './rendering/terrain';
+import {
+  solveBallisticIntercept,
+  computeFallbackBallisticVelocity,
+  rollAttackDamage,
+} from './domains/gameplay/projectiles';
+import {
+  getUpgradeEnergyCost,
+  getRepairCost,
+  getRepairStatus,
+} from './domains/gameplay/economy';
+import type { GroundBounds, DebugViewState, PlayerArrowProjectile } from './gameContext';
 import {
   getTowerType,
   getTowerUpgradeDeltaText,
@@ -48,6 +82,7 @@ import type {
 import { SpatialGrid } from './domains/world/spatialGrid';
 import { createParticleSystem } from './rendering/effects/particles';
 import { createSmokePoofEffect } from './rendering/effects/smokePoof';
+import { createMobDeathVisualSystem } from './rendering/effects/mobDeathVisuals';
 import {
   clamp,
   distanceToColliderSurface,
@@ -211,11 +246,6 @@ const COIN_PILE_CYLINDER_MIN = 3;
 const COIN_PILE_CYLINDER_MAX = 96;
 const COIN_PILE_MAX_RADIUS = 2.1;
 const COIN_PILE_CLUSTER_MAX_PER_CORNER = 5;
-type DebugViewState = {
-  worldGrid: boolean;
-  flowField: boolean;
-  playerShootRange: boolean;
-};
 
 const debugViewState: DebugViewState = {
   worldGrid: false,
@@ -522,922 +552,27 @@ dir.shadow.camera.updateProjectionMatrix();
 scene.add(dir);
 scene.add(dir.target);
 
-type GroundBounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 
-type InstancedLayerOptions = {
-  castShadow?: boolean;
-  receiveShadow?: boolean;
-  yOffset?: number;
-};
 
-type InstancedLayerEntry = {
-  mesh: THREE.InstancedMesh;
-  baseMatrix: THREE.Matrix4;
-};
 
-class InstancedModelLayer {
-  private readonly root = new THREE.Group();
-  private readonly entries: InstancedLayerEntry[] = [];
-  private readonly transformScratch = new THREE.Matrix4();
-  private readonly instanceMatrixScratch = new THREE.Matrix4();
-  private readonly facingQuaternionScratch = new THREE.Quaternion();
-  private readonly facingDirectionScratch = new THREE.Vector3();
-  private readonly capacity: number;
-  private readonly castShadow: boolean;
-  private readonly receiveShadow: boolean;
-  private readonly yOffset: number;
-  private facingYaw = 0;
 
-  constructor(
-    scene: THREE.Scene,
-    capacity: number,
-    options: InstancedLayerOptions = {}
-  ) {
-    this.capacity = capacity;
-    this.castShadow = options.castShadow ?? false;
-    this.receiveShadow = options.receiveShadow ?? true;
-    this.yOffset = options.yOffset ?? 0;
-    scene.add(this.root);
-  }
 
-  setTemplate(source: THREE.Object3D | null) {
-    this.clearEntries();
-    this.facingYaw = 0;
-    if (!source) return;
-    source.updateMatrixWorld(true);
-    this.facingYaw = this.computeFacingYaw(source);
-    source.traverse((node) => {
-      if (!(node instanceof THREE.Mesh)) return;
-      const material = Array.isArray(node.material)
-        ? node.material.map((mat) => mat.clone())
-        : node.material.clone();
-      const instanced = new THREE.InstancedMesh(
-        node.geometry,
-        material,
-        this.capacity
-      );
-      instanced.count = 0;
-      instanced.frustumCulled = false;
-      instanced.castShadow = this.castShadow;
-      instanced.receiveShadow = this.receiveShadow;
-      instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      this.root.add(instanced);
-      this.entries.push({
-        mesh: instanced,
-        baseMatrix: node.matrixWorld.clone(),
-      });
-    });
-  }
 
-  setPositions(positions: readonly THREE.Vector3[]) {
-    const count = Math.min(positions.length, this.capacity);
-    for (const entry of this.entries) {
-      entry.mesh.count = count;
-      for (let i = 0; i < count; i += 1) {
-        const pos = positions[i]!;
-        this.transformScratch.makeTranslation(
-          pos.x,
-          pos.y + this.yOffset,
-          pos.z
-        );
-        this.instanceMatrixScratch.multiplyMatrices(
-          this.transformScratch,
-          entry.baseMatrix
-        );
-        entry.mesh.setMatrixAt(i, this.instanceMatrixScratch);
-      }
-      entry.mesh.instanceMatrix.needsUpdate = true;
-    }
-  }
 
-  setTransforms(transforms: readonly THREE.Matrix4[]) {
-    const count = Math.min(transforms.length, this.capacity);
-    for (const entry of this.entries) {
-      entry.mesh.count = count;
-      for (let i = 0; i < count; i += 1) {
-        this.transformScratch.copy(transforms[i]!);
-        if (this.yOffset !== 0) {
-          this.transformScratch.elements[13] += this.yOffset;
-        }
-        this.instanceMatrixScratch.multiplyMatrices(
-          this.transformScratch,
-          entry.baseMatrix
-        );
-        entry.mesh.setMatrixAt(i, this.instanceMatrixScratch);
-      }
-      entry.mesh.instanceMatrix.needsUpdate = true;
-    }
-  }
 
-  getFacingYaw() {
-    return this.facingYaw;
-  }
-
-  clear() {
-    for (const entry of this.entries) {
-      entry.mesh.count = 0;
-      entry.mesh.instanceMatrix.needsUpdate = true;
-    }
-  }
-
-  dispose() {
-    this.clearEntries();
-    this.root.removeFromParent();
-  }
-
-  private clearEntries() {
-    while (this.entries.length > 0) {
-      const entry = this.entries.pop()!;
-      this.root.remove(entry.mesh);
-      if (Array.isArray(entry.mesh.material)) {
-        for (const material of entry.mesh.material) {
-          material.dispose();
-        }
-      } else {
-        entry.mesh.material.dispose();
-      }
-    }
-  }
-
-  private computeFacingYaw(source: THREE.Object3D) {
-    const facing = source.getObjectByName('Facing');
-    if (!facing) return 0;
-    facing.getWorldQuaternion(this.facingQuaternionScratch);
-    // Blender empties commonly author "forward" as local -Y in export workflows.
-    this.facingDirectionScratch
-      .set(0, -1, 0)
-      .applyQuaternion(this.facingQuaternionScratch);
-    this.facingDirectionScratch.y = 0;
-    if (this.facingDirectionScratch.lengthSq() < 1e-9) return 0;
-    this.facingDirectionScratch.normalize();
-    return Math.atan2(
-      this.facingDirectionScratch.x,
-      this.facingDirectionScratch.z
-    );
-  }
-}
-
-const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const getVisibleGroundBounds = (
-  camera: THREE.OrthographicCamera
-): GroundBounds => {
-  const corners = [
-    new THREE.Vector3(-1, -1, -1),
-    new THREE.Vector3(1, -1, -1),
-    new THREE.Vector3(1, 1, -1),
-    new THREE.Vector3(-1, 1, -1),
-  ];
-  let minX = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let minZ = Number.POSITIVE_INFINITY;
-  let maxZ = Number.NEGATIVE_INFINITY;
-
-  for (const corner of corners) {
-    const nearPoint = corner.clone().unproject(camera);
-    const farPoint = corner.clone().setZ(1).unproject(camera);
-    const direction = farPoint.sub(nearPoint).normalize();
-    const ray = new THREE.Ray(nearPoint, direction);
-    const hit = new THREE.Vector3();
-    if (ray.intersectPlane(groundPlane, hit)) {
-      minX = Math.min(minX, hit.x);
-      maxX = Math.max(maxX, hit.x);
-      minZ = Math.min(minZ, hit.z);
-      maxZ = Math.max(maxZ, hit.z);
-    }
-  }
-
-  if (
-    !Number.isFinite(minX) ||
-    !Number.isFinite(maxX) ||
-    !Number.isFinite(minZ) ||
-    !Number.isFinite(maxZ)
-  ) {
-    return { minX: -1, maxX: 1, minZ: -1, maxZ: 1 };
-  }
-
-  const padding = GRID_SIZE * 2;
-  minX -= padding;
-  maxX += padding;
-  minZ -= padding;
-  maxZ += padding;
-
-  minX = Math.floor(minX / GRID_SIZE) * GRID_SIZE;
-  maxX = Math.ceil(maxX / GRID_SIZE) * GRID_SIZE;
-  minZ = Math.floor(minZ / GRID_SIZE) * GRID_SIZE;
-  maxZ = Math.ceil(maxZ / GRID_SIZE) * GRID_SIZE;
-
-  return { minX, maxX, minZ, maxZ };
-};
-
-// World-aligned grid system that only renders visible lines
-class WorldGrid {
-  private group: THREE.Group;
-  private lineMaterial: THREE.LineBasicMaterial;
-  private lines: THREE.Line[] = [];
-  private lastBounds: GroundBounds | null = null;
-  private readonly halfGrid: number;
-
-  constructor() {
-    this.group = new THREE.Group();
-    this.lineMaterial = new THREE.LineBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.15,
-    });
-    this.halfGrid = GRID_SIZE * 0.5;
-    scene.add(this.group);
-  }
-
-  update(bounds: GroundBounds) {
-    if (
-      this.lastBounds &&
-      this.lastBounds.minX === bounds.minX &&
-      this.lastBounds.maxX === bounds.maxX &&
-      this.lastBounds.minZ === bounds.minZ &&
-      this.lastBounds.maxZ === bounds.maxZ
-    ) {
-      return;
-    }
-    this.lastBounds = bounds;
-
-    // Clear existing lines
-    for (const line of this.lines) {
-      this.group.remove(line);
-      line.geometry.dispose();
-    }
-    this.lines = [];
-
-    const clampedMinX = Math.max(bounds.minX, -WORLD_BOUNDS);
-    const clampedMaxX = Math.min(bounds.maxX, WORLD_BOUNDS);
-    const clampedMinZ = Math.max(bounds.minZ, -WORLD_BOUNDS);
-    const clampedMaxZ = Math.min(bounds.maxZ, WORLD_BOUNDS);
-    if (clampedMinX > clampedMaxX || clampedMinZ > clampedMaxZ) {
-      return;
-    }
-
-    const minX =
-      Math.ceil((clampedMinX - this.halfGrid) / GRID_SIZE) * GRID_SIZE +
-      this.halfGrid;
-    const maxX =
-      Math.floor((clampedMaxX - this.halfGrid) / GRID_SIZE) * GRID_SIZE +
-      this.halfGrid;
-    const minZ =
-      Math.ceil((clampedMinZ - this.halfGrid) / GRID_SIZE) * GRID_SIZE +
-      this.halfGrid;
-    const maxZ =
-      Math.floor((clampedMaxZ - this.halfGrid) / GRID_SIZE) * GRID_SIZE +
-      this.halfGrid;
-
-    // Create vertical lines (along Z axis)
-    for (let x = minX; x <= maxX; x += GRID_SIZE) {
-      const geometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x, 0.01, clampedMinZ),
-        new THREE.Vector3(x, 0.01, clampedMaxZ),
-      ]);
-      const line = new THREE.Line(geometry, this.lineMaterial);
-      this.group.add(line);
-      this.lines.push(line);
-    }
-
-    // Create horizontal lines (along X axis)
-    for (let z = minZ; z <= maxZ; z += GRID_SIZE) {
-      const geometry = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(clampedMinX, 0.01, z),
-        new THREE.Vector3(clampedMaxX, 0.01, z),
-      ]);
-      const line = new THREE.Line(geometry, this.lineMaterial);
-      this.group.add(line);
-      this.lines.push(line);
-    }
-  }
-
-  setVisible(visible: boolean) {
-    this.group.visible = visible;
-  }
-
-  setBuildMode(active: boolean) {
-    this.lineMaterial.color.setHex(active ? 0xffffff : 0x000000);
-    this.lineMaterial.opacity = active ? 0.18 : 0.15;
-  }
-
-  dispose() {
-    for (const line of this.lines) {
-      this.group.remove(line);
-      line.geometry.dispose();
-    }
-    this.lines = [];
-    this.lineMaterial.dispose();
-    scene.remove(this.group);
-  }
-}
-
-class WorldBorder {
-  private readonly line: THREE.LineLoop;
-
-  constructor() {
-    const points = [
-      new THREE.Vector3(-WORLD_BOUNDS, 0.06, -WORLD_BOUNDS),
-      new THREE.Vector3(WORLD_BOUNDS, 0.06, -WORLD_BOUNDS),
-      new THREE.Vector3(WORLD_BOUNDS, 0.06, WORLD_BOUNDS),
-      new THREE.Vector3(-WORLD_BOUNDS, 0.06, WORLD_BOUNDS),
-    ];
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({
-      color: 0xd96464,
-      transparent: true,
-      opacity: 0.95,
-    });
-    this.line = new THREE.LineLoop(geometry, material);
-    scene.add(this.line);
-  }
-
-  dispose() {
-    scene.remove(this.line);
-    this.line.geometry.dispose();
-    (this.line.material as THREE.Material).dispose();
-  }
-}
-
-class SpawnContainerOverlay {
-  private readonly lines = new Map<string, THREE.LineLoop>();
-  private readonly material = new THREE.LineBasicMaterial({
-    color: 0x6f8a9c,
-    transparent: true,
-    opacity: 0.8,
-  });
-
-  upsert(spawnerId: string, corners: THREE.Vector3[]) {
-    const existing = this.lines.get(spawnerId);
-    if (existing) {
-      scene.remove(existing);
-      existing.geometry.dispose();
-      this.lines.delete(spawnerId);
-    }
-    const geometry = new THREE.BufferGeometry().setFromPoints(corners);
-    const loop = new THREE.LineLoop(geometry, this.material);
-    loop.position.y = 0.05;
-    scene.add(loop);
-    this.lines.set(spawnerId, loop);
-  }
-
-  clear() {
-    for (const line of this.lines.values()) {
-      scene.remove(line);
-      line.geometry.dispose();
-    }
-    this.lines.clear();
-  }
-
-  dispose() {
-    this.clear();
-    this.material.dispose();
-  }
-}
-
-class StagingIslandsOverlay {
-  private readonly islands = new Map<
-    string,
-    {
-      group: THREE.Group;
-      gate: THREE.Mesh;
-      gateClosedY: number;
-      gateOpenY: number;
-      gateProgress: number;
-    }
-  >();
-  private readonly islandGroundPositionsBySpawner = new Map<
-    string,
-    THREE.Vector3[]
-  >();
-  private readonly bridgePathKeysBySpawner = new Map<string, Set<string>>();
-  private readonly bridgePathCenterPositionsBySpawner = new Map<
-    string,
-    THREE.Vector3[]
-  >();
-  private readonly bridgePathEdgeTransformsBySpawner = new Map<
-    string,
-    THREE.Matrix4[]
-  >();
-  private readonly bridgePathInnerCornerTransformsBySpawner = new Map<
-    string,
-    THREE.Matrix4[]
-  >();
-  private readonly bridgePathOuterCornerTransformsBySpawner = new Map<
-    string,
-    THREE.Matrix4[]
-  >();
-  private readonly groundLayer = new InstancedModelLayer(scene, 2_500, {
-    receiveShadow: true,
-    castShadow: false,
-  });
-  private readonly pathCenterLayer = new InstancedModelLayer(scene, 1_500, {
-    receiveShadow: true,
-    castShadow: false,
-    yOffset: 0.01,
-  });
-  private readonly pathEdgeLayer = new InstancedModelLayer(scene, 1_500, {
-    receiveShadow: true,
-    castShadow: false,
-    yOffset: 0.01,
-  });
-  private readonly pathInnerCornerLayer = new InstancedModelLayer(scene, 600, {
-    receiveShadow: true,
-    castShadow: false,
-    yOffset: 0.01,
-  });
-  private readonly pathOuterCornerLayer = new InstancedModelLayer(scene, 600, {
-    receiveShadow: true,
-    castShadow: false,
-    yOffset: 0.01,
-  });
-  private readonly gateClosedMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb64747,
-    transparent: true,
-    opacity: 0.95,
-  });
-  private readonly gateOpenMaterial = new THREE.MeshStandardMaterial({
-    color: 0x4bb46a,
-    transparent: true,
-    opacity: 0.9,
-  });
-  private tilesChangedListener: (() => void) | null = null;
-
-  setTilesChangedListener(listener: (() => void) | null) {
-    this.tilesChangedListener = listener;
-  }
-
-  getLandTileKeys() {
-    const keys = new Set<string>();
-    for (const tiles of this.islandGroundPositionsBySpawner.values()) {
-      for (const tile of tiles) {
-        keys.add(`${tile.x},${tile.z}`);
-      }
-    }
-    for (const bridgePathKeys of this.bridgePathKeysBySpawner.values()) {
-      for (const key of bridgePathKeys) {
-        keys.add(key);
-      }
-    }
-    return keys;
-  }
-
-  setGroundTemplate(source: THREE.Object3D | null) {
-    this.groundLayer.setTemplate(source);
-    this.rebuildTileLayers();
-  }
-
-  setPathTemplate(source: THREE.Object3D | null) {
-    this.pathCenterLayer.setTemplate(source);
-    this.rebuildTileLayers();
-  }
-
-  setPathEdgeTemplate(source: THREE.Object3D | null) {
-    this.pathEdgeLayer.setTemplate(source);
-    this.rebuildTileLayers();
-  }
-
-  setPathInnerCornerTemplate(source: THREE.Object3D | null) {
-    this.pathInnerCornerLayer.setTemplate(source);
-    this.rebuildTileLayers();
-  }
-
-  setPathOuterCornerTemplate(source: THREE.Object3D | null) {
-    this.pathOuterCornerLayer.setTemplate(source);
-    this.rebuildTileLayers();
-  }
-
-  private rebuildTileLayers() {
-    const groundTiles: THREE.Vector3[] = [];
-    for (const tiles of this.islandGroundPositionsBySpawner.values()) {
-      groundTiles.push(...tiles);
-    }
-    this.groundLayer.setPositions(groundTiles);
-
-    const bridgePathCenterTiles: THREE.Vector3[] = [];
-    for (const tiles of this.bridgePathCenterPositionsBySpawner.values()) {
-      bridgePathCenterTiles.push(...tiles);
-    }
-    this.pathCenterLayer.setPositions(bridgePathCenterTiles);
-
-    const bridgePathEdgeTransforms: THREE.Matrix4[] = [];
-    for (const transforms of this.bridgePathEdgeTransformsBySpawner.values()) {
-      bridgePathEdgeTransforms.push(...transforms);
-    }
-    this.pathEdgeLayer.setTransforms(bridgePathEdgeTransforms);
-
-    const bridgePathInnerCornerTransforms: THREE.Matrix4[] = [];
-    for (const transforms of this.bridgePathInnerCornerTransformsBySpawner.values()) {
-      bridgePathInnerCornerTransforms.push(...transforms);
-    }
-    this.pathInnerCornerLayer.setTransforms(bridgePathInnerCornerTransforms);
-
-    const bridgePathOuterCornerTransforms: THREE.Matrix4[] = [];
-    for (const transforms of this.bridgePathOuterCornerTransformsBySpawner.values()) {
-      bridgePathOuterCornerTransforms.push(...transforms);
-    }
-    this.pathOuterCornerLayer.setTransforms(bridgePathOuterCornerTransforms);
-    this.tilesChangedListener?.();
-  }
-
-  hasBridgePathAt(x: number, z: number) {
-    const key = `${x},${z}`;
-    for (const keys of this.bridgePathKeysBySpawner.values()) {
-      if (keys.has(key)) return true;
-    }
-    return false;
-  }
-
-  private buildIslandGroundTiles(center: THREE.Vector3) {
-    const out: THREE.Vector3[] = [];
-    const baseX = Math.round(center.x);
-    const baseZ = Math.round(center.z);
-    const minOffset = -Math.floor(STAGING_ISLAND_SIZE * 0.5);
-    for (let xStep = 0; xStep < STAGING_ISLAND_SIZE; xStep += 1) {
-      for (let zStep = 0; zStep < STAGING_ISLAND_SIZE; zStep += 1) {
-        out.push(
-          new THREE.Vector3(
-            baseX + minOffset + xStep,
-            STAGING_PLATFORM_Y,
-            baseZ + minOffset + zStep
-          )
-        );
-      }
-    }
-    return out;
-  }
-
-  private buildBridgeGroundTiles(
-    center: THREE.Vector3,
-    towardMap: THREE.Vector3,
-    reservePathStrip = true
-  ) {
-    const out: THREE.Vector3[] = [];
-    const unique = new Set<string>();
-    const tangent = new THREE.Vector3(-towardMap.z, 0, towardMap.x);
-    const islandHalf = STAGING_ISLAND_SIZE * 0.5;
-    const bridgeHalf = Math.max(0, Math.floor(STAGING_BRIDGE_WIDTH * 0.5));
-    const pathHalf = Math.max(0, Math.floor(STAGING_BRIDGE_PATH_WIDTH * 0.5));
-    for (let along = 0; along < STAGING_BRIDGE_LENGTH; along += 1) {
-      const anchor = center
-        .clone()
-        .addScaledVector(towardMap, islandHalf + along);
-      for (let lateral = 0; lateral < STAGING_BRIDGE_WIDTH; lateral += 1) {
-        const lateralOffset = lateral - bridgeHalf;
-        // Reserve middle strip only when a path will actually be drawn.
-        if (reservePathStrip && Math.abs(lateralOffset) <= pathHalf) continue;
-        const tile = anchor.clone().addScaledVector(tangent, lateralOffset);
-        const x = Math.round(tile.x);
-        const z = Math.round(tile.z);
-        if (Math.abs(x) <= WORLD_BOUNDS && Math.abs(z) <= WORLD_BOUNDS)
-          continue;
-        const key = `${x},${z}`;
-        if (unique.has(key)) continue;
-        unique.add(key);
-        out.push(new THREE.Vector3(x, STAGING_PLATFORM_Y, z));
-      }
-    }
-    return out;
-  }
-
-  private buildBridgePathTiles(
-    center: THREE.Vector3,
-    towardMap: THREE.Vector3
-  ) {
-    const centers: THREE.Vector3[] = [];
-    const edgeTransforms: THREE.Matrix4[] = [];
-    const innerCornerTransforms: THREE.Matrix4[] = [];
-    const outerCornerTransforms: THREE.Matrix4[] = [];
-    const unique = new Set<string>();
-    const tangent = new THREE.Vector3(-towardMap.z, 0, towardMap.x);
-    const islandHalf = STAGING_ISLAND_SIZE * 0.5;
-    const islandCenterRun = Math.floor(islandHalf);
-    const pathHalf = Math.max(0, Math.floor(STAGING_BRIDGE_PATH_WIDTH * 0.5));
-    const pathWidth = Math.max(1, STAGING_BRIDGE_PATH_WIDTH);
-    // Extend from island center across the bridge to the map edge.
-    for (
-      let along = -islandCenterRun;
-      along < STAGING_BRIDGE_LENGTH;
-      along += 1
-    ) {
-      const anchor = center
-        .clone()
-        .addScaledVector(towardMap, islandHalf + along);
-      for (let lateral = 0; lateral < pathWidth; lateral += 1) {
-        const lateralOffset = lateral - pathHalf;
-        const tile = anchor.clone().addScaledVector(tangent, lateralOffset);
-        const x = Math.round(tile.x);
-        const z = Math.round(tile.z);
-        // Let map path layers own in-bounds tiles to avoid z-fighting.
-        if (Math.abs(x) <= WORLD_BOUNDS && Math.abs(z) <= WORLD_BOUNDS)
-          continue;
-        const key = `${x},${z}`;
-        if (unique.has(key)) continue;
-        unique.add(key);
-      }
-    }
-    const seamTowardMapDx = Math.sign(towardMap.x);
-    const seamTowardMapDz = Math.sign(towardMap.z);
-    const hasPathAt = (x: number, z: number) => {
-      const key = `${x},${z}`;
-      if (unique.has(key)) return true;
-      // Merge seam topology with immediate in-bounds neighbors.
-      if (Math.abs(x) <= WORLD_BOUNDS && Math.abs(z) <= WORLD_BOUNDS) {
-        const outsideNeighborX = x - seamTowardMapDx;
-        const outsideNeighborZ = z - seamTowardMapDz;
-        if (unique.has(`${outsideNeighborX},${outsideNeighborZ}`)) return true;
-      }
-      return false;
-    };
-    const transform = new THREE.Matrix4();
-    for (const key of unique) {
-      const { x, z } = parseGridKey(key);
-      const classification = classifyPathTile(x, z, hasPathAt);
-      const desiredYaw = directionToYaw(
-        classification.directionDx,
-        classification.directionDz
-      );
-      const targetFacing =
-        classification.variant === 'edge'
-          ? this.pathEdgeLayer.getFacingYaw()
-          : classification.variant === 'inner-corner'
-            ? this.pathInnerCornerLayer.getFacingYaw()
-            : classification.variant === 'outer-corner'
-              ? this.pathOuterCornerLayer.getFacingYaw()
-              : 0;
-      const yawOffset =
-        classification.variant === 'edge'
-          ? edgeTileYawOffset
-          : classification.variant === 'inner-corner' ||
-              classification.variant === 'outer-corner'
-            ? cornerTileYawOffset
-            : 0;
-      const correctedYaw = desiredYaw - targetFacing + yawOffset;
-      const finalYaw =
-        classification.variant === 'center'
-          ? correctedYaw
-          : snapYawToQuarterTurn(correctedYaw);
-      if (classification.variant === 'center') {
-        centers.push(new THREE.Vector3(x, STAGING_PLATFORM_Y, z));
-      } else {
-        transform.makeRotationY(finalYaw);
-        transform.setPosition(x, STAGING_PLATFORM_Y, z);
-        if (classification.variant === 'edge')
-          edgeTransforms.push(transform.clone());
-        if (classification.variant === 'inner-corner')
-          innerCornerTransforms.push(transform.clone());
-        if (classification.variant === 'outer-corner')
-          outerCornerTransforms.push(transform.clone());
-      }
-    }
-    return {
-      centers,
-      edgeTransforms,
-      innerCornerTransforms,
-      outerCornerTransforms,
-      keys: unique,
-    };
-  }
-
-  upsert(
-    spawnerId: string,
-    center: THREE.Vector3,
-    normal: THREE.Vector3,
-    gateOpen: boolean,
-    showPath = true
-  ) {
-    this.remove(spawnerId);
-    const group = new THREE.Group();
-    const towardMap = normal.clone().multiplyScalar(-1);
-    const yaw = Math.atan2(towardMap.x, towardMap.z);
-    const islandHalf = STAGING_ISLAND_SIZE * 0.5;
-
-    const bridgePath = showPath
-      ? this.buildBridgePathTiles(center, towardMap)
-      : {
-          centers: [] as THREE.Vector3[],
-          edgeTransforms: [] as THREE.Matrix4[],
-          innerCornerTransforms: [] as THREE.Matrix4[],
-          outerCornerTransforms: [] as THREE.Matrix4[],
-          keys: new Set<string>(),
-        };
-    this.bridgePathKeysBySpawner.set(spawnerId, bridgePath.keys);
-    const pathTileKeys = new Set<string>();
-    for (const tile of bridgePath.centers) {
-      pathTileKeys.add(`${tile.x},${tile.z}`);
-    }
-    for (const transform of bridgePath.edgeTransforms) {
-      pathTileKeys.add(
-        `${Math.round(transform.elements[12]!)},${Math.round(transform.elements[14]!)}`
-      );
-    }
-    for (const transform of bridgePath.innerCornerTransforms) {
-      pathTileKeys.add(
-        `${Math.round(transform.elements[12]!)},${Math.round(transform.elements[14]!)}`
-      );
-    }
-    for (const transform of bridgePath.outerCornerTransforms) {
-      pathTileKeys.add(
-        `${Math.round(transform.elements[12]!)},${Math.round(transform.elements[14]!)}`
-      );
-    }
-    const groundTiles = [
-      ...this.buildIslandGroundTiles(center),
-      ...this.buildBridgeGroundTiles(center, towardMap, showPath),
-    ].filter((tile) => !pathTileKeys.has(`${tile.x},${tile.z}`));
-    this.islandGroundPositionsBySpawner.set(spawnerId, groundTiles);
-    this.bridgePathCenterPositionsBySpawner.set(spawnerId, bridgePath.centers);
-    this.bridgePathEdgeTransformsBySpawner.set(
-      spawnerId,
-      bridgePath.edgeTransforms
-    );
-    this.bridgePathInnerCornerTransformsBySpawner.set(
-      spawnerId,
-      bridgePath.innerCornerTransforms
-    );
-    this.bridgePathOuterCornerTransformsBySpawner.set(
-      spawnerId,
-      bridgePath.outerCornerTransforms
-    );
-    this.rebuildTileLayers();
-
-    const gatePos = center
-      .clone()
-      .addScaledVector(towardMap, islandHalf - 0.35);
-    const gateClosedY = STAGING_ISLAND_HEIGHT * 0.5 + 0.22;
-    const gateOpenY = gateClosedY - (STAGING_ISLAND_HEIGHT + 0.55);
-    const gate = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        STAGING_BRIDGE_WIDTH + 0.3,
-        STAGING_ISLAND_HEIGHT + 0.45,
-        0.25
-      ),
-      gateOpen ? this.gateOpenMaterial : this.gateClosedMaterial
-    );
-    gate.position.copy(gatePos).setY(gateOpen ? gateOpenY : gateClosedY);
-    gate.rotation.y = yaw;
-    group.add(gate);
-
-    scene.add(group);
-    this.islands.set(spawnerId, {
-      group,
-      gate,
-      gateClosedY,
-      gateOpenY,
-      gateProgress: gateOpen ? 1 : 0,
-    });
-  }
-
-  setGateProgress(spawnerId: string, progress: number) {
-    const entry = this.islands.get(spawnerId);
-    if (!entry) return;
-    const clamped = clamp(progress, 0, 1);
-    entry.gateProgress = clamped;
-    entry.gate.position.y = THREE.MathUtils.lerp(
-      entry.gateClosedY,
-      entry.gateOpenY,
-      clamped
-    );
-    entry.gate.material =
-      clamped >= 1 ? this.gateOpenMaterial : this.gateClosedMaterial;
-  }
-
-  remove(spawnerId: string) {
-    const existing = this.islands.get(spawnerId);
-    if (!existing) return;
-    scene.remove(existing.group);
-    for (const child of existing.group.children) {
-      const mesh = child as THREE.Mesh;
-      mesh.geometry?.dispose();
-    }
-    this.islands.delete(spawnerId);
-    this.islandGroundPositionsBySpawner.delete(spawnerId);
-    this.bridgePathKeysBySpawner.delete(spawnerId);
-    this.bridgePathCenterPositionsBySpawner.delete(spawnerId);
-    this.bridgePathEdgeTransformsBySpawner.delete(spawnerId);
-    this.bridgePathInnerCornerTransformsBySpawner.delete(spawnerId);
-    this.bridgePathOuterCornerTransformsBySpawner.delete(spawnerId);
-    this.rebuildTileLayers();
-  }
-
-  clear() {
-    for (const spawnerId of this.islands.keys()) {
-      this.remove(spawnerId);
-    }
-  }
-
-  dispose() {
-    this.clear();
-    this.groundLayer.dispose();
-    this.pathCenterLayer.dispose();
-    this.pathEdgeLayer.dispose();
-    this.pathInnerCornerLayer.dispose();
-    this.pathOuterCornerLayer.dispose();
-    this.gateClosedMaterial.dispose();
-    this.gateOpenMaterial.dispose();
-  }
-}
-
-class FlowFieldDebugOverlay {
-  private reachableMesh: THREE.InstancedMesh | null = null;
-  private goalMesh: THREE.InstancedMesh | null = null;
-  private readonly tileDummy = new THREE.Object3D();
-
-  upsert(field: CorridorFlowField) {
-    this.clear();
-    let reachableCount = 0;
-    let goalCount = 0;
-    for (let idx = 0; idx < field.distance.length; idx += 1) {
-      const distance = field.distance[idx]!;
-      if (distance < 0) continue;
-      if (distance === 0) {
-        goalCount += 1;
-      } else {
-        reachableCount += 1;
-      }
-    }
-    if (reachableCount + goalCount === 0) return;
-
-    const tileSize = field.resolution * 0.92;
-    const tileGeometry = new THREE.PlaneGeometry(tileSize, tileSize);
-    tileGeometry.rotateX(-Math.PI / 2);
-    const reachableMaterial = new THREE.MeshBasicMaterial({
-      color: 0x2baeff,
-      transparent: true,
-      opacity: 0.32,
-      depthWrite: false,
-    });
-    const goalMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffef33,
-      transparent: true,
-      opacity: 0.72,
-      depthWrite: false,
-    });
-    this.reachableMesh = new THREE.InstancedMesh(
-      tileGeometry,
-      reachableMaterial,
-      Math.max(1, reachableCount)
-    );
-    this.goalMesh = new THREE.InstancedMesh(
-      tileGeometry.clone(),
-      goalMaterial,
-      Math.max(1, goalCount)
-    );
-    this.reachableMesh.count = 0;
-    this.goalMesh.count = 0;
-    this.reachableMesh.frustumCulled = false;
-    this.goalMesh.frustumCulled = false;
-
-    const y = 0.06;
-    let reachableIdx = 0;
-    let goalIdx = 0;
-    for (let idx = 0; idx < field.distance.length; idx += 1) {
-      const distance = field.distance[idx]!;
-      if (distance < 0) continue;
-      const x = idx % field.width;
-      const z = Math.floor(idx / field.width);
-      const wx = field.minWX + x * field.resolution;
-      const wz = field.minWZ + z * field.resolution;
-      if (distance === 0) {
-        this.tileDummy.position.set(wx, y + 0.01, wz);
-        this.tileDummy.updateMatrix();
-        this.goalMesh.setMatrixAt(goalIdx, this.tileDummy.matrix);
-        goalIdx += 1;
-      } else {
-        this.tileDummy.position.set(wx, y, wz);
-        this.tileDummy.updateMatrix();
-        this.reachableMesh.setMatrixAt(reachableIdx, this.tileDummy.matrix);
-        reachableIdx += 1;
-      }
-    }
-    this.reachableMesh.count = reachableIdx;
-    this.goalMesh.count = goalIdx;
-    this.reachableMesh.instanceMatrix.needsUpdate = true;
-    this.goalMesh.instanceMatrix.needsUpdate = true;
-    scene.add(this.reachableMesh);
-    scene.add(this.goalMesh);
-  }
-
-  clear() {
-    if (this.reachableMesh) {
-      scene.remove(this.reachableMesh);
-      this.reachableMesh.geometry.dispose();
-      (this.reachableMesh.material as THREE.Material).dispose();
-      this.reachableMesh = null;
-    }
-    if (this.goalMesh) {
-      scene.remove(this.goalMesh);
-      this.goalMesh.geometry.dispose();
-      (this.goalMesh.material as THREE.Material).dispose();
-      this.goalMesh = null;
-    }
-  }
-}
-
-const worldGrid = new WorldGrid();
-const worldBorder = new WorldBorder();
-const spawnContainerOverlay = new SpawnContainerOverlay();
-const stagingIslandsOverlay = new StagingIslandsOverlay();
-const flowFieldDebugOverlay = new FlowFieldDebugOverlay();
+const worldGrid = new WorldGrid(scene, GRID_SIZE, WORLD_BOUNDS);
+const worldBorder = new WorldBorder(scene, WORLD_BOUNDS);
+const spawnContainerOverlay = new SpawnContainerOverlay(scene);
+const stagingIslandsOverlay = new StagingIslandsOverlay(scene, {
+  islandSize: STAGING_ISLAND_SIZE,
+  islandHeight: STAGING_ISLAND_HEIGHT,
+  platformY: STAGING_PLATFORM_Y,
+  bridgeWidth: STAGING_BRIDGE_WIDTH,
+  bridgePathWidth: STAGING_BRIDGE_PATH_WIDTH,
+  bridgeLength: STAGING_BRIDGE_LENGTH,
+  worldBounds: WORLD_BOUNDS,
+});
+const flowFieldDebugOverlay = new FlowFieldDebugOverlay(scene);
 const groundTileLayer = new InstancedModelLayer(scene, 20_000, {
   receiveShadow: true,
   castShadow: false,
@@ -1469,86 +604,6 @@ const tmpPathEdgeTransforms: THREE.Matrix4[] = [];
 const tmpPathInnerCornerTransforms: THREE.Matrix4[] = [];
 const tmpPathOuterCornerTransforms: THREE.Matrix4[] = [];
 const tmpPathTransformScratch = new THREE.Matrix4();
-const cardinalGrassOffsets = [
-  { key: 'north', dx: 0, dz: -1 },
-  { key: 'east', dx: 1, dz: 0 },
-  { key: 'south', dx: 0, dz: 1 },
-  { key: 'west', dx: -1, dz: 0 },
-] as const;
-type PathTileVariant = 'center' | 'edge' | 'inner-corner' | 'outer-corner';
-type PathTileClassification = {
-  variant: PathTileVariant;
-  directionDx: number;
-  directionDz: number;
-};
-const parseGridKey = (key: string) => {
-  const [xRaw = '0', zRaw = '0'] = key.split(',');
-  return { x: Number(xRaw), z: Number(zRaw) };
-};
-const classifyPathTile = (
-  x: number,
-  z: number,
-  hasPathAt: (x: number, z: number) => boolean
-): PathTileClassification => {
-  const north = hasPathAt(x, z - 1);
-  const east = hasPathAt(x + 1, z);
-  const south = hasPathAt(x, z + 1);
-  const west = hasPathAt(x - 1, z);
-  const northEast = hasPathAt(x + 1, z - 1);
-  const southEast = hasPathAt(x + 1, z + 1);
-  const southWest = hasPathAt(x - 1, z + 1);
-  const northWest = hasPathAt(x - 1, z - 1);
-
-  const grassCardinals = cardinalGrassOffsets.filter(
-    ({ dx, dz }) => !hasPathAt(x + dx, z + dz)
-  );
-  if (grassCardinals.length === 1) {
-    return {
-      variant: 'edge',
-      directionDx: grassCardinals[0]!.dx,
-      directionDz: grassCardinals[0]!.dz,
-    };
-  }
-
-  if (grassCardinals.length === 2) {
-    const hasNorth = grassCardinals.some(({ key }) => key === 'north');
-    const hasEast = grassCardinals.some(({ key }) => key === 'east');
-    const hasSouth = grassCardinals.some(({ key }) => key === 'south');
-    const hasWest = grassCardinals.some(({ key }) => key === 'west');
-    if (hasNorth && hasEast)
-      return { variant: 'outer-corner', directionDx: 1, directionDz: -1 };
-    if (hasEast && hasSouth)
-      return { variant: 'outer-corner', directionDx: 1, directionDz: 1 };
-    if (hasSouth && hasWest)
-      return { variant: 'outer-corner', directionDx: -1, directionDz: 1 };
-    if (hasWest && hasNorth)
-      return { variant: 'outer-corner', directionDx: -1, directionDz: -1 };
-  }
-
-  const innerCornerDirections: Array<{ dx: number; dz: number }> = [];
-  if (north && east && !northEast)
-    innerCornerDirections.push({ dx: 1, dz: -1 });
-  if (east && south && !southEast) innerCornerDirections.push({ dx: 1, dz: 1 });
-  if (south && west && !southWest)
-    innerCornerDirections.push({ dx: -1, dz: 1 });
-  if (west && north && !northWest)
-    innerCornerDirections.push({ dx: -1, dz: -1 });
-  if (innerCornerDirections.length === 1) {
-    const dir = innerCornerDirections[0]!;
-    return {
-      variant: 'inner-corner',
-      directionDx: dir.dx,
-      directionDz: dir.dz,
-    };
-  }
-
-  return { variant: 'center', directionDx: 0, directionDz: 1 };
-};
-const directionToYaw = (dx: number, dz: number) => Math.atan2(dx, dz);
-const edgeTileYawOffset = -Math.PI * 0.5;
-const cornerTileYawOffset = Math.PI;
-const snapYawToQuarterTurn = (yaw: number) =>
-  Math.round(yaw / (Math.PI * 0.5)) * (Math.PI * 0.5);
 const buildPathTilesFromPoints = (
   points: readonly THREE.Vector3[],
   colliders: readonly StaticCollider[],
@@ -1728,213 +783,13 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = 0;
 ground.visible = false;
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 ground.receiveShadow = true;
 scene.add(ground);
-type WaterDistanceField = {
-  texture: THREE.DataTexture;
-  minX: number;
-  minZ: number;
-  sizeX: number;
-  sizeZ: number;
-};
 const waterOuterEdge = WORLD_BOUNDS + WATER_RING_OUTER_PADDING;
-const buildCoastlineLandKeys = () => {
-  const landKeys = new Set<string>();
-  for (let x = -WORLD_BOUNDS; x <= WORLD_BOUNDS; x += GRID_SIZE) {
-    for (let z = -WORLD_BOUNDS; z <= WORLD_BOUNDS; z += GRID_SIZE) {
-      landKeys.add(`${x},${z}`);
-    }
-  }
-  const stagingKeys = stagingIslandsOverlay.getLandTileKeys();
-  for (const key of stagingKeys) {
-    landKeys.add(key);
-  }
-  return landKeys;
-};
 
-const buildWaterDistanceField = (
-  landTileKeys: Set<string>
-): WaterDistanceField => {
-  let minX = -waterOuterEdge;
-  let maxX = waterOuterEdge;
-  let minZ = -waterOuterEdge;
-  let maxZ = waterOuterEdge;
-  for (const key of landTileKeys) {
-    const { x, z } = parseGridKey(key);
-    minX = Math.min(minX, x - GRID_SIZE * 3);
-    maxX = Math.max(maxX, x + GRID_SIZE * 3);
-    minZ = Math.min(minZ, z - GRID_SIZE * 3);
-    maxZ = Math.max(maxZ, z + GRID_SIZE * 3);
-  }
-  const sizeX = Math.max(GRID_SIZE * 2, maxX - minX);
-  const sizeZ = Math.max(GRID_SIZE * 2, maxZ - minZ);
-  const cellsX = Math.max(2, Math.floor(sizeX / GRID_SIZE) + 1);
-  const cellsZ = Math.max(2, Math.floor(sizeZ / GRID_SIZE) + 1);
-  const maxDistCells = 34;
-  const dist = new Int16Array(cellsX * cellsZ);
-  dist.fill(-1);
-  const landMask = new Uint8Array(cellsX * cellsZ);
-  const queue = new Int32Array(cellsX * cellsZ);
-  let head = 0;
-  let tail = 0;
-  const indexOf = (tx: number, tz: number) => tz * cellsX + tx;
-  const toCellX = (x: number) =>
-    Math.max(0, Math.min(cellsX - 1, Math.round((x - minX) / GRID_SIZE)));
-  const toCellZ = (z: number) =>
-    Math.max(0, Math.min(cellsZ - 1, Math.round((z - minZ) / GRID_SIZE)));
-
-  for (const key of landTileKeys) {
-    const { x, z } = parseGridKey(key);
-    const idx = indexOf(toCellX(x), toCellZ(z));
-    if (landMask[idx] === 1) continue;
-    landMask[idx] = 1;
-  }
-
-  // Seed from shoreline water cells (water cells directly adjacent to land),
-  // so every coast emits at the same phase origin.
-  for (let tz = 0; tz < cellsZ; tz += 1) {
-    for (let tx = 0; tx < cellsX; tx += 1) {
-      const idx = indexOf(tx, tz);
-      if (landMask[idx] === 1) continue;
-      let touchesLand = false;
-      if (tx > 0 && landMask[idx - 1] === 1) touchesLand = true;
-      if (tx + 1 < cellsX && landMask[idx + 1] === 1) touchesLand = true;
-      if (tz > 0 && landMask[idx - cellsX] === 1) touchesLand = true;
-      if (tz + 1 < cellsZ && landMask[idx + cellsX] === 1) touchesLand = true;
-      if (!touchesLand) continue;
-      dist[idx] = 0;
-      queue[tail] = idx;
-      tail += 1;
-    }
-  }
-
-  while (head < tail) {
-    const idx = queue[head]!;
-    head += 1;
-    const baseDist = dist[idx]!;
-    if (baseDist >= maxDistCells) continue;
-    const tx = idx % cellsX;
-    const tz = (idx - tx) / cellsX;
-    const nextDist = baseDist + 1;
-    if (tx > 0) {
-      const ni = idx - 1;
-      if (landMask[ni] === 0 && dist[ni] === -1) {
-        dist[ni] = nextDist;
-        queue[tail] = ni;
-        tail += 1;
-      }
-    }
-    if (tx + 1 < cellsX) {
-      const ni = idx + 1;
-      if (landMask[ni] === 0 && dist[ni] === -1) {
-        dist[ni] = nextDist;
-        queue[tail] = ni;
-        tail += 1;
-      }
-    }
-    if (tz > 0) {
-      const ni = idx - cellsX;
-      if (landMask[ni] === 0 && dist[ni] === -1) {
-        dist[ni] = nextDist;
-        queue[tail] = ni;
-        tail += 1;
-      }
-    }
-    if (tz + 1 < cellsZ) {
-      const ni = idx + cellsX;
-      if (landMask[ni] === 0 && dist[ni] === -1) {
-        dist[ni] = nextDist;
-        queue[tail] = ni;
-        tail += 1;
-      }
-    }
-  }
-
-  const data = new Uint8Array(cellsX * cellsZ * 4);
-  for (let i = 0; i < dist.length; i += 1) {
-    if (landMask[i] === 1) {
-      const diLand = i * 4;
-      data[diLand] = 0;
-      data[diLand + 1] = 0;
-      data[diLand + 2] = 0;
-      data[diLand + 3] = 0;
-      continue;
-    }
-    const raw = dist[i]!;
-    const clamped = raw < 0 ? maxDistCells : Math.min(raw, maxDistCells);
-    const normalized = clamped / maxDistCells;
-    const byte = Math.round(normalized * 255);
-    const di = i * 4;
-    data[di] = byte;
-    data[di + 1] = byte;
-    data[di + 2] = byte;
-    data[di + 3] = 255;
-  }
-
-  const texture = new THREE.DataTexture(data, cellsX, cellsZ, THREE.RGBAFormat);
-  texture.needsUpdate = true;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  return { texture, minX, minZ, sizeX, sizeZ };
-};
-
-const buildWaterSurfaceGeometry = (
-  landTileKeys: Set<string>,
-  field: WaterDistanceField
-) => {
-  const geometry = new THREE.BufferGeometry();
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const minX = field.minX;
-  const maxX = field.minX + field.sizeX;
-  const minZ = field.minZ;
-  const maxZ = field.minZ + field.sizeZ;
-  const startX = Math.ceil(minX / GRID_SIZE) * GRID_SIZE;
-  const endX = Math.floor(maxX / GRID_SIZE) * GRID_SIZE;
-  const startZ = Math.ceil(minZ / GRID_SIZE) * GRID_SIZE;
-  const endZ = Math.floor(maxZ / GRID_SIZE) * GRID_SIZE;
-  for (let x = startX; x <= endX; x += GRID_SIZE) {
-    for (let z = startZ; z <= endZ; z += GRID_SIZE) {
-      if (landTileKeys.has(`${x},${z}`)) continue;
-      const x0 = x - GRID_SIZE * 0.5;
-      const x1 = x + GRID_SIZE * 0.5;
-      const z0 = z - GRID_SIZE * 0.5;
-      const z1 = z + GRID_SIZE * 0.5;
-      positions.push(
-        x0,
-        0,
-        z0,
-        x1,
-        0,
-        z1,
-        x1,
-        0,
-        z0,
-        x0,
-        0,
-        z0,
-        x0,
-        0,
-        z1,
-        x1,
-        0,
-        z1
-      );
-      normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-    }
-  }
-  geometry.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute(positions, 3)
-  );
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geometry.computeBoundingSphere();
-  return geometry;
-};
-const initialWaterLandKeys = buildCoastlineLandKeys();
-let waterDistanceField = buildWaterDistanceField(initialWaterLandKeys);
+const initialWaterLandKeys = buildCoastlineLandKeys(WORLD_BOUNDS, GRID_SIZE, stagingIslandsOverlay.getLandTileKeys());
+let waterDistanceField = buildWaterDistanceField(initialWaterLandKeys, waterOuterEdge, GRID_SIZE);
 const waterMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
@@ -2004,7 +859,7 @@ const waterMaterial = new THREE.ShaderMaterial({
   `,
 });
 const waterMesh = new THREE.Mesh(
-  buildWaterSurfaceGeometry(initialWaterLandKeys, waterDistanceField),
+  buildWaterSurfaceGeometry(initialWaterLandKeys, waterDistanceField, GRID_SIZE),
   waterMaterial
 );
 waterMesh.position.set(0, WATER_LEVEL - 0.01, 0);
@@ -2014,9 +869,9 @@ scene.add(waterMesh);
 const updateWaterFromBounds = (_bounds: GroundBounds) => {};
 
 const rebuildWaterDistanceField = () => {
-  const nextLandKeys = buildCoastlineLandKeys();
-  const next = buildWaterDistanceField(nextLandKeys);
-  const nextGeometry = buildWaterSurfaceGeometry(nextLandKeys, next);
+  const nextLandKeys = buildCoastlineLandKeys(WORLD_BOUNDS, GRID_SIZE, stagingIslandsOverlay.getLandTileKeys());
+  const next = buildWaterDistanceField(nextLandKeys, waterOuterEdge, GRID_SIZE);
+  const nextGeometry = buildWaterSurfaceGeometry(nextLandKeys, next, GRID_SIZE);
   waterMesh.geometry.dispose();
   waterMesh.geometry = nextGeometry;
   waterDistanceField.texture.dispose();
@@ -2459,7 +1314,6 @@ const setStructureVisualScale = (mesh: THREE.Mesh, scale: number) => {
 };
 
 const DAMAGE_TINT = new THREE.Color(0xff5d5d);
-const DEATH_FLASH_TINT = new THREE.Color(0xff2a2a);
 const TEMP_BASE_COLOR = new THREE.Color();
 
 const applyStructureDamageVisuals = () => {
@@ -2753,16 +1607,6 @@ loadModelWithProgress(
 const mobs: MobEntity[] = [];
 const towers: Tower[] = [];
 const activeArrowProjectiles: ArrowProjectile[] = [];
-type PlayerArrowProjectile = {
-  mesh: THREE.Object3D;
-  position: THREE.Vector3;
-  velocity: THREE.Vector3;
-  gravity: THREE.Vector3;
-  gravityDelay: number;
-  radius: number;
-  ttl: number;
-  damage: number;
-};
 const activePlayerArrowProjectiles: PlayerArrowProjectile[] = [];
 let selectedTower: Tower | null = null;
 const smokePoofEffect = createSmokePoofEffect(scene);
@@ -4291,24 +3135,7 @@ type GrowingTree = {
   startedAtMs: number;
 };
 
-type MobDeathVisual = {
-  root: THREE.Object3D;
-  materials: THREE.Material[];
-  age: number;
-  heading: number;
-  fallSign: number;
-  startX: number;
-  startZ: number;
-  startY: number;
-  knockbackX: number;
-  knockbackZ: number;
-};
 
-const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
-  if (upgradeId === 'range') return ENERGY_COST_UPGRADE_RANGE;
-  if (upgradeId === 'damage') return ENERGY_COST_UPGRADE_DAMAGE;
-  return ENERGY_COST_UPGRADE_SPEED;
-};
 
 const getStructureIdFromCollider = (
   collider: DestructibleCollider
@@ -4322,30 +3149,6 @@ const getStructureIdFromCollider = (
 const treeRegrowQueue: TreeRegrowCandidate[] = [];
 const growingTrees: GrowingTree[] = [];
 
-const getRepairCost = (state: {
-  hp: number;
-  maxHp: number;
-  cumulativeBuildCost?: number;
-}) => {
-  if (state.maxHp <= 0 || state.hp >= state.maxHp) return 0;
-  const missingRatio = clamp((state.maxHp - state.hp) / state.maxHp, 0, 1);
-  const cumulativeBuildCost = Math.max(0, state.cumulativeBuildCost ?? 0);
-  return Math.max(
-    1,
-    Math.ceil(cumulativeBuildCost * REPAIR_DISCOUNT_RATE * missingRatio)
-  );
-};
-
-const getRepairStatus = (
-  hp: number,
-  maxHp: number
-): 'healthy' | 'needs_repair' | 'critical' => {
-  if (maxHp <= 0) return 'healthy';
-  const hpRatio = hp / maxHp;
-  if (hpRatio <= REPAIR_CRITICAL_HP_RATIO) return 'critical';
-  if (hpRatio < REPAIR_WARNING_HP_RATIO) return 'needs_repair';
-  return 'healthy';
-};
 
 const queueTreeRegrow = (collider: DestructibleCollider) => {
   if (collider.type !== 'tree') return;
@@ -4398,176 +3201,11 @@ app.appendChild(damageTextContainer);
 
 const activeEnergyTrails: EnergyTrail[] = [];
 const activeDamageTexts: FloatingDamageText[] = [];
-const activeMobDeathVisuals: MobDeathVisual[] = [];
-const CRIT_CHANCE = 1 / 8;
-const CRIT_MULTIPLIER = 2;
-
-const clearMobDeathVisuals = () => {
-  for (const visual of activeMobDeathVisuals) {
-    scene.remove(visual.root);
-    for (const material of visual.materials) {
-      material.dispose();
-    }
-  }
-  activeMobDeathVisuals.length = 0;
-};
-
-const spawnMobDeathVisual = (mob: MobEntity) => {
-  if (!mobDeathVisualTemplate) return;
-  const deathRoot = new THREE.Group();
-  const corpse = mobDeathVisualTemplate.clone(true);
-  const corpseBounds = new THREE.Box3().setFromObject(corpse);
-  if (!corpseBounds.isEmpty()) {
-    // Force the local pivot to the model's bottom, so tipping hinges at ground contact.
-    corpse.position.y -= corpseBounds.min.y;
-  }
-  deathRoot.add(corpse);
-  deathRoot.position.copy(mob.mesh.position);
-  const DEATH_VISUAL_LIFT_Y = 0.3;
-  deathRoot.position.y += mobInstanceGroundOffsetY + DEATH_VISUAL_LIFT_Y;
-  const startX = deathRoot.position.x;
-  const startZ = deathRoot.position.z;
-  const startY = deathRoot.position.y;
-  const headingSpeedSq =
-    mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z;
-  let heading =
-    headingSpeedSq > 1e-6
-      ? Math.atan2(mob.velocity.x, mob.velocity.z) + mobInstanceHeadingOffset
-      : mobInstanceHeadingOffset;
-  const fallSignFallback =
-    ((mob.mesh.id * 2654435761) >>> 0) % 2 === 0 ? 1 : -1;
-  let fallSign = fallSignFallback;
-  let knockbackX = 0;
-  let knockbackZ = 0;
-  if (mob.lastHitDirection) {
-    const hitDirX = mob.lastHitDirection.x;
-    const hitDirZ = mob.lastHitDirection.z;
-    const hitLenSq = hitDirX * hitDirX + hitDirZ * hitDirZ;
-    if (hitLenSq > 1e-8) {
-      const hitLenInv = 1 / Math.sqrt(hitLenSq);
-      const normalizedHitDirX = hitDirX * hitLenInv;
-      const normalizedHitDirZ = hitDirZ * hitLenInv;
-      // Align yaw so local +Z faces the hit direction, then tip front/back.
-      heading =
-        Math.atan2(normalizedHitDirX, normalizedHitDirZ) +
-        mobInstanceHeadingOffset;
-      // Rig pitch orientation is mirrored; this sign tips along local +Z.
-      fallSign = -1;
-      const DEATH_KNOCKBACK_DISTANCE = 2.6;
-      knockbackX = normalizedHitDirX * DEATH_KNOCKBACK_DISTANCE;
-      knockbackZ = normalizedHitDirZ * DEATH_KNOCKBACK_DISTANCE;
-    }
-  }
-  deathRoot.rotation.y = heading;
-
-  const deathMaterials: THREE.Material[] = [];
-  corpse.traverse((node) => {
-    if (!(node instanceof THREE.Mesh)) return;
-    const clonedMaterial = Array.isArray(node.material)
-      ? node.material.map((material) => material.clone())
-      : node.material.clone();
-    const asArray = Array.isArray(clonedMaterial)
-      ? clonedMaterial
-      : [clonedMaterial];
-    for (const material of asArray) {
-      material.transparent = true;
-      material.opacity = 1;
-      material.depthWrite = false;
-      const tintableMaterial = material as THREE.Material & {
-        color?: THREE.Color;
-      };
-      if (tintableMaterial.color) {
-        tintableMaterial.userData.deathFlashBaseColorHex =
-          tintableMaterial.color.getHex();
-      }
-      deathMaterials.push(material);
-    }
-    node.material = clonedMaterial;
-    node.castShadow = true;
-    node.receiveShadow = true;
-  });
-  scene.add(deathRoot);
-
-  activeMobDeathVisuals.push({
-    root: deathRoot,
-    materials: deathMaterials,
-    age: 0,
-    heading,
-    fallSign,
-    startX,
-    startZ,
-    startY,
-    knockbackX,
-    knockbackZ,
-  });
-};
-
-const updateMobDeathVisuals = (delta: number) => {
-  const FALL_DURATION = 0.5;
-  const HOLD_DURATION = 1.15;
-  const FADE_DURATION = 1.0;
-  const HIT_FLASH_HOLD_DURATION = 0.32;
-  const HIT_FLASH_LERP_OUT_DURATION = 0.2;
-  const KNOCKBACK_DURATION = 0.38;
-  const TOTAL_DURATION = FALL_DURATION + HOLD_DURATION + FADE_DURATION;
-  const MAX_FALL_ANGLE = Math.PI * 0.56;
-  const SINK_DISTANCE = 0.85;
-  const MIN_DEATH_Y = -2;
-  for (let i = activeMobDeathVisuals.length - 1; i >= 0; i -= 1) {
-    const visual = activeMobDeathVisuals[i]!;
-    visual.age += delta;
-    const clampedFallT = clamp(visual.age / FALL_DURATION, 0, 1);
-    const easedFall = 1 - (1 - clampedFallT) * (1 - clampedFallT);
-    const knockbackT = clamp(visual.age / KNOCKBACK_DURATION, 0, 1);
-    const knockbackEase =
-      1 - (1 - knockbackT) * (1 - knockbackT) * (1 - knockbackT);
-    visual.root.position.x = visual.startX + visual.knockbackX * knockbackEase;
-    visual.root.position.z = visual.startZ + visual.knockbackZ * knockbackEase;
-    visual.root.rotation.set(0, visual.heading, 0);
-    visual.root.rotateX(visual.fallSign * MAX_FALL_ANGLE * easedFall);
-    const hitFlashStrength =
-      visual.age <= HIT_FLASH_HOLD_DURATION
-        ? 1
-        : clamp(
-            1 -
-              (visual.age - HIT_FLASH_HOLD_DURATION) /
-                HIT_FLASH_LERP_OUT_DURATION,
-            0,
-            1
-          );
-    const fadeStart = FALL_DURATION + HOLD_DURATION;
-    const fadeT = clamp((visual.age - fadeStart) / FADE_DURATION, 0, 1);
-    const sinkEase = 1 - (1 - fadeT) * (1 - fadeT);
-    visual.root.position.y = Math.max(
-      visual.startY - SINK_DISTANCE * sinkEase,
-      MIN_DEATH_Y
-    );
-    const opacity = 1 - fadeT;
-    for (const material of visual.materials) {
-      const tintableMaterial = material as THREE.Material & {
-        color?: THREE.Color;
-      };
-      if (tintableMaterial.color) {
-        const baseColorHex = tintableMaterial.userData
-          .deathFlashBaseColorHex as number | undefined;
-        if (baseColorHex !== undefined) {
-          TEMP_BASE_COLOR.setHex(baseColorHex);
-          tintableMaterial.color
-            .copy(TEMP_BASE_COLOR)
-            .lerp(DEATH_FLASH_TINT, hitFlashStrength);
-        }
-      }
-      material.opacity = opacity;
-    }
-    if (visual.age >= TOTAL_DURATION) {
-      scene.remove(visual.root);
-      for (const material of visual.materials) {
-        material.dispose();
-      }
-      activeMobDeathVisuals.splice(i, 1);
-    }
-  }
-};
+const mobDeathVisuals = createMobDeathVisualSystem(scene);
+const clearMobDeathVisuals = mobDeathVisuals.clear;
+const spawnMobDeathVisual = (mob: MobEntity) =>
+  mobDeathVisuals.spawn(mob, mobDeathVisualTemplate, mobInstanceGroundOffsetY, mobInstanceHeadingOffset);
+const updateMobDeathVisuals = mobDeathVisuals.update;
 
 const updateCoinHudView = (delta: number) => {
   const rect = coinHudCanvasEl.getBoundingClientRect();
@@ -5063,112 +3701,6 @@ const markMobHitFlash = (mob: MobEntity) => {
   mob.hitFlashUntilMs = performance.now() + MOB_HIT_FLASH_MS;
 };
 
-const solveBallisticIntercept = (
-  start: THREE.Vector3,
-  targetPos: THREE.Vector3,
-  targetVelocity: THREE.Vector3,
-  speed: number,
-  gravity: THREE.Vector3,
-  gravityDelay: number,
-  maxTime: number
-) => {
-  const gravityDisplacementAt = (time: number) => {
-    const activeGravityTime = Math.max(0, time - gravityDelay);
-    return 0.5 * activeGravityTime * activeGravityTime;
-  };
-  const evaluate = (time: number) => {
-    towerAimPointScratch
-      .copy(targetPos)
-      .addScaledVector(targetVelocity, time)
-      .sub(start)
-      .addScaledVector(gravity, -gravityDisplacementAt(time));
-    return towerAimPointScratch.lengthSq() - speed * speed * time * time;
-  };
-
-  const minTime = 0.06;
-  const step = 0.04;
-  let prevTime = minTime;
-  let prevValue = evaluate(prevTime);
-  if (Math.abs(prevValue) < 1e-3) {
-    const hitTime = prevTime;
-    const interceptPoint = targetPos
-      .clone()
-      .addScaledVector(targetVelocity, hitTime);
-    const velocity = interceptPoint
-      .clone()
-      .sub(start)
-      .addScaledVector(gravity, -gravityDisplacementAt(hitTime))
-      .divideScalar(hitTime);
-    return { hitTime, interceptPoint, velocity };
-  }
-
-  for (let t = minTime + step; t <= maxTime; t += step) {
-    const value = evaluate(t);
-    if (prevValue === 0 || value === 0 || prevValue * value < 0) {
-      let lo = prevTime;
-      let hi = t;
-      let loValue = prevValue;
-      for (let i = 0; i < 16; i += 1) {
-        const mid = (lo + hi) * 0.5;
-        const midValue = evaluate(mid);
-        if (Math.abs(midValue) < 1e-4) {
-          lo = mid;
-          hi = mid;
-          break;
-        }
-        if (loValue * midValue <= 0) {
-          hi = mid;
-        } else {
-          lo = mid;
-          loValue = midValue;
-        }
-      }
-      const hitTime = (lo + hi) * 0.5;
-      const interceptPoint = targetPos
-        .clone()
-        .addScaledVector(targetVelocity, hitTime);
-      const velocity = interceptPoint
-        .clone()
-        .sub(start)
-        .addScaledVector(gravity, -gravityDisplacementAt(hitTime))
-        .divideScalar(hitTime);
-      return { hitTime, interceptPoint, velocity };
-    }
-    prevTime = t;
-    prevValue = value;
-  }
-  return null;
-};
-
-const computeFallbackBallisticVelocity = (
-  start: THREE.Vector3,
-  targetPos: THREE.Vector3,
-  gravity: THREE.Vector3,
-  gravityDelay: number,
-  speed: number,
-  maxTime: number
-) => {
-  const travelTime = THREE.MathUtils.clamp(
-    start.distanceTo(targetPos) / Math.max(speed, 0.001),
-    0.08,
-    maxTime
-  );
-  const activeGravityTime = Math.max(0, travelTime - gravityDelay);
-  const gravityDisplacement = 0.5 * activeGravityTime * activeGravityTime;
-  return targetPos
-    .clone()
-    .sub(start)
-    .addScaledVector(gravity, -gravityDisplacement)
-    .divideScalar(travelTime);
-};
-
-const rollAttackDamage = (baseDamage: number) => {
-  const isCrit = Math.random() < CRIT_CHANCE;
-  return {
-    damage: isCrit ? baseDamage * CRIT_MULTIPLIER : baseDamage,
-    isCrit,
-  };
-};
 
 const spawnFloatingDamageText = (
   mob: Entity,
@@ -5386,7 +3918,7 @@ const setBuildMode = (mode: BuildMode) => {
 
     worldGrid.setBuildMode(true);
     worldGrid.setVisible(true);
-    worldGrid.update(getVisibleGroundBounds(camera));
+    worldGrid.update(getVisibleGroundBounds(camera, GRID_SIZE));
   } else {
     (scene.background as THREE.Color).setHex(SCENE_BG_DEFAULT);
     hemi.color.setHex(HEMI_SKY_DEFAULT);
@@ -7202,7 +5734,7 @@ const tick = (now: number, delta: number) => {
   updateUsernameLabels();
 
   // Update ground + grid to cover the visible camera rectangle
-  const visibleBounds = getVisibleGroundBounds(camera);
+  const visibleBounds = getVisibleGroundBounds(camera, GRID_SIZE);
   updateGroundFromBounds(visibleBounds);
   updateWaterFromBounds(visibleBounds);
   if (debugViewState.worldGrid || gameState.buildMode !== 'off') {
