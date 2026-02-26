@@ -6,6 +6,9 @@ import wallModelUrl from '../src/client/assets/models/wall.glb?url';
 import treeModelUrl from '../src/client/assets/models/tree.glb?url';
 import swordModelUrl from '../src/client/assets/models/sword.glb?url';
 import arrowModelUrl from '../src/client/assets/models/arrow.glb?url';
+import cannonModelUrl from '../src/client/assets/models/cannon.glb?url';
+import bombModelUrl from '../src/client/assets/models/bomb.glb?url';
+import signModelUrl from '../src/client/assets/models/sign.glb?url';
 
 type Preset = {
   id: string;
@@ -16,6 +19,8 @@ type Preset = {
   scale?: number;
   /** Camera zoom multiplier - makes model appear larger (default 1) */
   zoom?: number;
+  /** Rotation around X axis in radians */
+  rotationX?: number;
   /** Rotation around Y axis in radians */
   rotationY?: number;
   /** Rotation around Z axis in radians (diagonal in screen plane) */
@@ -69,6 +74,29 @@ const presets: Preset[] = [
     outputName: 'arrow-icon.png',
     zoom: 1.1,
     rotationZ: (-10 * Math.PI) / 180,
+  },
+  {
+    id: 'cannon',
+    label: 'Cannon',
+    modelUrl: cannonModelUrl,
+    outputName: 'cannon-icon.png',
+  },
+  {
+    id: 'bomb',
+    label: 'Bomb',
+    modelUrl: bombModelUrl,
+    outputName: 'bomb-icon.png',
+  },
+  {
+    id: 'sign',
+    label: 'Sign',
+    modelUrl: signModelUrl,
+    outputName: 'sign-icon.png',
+    scale: 0.85,
+    zoom: 1,
+    rotationX: -Math.PI / 4,
+    rotationY: -Math.PI / 2,
+    rotationZ: -Math.PI / 4,
   },
 ];
 
@@ -454,6 +482,9 @@ const renderPreset = async (preset: Preset) => {
     root.clear();
     const scaleMultiplier = preset.scale ?? 1;
     const model = normalizeModel(gltf.scene, scaleMultiplier);
+    if (preset.rotationX != null) {
+      model.rotation.x = preset.rotationX;
+    }
     if (preset.rotationY != null) {
       model.rotation.y = preset.rotationY;
     }
