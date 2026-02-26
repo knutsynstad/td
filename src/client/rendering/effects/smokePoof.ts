@@ -49,8 +49,14 @@ const setObjectOpacity = (materials: THREE.Material[], opacity: number) => {
   }
 };
 
+export type SmokePoofOptions = {
+  scaleMultiplier?: number;
+  count?: number;
+  spreadMultiplier?: number;
+};
+
 export type SmokePoofEffect = {
-  spawnSmokePoof: (pos: THREE.Vector3) => void;
+  spawnSmokePoof: (pos: THREE.Vector3, options?: SmokePoofOptions) => void;
   setSmokeTemplate: (template: THREE.Object3D | null) => void;
   updateSmokePoofs: (delta: number) => void;
 };
@@ -61,10 +67,12 @@ export const createSmokePoofEffect = (
   const instances: SmokePoofInstance[] = [];
   let smokeTemplate: THREE.Object3D | null = null;
 
-  const spawnSmokePoof = (pos: THREE.Vector3) => {
+  const spawnSmokePoof = (pos: THREE.Vector3, options?: SmokePoofOptions) => {
     if (!smokeTemplate) return;
 
-    const count = 10;
+    const count = options?.count ?? 10;
+    const scaleMult = options?.scaleMultiplier ?? 1;
+    const spreadMult = options?.spreadMultiplier ?? 1;
     for (let i = 0; i < count; i++) {
       const root = smokeTemplate.clone(true);
       const jitter = 0.05;
@@ -78,13 +86,15 @@ export const createSmokePoofEffect = (
         Math.random() * Math.PI,
         Math.random() * Math.PI
       );
-      const baseScale = SIZE_MULTIPLIER * (0.7 + Math.random() * 0.5);
+      const baseScale = SIZE_MULTIPLIER * (0.7 + Math.random() * 0.5) * scaleMult;
       root.scale.setScalar(0.4 * baseScale);
       const angle = Math.random() * Math.PI * 2;
       const speed =
-        SPRAY_SPEED_MIN + Math.random() * (SPRAY_SPEED_MAX - SPRAY_SPEED_MIN);
+        (SPRAY_SPEED_MIN + Math.random() * (SPRAY_SPEED_MAX - SPRAY_SPEED_MIN)) *
+        spreadMult;
       const up =
-        SPRAY_UP_MIN + Math.random() * (SPRAY_UP_MAX - SPRAY_UP_MIN);
+        (SPRAY_UP_MIN + Math.random() * (SPRAY_UP_MAX - SPRAY_UP_MIN)) *
+        spreadMult;
       const velocity = new THREE.Vector3(
         Math.cos(angle) * speed,
         up,

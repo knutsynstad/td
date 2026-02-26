@@ -7,14 +7,27 @@ import {
   getBallistaArrowLaunchTransform,
 } from '../../rendering/presenters/ballistaRig';
 import {
+  createCannonVisualRig,
+  updateCannonRigTracking,
+  getCannonMuzzleLaunchTransform,
+  getCannonMuzzleLaunchDirection,
+} from '../../rendering/presenters/cannonRig';
+import { placeCannonballAtPosition } from '../../rendering/presenters/cannonballProjectile';
+import {
   computeArrowFacingFromTemplate,
   orientArrowToVelocity,
   placeArrowMeshAtFacing,
 } from '../../rendering/presenters/arrowProjectile';
 import { createInputController } from '../../domains/gameplay/inputController';
+import {
+  getTowerUpgradeDeltaText,
+  TOWER_UPGRADES,
+} from '../../domains/gameplay/towers/towerTypes';
 import { screenToWorldOnGround } from '../../domains/world/coords';
+import { SelectionDialog } from '../../ui/components/selectionDialog';
 import { clamp } from '../../domains/world/collision';
 import { createParticleSystem } from '../../rendering/effects/particles';
+import { createSmokePoofEffect } from '../../rendering/effects/smokePoof';
 import castleModelUrl from '../../assets/models/castle.glb?url';
 import treeModelUrl from '../../assets/models/tree.glb?url';
 import rockModelUrl from '../../assets/models/rock.glb?url';
@@ -24,6 +37,8 @@ import wallModelUrl from '../../assets/models/wall.glb?url';
 import mobModelUrl from '../../assets/models/mob.glb?url';
 import bossModelUrl from '../../assets/models/boss.glb?url';
 import cannonModelUrl from '../../assets/models/cannon.glb?url';
+import cannonballModelUrl from '../../assets/models/cannonball.glb?url';
+import smokeModelUrl from '../../assets/models/smoke.glb?url';
 import arrowModelUrl from '../../assets/models/arrow.glb?url';
 import groundModelUrl from '../../assets/models/ground.glb?url';
 import pathModelUrl from '../../assets/models/path.glb?url';
@@ -45,6 +60,13 @@ const BALLISTA_ARROW_GRAVITY = 36;
 const BALLISTA_ARROW_GRAVITY_DELAY = 0.12;
 const BALLISTA_ARROW_RADIUS = 0.2;
 const BALLISTA_ARROW_MAX_LIFETIME = 3;
+const CANNONBALL_SPEED = 22;
+const CANNONBALL_GRAVITY = 32;
+const CANNONBALL_GRAVITY_DELAY = 0.2;
+const CANNONBALL_RADIUS = 0.35;
+const CANNONBALL_MAX_LIFETIME = 4;
+const CANNONBALL_AOE_RADIUS = 2.5;
+const CANNONBALL_KNOCKBACK = 3.5;
 const UPGRADE_COST = 20;
 const MOB_MAX_HP = 50;
 const MOB_BASE_Y = 0.65;
@@ -69,14 +91,36 @@ type ArrowProjectile = {
   damage: number;
 };
 
+type CannonballProjectile = {
+  mesh: THREE.Object3D;
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  gravityDelay: number;
+  radius: number;
+  ttl: number;
+  damage: number;
+  aoeRadius: number;
+};
+
 const app = document.querySelector<HTMLDivElement>('#app');
 if (app === null) throw new Error('Missing #app');
 
+app.innerHTML = `
+  <div id="sandboxHud" class="hud">
+    <div class="hud-corner hud-corner--top-right">
+      <div class="hud-energy">
+        <div class="hud-energy__icon-view">
+          <canvas id="sandboxCoinCanvas" class="hud-energy__coin-canvas" aria-label="Coins"></canvas>
+        </div>
+        <span id="sandboxEnergyCount" class="hud-energy__value">9001</span>
+      </div>
+    </div>
+  </div>
+`;
+
 const canvas = document.createElement('canvas');
-canvas.style.display = 'block';
-canvas.style.width = '100%';
-canvas.style.height = '100%';
-app.insertBefore(canvas, app.firstChild);
+const renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
+app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10151a);
@@ -101,7 +145,6 @@ const cameraOffset = new THREE.Vector3(
   Math.sin(isoRot) * Math.cos(isoAngle) * isoDistance
 );
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 const SANDBOX_COINS = 9001;
@@ -216,6 +259,27 @@ const prepareStatic = (source: THREE.Object3D): THREE.Object3D => {
   return model;
 };
 
+const prepareCoinModel = (source: THREE.Object3D): THREE.Object3D => {
+  const model = source.clone(true);
+  const initialBounds = new THREE.Box3().setFromObject(model);
+  if (initialBounds.isEmpty()) return model;
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  initialBounds.getSize(size);
+  initialBounds.getCenter(center);
+  const largestAxis = Math.max(size.x, size.y, size.z, 0.001);
+  const targetAxis = 1.2;
+  const uniformScale = targetAxis / largestAxis;
+  model.scale.multiplyScalar(uniformScale);
+  model.position.set(
+    -center.x * uniformScale,
+    -center.y * uniformScale,
+    -center.z * uniformScale
+  );
+  setShadows(model);
+  return model;
+};
+
 const loader = new GLTFLoader();
 const loadModel = (url: string): Promise<THREE.Object3D> =>
   new Promise((resolve, reject) => {
@@ -225,6 +289,17 @@ const loadModel = (url: string): Promise<THREE.Object3D> =>
       undefined,
       reject
     );
+  });
+const loadModelRaw = (url: string): Promise<THREE.Object3D> =>
+  new Promise((resolve, reject) => {
+    loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+  });
+const loadModelWithPreparer = (
+  url: string,
+  preparer: (source: THREE.Object3D) => THREE.Object3D
+): Promise<THREE.Object3D> =>
+  new Promise((resolve, reject) => {
+    loader.load(url, (gltf) => resolve(preparer(gltf.scene)), undefined, reject);
   });
 
 const knollGroup = new THREE.Group();
@@ -245,6 +320,7 @@ let wasKeyboardMoving = false;
 
 const getGroundPoint = (event: PointerEvent): THREE.Vector3 | null => {
   const rect = renderer.domElement.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
   return screenToWorldOnGround(
     event.clientX,
     event.clientY,
@@ -281,9 +357,32 @@ const installPointerHandler = (handler: (event: PointerEvent) => void) => {
   renderer.domElement.addEventListener('pointerdown', handler);
 };
 installPointerHandler((event) => {
+  if ((event.target as HTMLElement).closest('.selection-dialog, .hud-energy')) return;
   const point = getGroundPoint(event);
   if (point) setMoveTarget(point);
 });
+
+const ensureRaycastable = (obj: THREE.Object3D) => {
+  obj.traverse((child) => {
+    if (child instanceof THREE.Mesh) child.raycast = THREE.Mesh.prototype.raycast;
+  });
+};
+
+const addHitbox = (parent: THREE.Object3D, template: THREE.Object3D) => {
+  const b = new THREE.Box3().setFromObject(template);
+  if (b.isEmpty()) return;
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  b.getSize(size);
+  b.getCenter(center);
+  const hitbox = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x, size.y, size.z),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  hitbox.position.copy(center).sub(template.position);
+  hitbox.raycast = THREE.Mesh.prototype.raycast;
+  parent.add(hitbox);
+};
 
 const placeModel = (
   template: THREE.Object3D,
@@ -296,6 +395,8 @@ const placeModel = (
   clone.position.set(x, 0, z);
   clone.scale.setScalar(scale);
   clone.rotation.y = rotY;
+  ensureRaycastable(clone);
+  addHitbox(clone, template);
   knollGroup.add(clone);
 };
 
@@ -312,6 +413,8 @@ const placeRock = (
   clone.position.set(x, 0, z);
   clone.scale.set(footX, vertScale, footZ);
   clone.rotation.y = rotY;
+  ensureRaycastable(clone);
+  addHitbox(clone, template);
   knollGroup.add(clone);
 };
 
@@ -325,6 +428,9 @@ Promise.all([
   loadModel(mobModelUrl),
   loadModel(bossModelUrl),
   loadModel(cannonModelUrl),
+  loadModelRaw(cannonModelUrl),
+  loadModel(cannonballModelUrl),
+  loadModel(smokeModelUrl),
   loadModel(arrowModelUrl),
   loadModel(groundModelUrl),
   loadModel(pathModelUrl),
@@ -332,6 +438,7 @@ Promise.all([
   loadModel(pathCornerInnerModelUrl),
   loadModel(pathCornerOuterModelUrl),
   loadModel(coinModelUrl),
+  loadModelWithPreparer(coinModelUrl, prepareCoinModel),
   loadModel(playerModelUrl),
   loadModel(pondModelUrl),
 ])
@@ -346,6 +453,9 @@ Promise.all([
       mobTemplate,
       boss,
       cannon,
+      cannonRaw,
+      cannonballTemplate,
+      smokeModel,
       arrowTemplate,
       groundTile,
       pathTile,
@@ -353,13 +463,14 @@ Promise.all([
       pathInner,
       pathOuter,
       coin,
+      coinHudTemplate,
       playerTemplate,
       pond,
     ]) => {
       applyGroundTileMaterial(groundTile);
 
       coinHudRoot.clear();
-      const hudCoin = coin.clone(true);
+      const hudCoin = coinHudTemplate.clone(true);
       hudCoin.scale.multiplyScalar(0.85);
       hudCoin.rotation.y = Math.PI / 7;
       coinHudRoot.add(hudCoin);
@@ -373,9 +484,8 @@ Promise.all([
       placeModel(wall, cx, cz);
       cx += KNOLL_SPACING;
       const rigDemoX = cx;
-      cx += KNOLL_SPACING;
-      placeModel(cannon, cx, cz);
-      cx += KNOLL_SPACING;
+      const cannonRigDemoX = cx + KNOLL_SPACING;
+      cx += KNOLL_SPACING * 2;
       placeModel(coin, cx, cz);
       cx += KNOLL_SPACING;
 
@@ -454,13 +564,18 @@ Promise.all([
 
       return {
         towerBallista,
+        cannon,
+        cannonRaw,
+        cannonballTemplate,
+        smokeModel,
         mobTemplate,
         arrowTemplate,
         rigDemoX,
+        cannonRigDemoX,
       };
     }
   )
-  .then(({ towerBallista, mobTemplate, arrowTemplate, rigDemoX }) => {
+  .then(({ towerBallista, cannon, cannonRaw, cannonballTemplate, smokeModel, mobTemplate, arrowTemplate, rigDemoX, cannonRigDemoX }) => {
     const arrowFacing = computeArrowFacingFromTemplate(arrowTemplate);
 
     let coins = SANDBOX_COINS;
@@ -473,62 +588,143 @@ Promise.all([
     type SandboxTowerState = { range: number; damage: number; shootCadence: number; rangeLevel: number; damageLevel: number; speedLevel: number };
     const sandboxTower: SandboxTowerState = { range: 8, damage: 16, shootCadence: 0.25, rangeLevel: 0, damageLevel: 0, speedLevel: 0 };
 
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    const selectionPanel = document.getElementById('sandboxSelectionPanel');
-    const statRangeEl = document.getElementById('sandboxStatRange');
-    const statDamageEl = document.getElementById('sandboxStatDamage');
-    const statSpeedEl = document.getElementById('sandboxStatSpeed');
     let ballistaSelected = false;
-
-    const updateSelectionPanel = () => {
-      if (!selectionPanel) return;
-      selectionPanel.style.display = ballistaSelected ? 'block' : 'none';
-      if (ballistaSelected) {
-        if (statRangeEl) statRangeEl.textContent = String(sandboxTower.range);
-        if (statDamageEl) statDamageEl.textContent = String(sandboxTower.damage);
-        if (statSpeedEl) statSpeedEl.textContent = String(Math.round(1 / sandboxTower.shootCadence));
-        const rangeBtn = document.getElementById('sandboxUpgradeRange');
-        const damageBtn = document.getElementById('sandboxUpgradeDamage');
-        const speedBtn = document.getElementById('sandboxUpgradeSpeed');
-        const setBtn = (btn: HTMLElement | null, disabled: boolean, text: string) => {
-          if (!btn) return;
-          btn.setAttribute('aria-disabled', String(disabled));
-          if (btn instanceof HTMLButtonElement) btn.disabled = disabled;
-          btn.textContent = text;
-        };
-        setBtn(rangeBtn, sandboxTower.rangeLevel >= 5 || coins < UPGRADE_COST, sandboxTower.rangeLevel >= 5 ? 'Range Max' : `Range +1 (${UPGRADE_COST})`);
-        setBtn(damageBtn, sandboxTower.damageLevel >= 5 || coins < UPGRADE_COST, sandboxTower.damageLevel >= 5 ? 'Damage Max' : `Damage +1 (${UPGRADE_COST})`);
-        setBtn(speedBtn, sandboxTower.speedLevel >= 5 || coins < UPGRADE_COST, sandboxTower.speedLevel >= 5 ? 'Speed Max' : `Speed +2/s (${UPGRADE_COST})`);
-      }
-    };
 
     const applyUpgrade = (id: 'range' | 'damage' | 'speed') => {
       if (coins < UPGRADE_COST) return;
-      if (id === 'range' && sandboxTower.rangeLevel < 5) {
+      const tower = ballistaSelected ? sandboxTower : sandboxCannon;
+      const rangeLevel = ballistaSelected ? sandboxTower.rangeLevel : sandboxCannon.rangeLevel;
+      const damageLevel = ballistaSelected ? sandboxTower.damageLevel : sandboxCannon.damageLevel;
+      const speedLevel = ballistaSelected ? sandboxTower.speedLevel : sandboxCannon.speedLevel;
+      if (id === 'range' && rangeLevel < 5) {
         coins -= UPGRADE_COST;
-        sandboxTower.rangeLevel += 1;
-        sandboxTower.range += 1;
-      } else if (id === 'damage' && sandboxTower.damageLevel < 5) {
+        tower.rangeLevel += 1;
+        tower.range += 1;
+      } else if (id === 'damage' && damageLevel < 5) {
         coins -= UPGRADE_COST;
-        sandboxTower.damageLevel += 1;
-        sandboxTower.damage += 1;
-      } else if (id === 'speed' && sandboxTower.speedLevel < 5) {
+        tower.damageLevel += 1;
+        tower.damage += 1;
+      } else if (id === 'speed' && speedLevel < 5) {
         coins -= UPGRADE_COST;
-        sandboxTower.speedLevel += 1;
-        const shotsPerSecond = 4 + sandboxTower.speedLevel * 2;
-        sandboxTower.shootCadence = 1 / shotsPerSecond;
+        tower.speedLevel += 1;
+        const shotsPerSecond = (ballistaSelected ? 4 : 2) + tower.speedLevel * (ballistaSelected ? 2 : 1);
+        tower.shootCadence = 1 / shotsPerSecond;
       }
       updateCoinsDisplay();
-      updateSelectionPanel();
+      updateSelectionDialog();
     };
 
-    document.getElementById('sandboxUpgradeRange')?.addEventListener('click', () => applyUpgrade('range'));
-    document.getElementById('sandboxUpgradeDamage')?.addEventListener('click', () => applyUpgrade('damage'));
-    document.getElementById('sandboxUpgradeSpeed')?.addEventListener('click', () => applyUpgrade('speed'));
+    const selectionDialog = new SelectionDialog(
+      app,
+      {
+        selectedCount: 0,
+        inRangeCount: 0,
+        isBankSelected: false,
+        selectedTowerTypeId: null,
+        selectedStructureLabel: '',
+        bankTotal: null,
+        canBankAdd1: false,
+        canBankAdd10: false,
+        canBankRemove1: false,
+        canBankRemove10: false,
+        showRepair: false,
+        buildingCoords: null,
+        buildingHealth: null,
+        upgradeOptions: [],
+        towerDetails: null,
+        canRepair: false,
+        canDelete: false,
+        repairCost: null,
+        repairStatus: null,
+      },
+      {
+        onUpgrade: applyUpgrade,
+        onRepair: () => {},
+        onDelete: () => {},
+        onBankAdd1: () => {},
+        onBankAdd10: () => {},
+        onBankRemove1: () => {},
+        onBankRemove10: () => {},
+      }
+    );
+
+    const updateSelectionDialog = () => {
+      const anySelected = ballistaSelected || cannonSelected;
+      if (!anySelected) {
+        selectionDialog.update({
+          selectedCount: 0,
+          inRangeCount: 0,
+          isBankSelected: false,
+          selectedTowerTypeId: null,
+          selectedStructureLabel: '',
+          bankTotal: null,
+          canBankAdd1: false,
+          canBankAdd10: false,
+          canBankRemove1: false,
+          canBankRemove10: false,
+          showRepair: false,
+          buildingCoords: null,
+          buildingHealth: null,
+          upgradeOptions: [],
+          towerDetails: null,
+          canRepair: false,
+          canDelete: false,
+          repairCost: null,
+          repairStatus: null,
+        });
+        return;
+      }
+      const tower = ballistaSelected ? sandboxTower : sandboxCannon;
+      const label = ballistaSelected ? 'Ballista' : 'Cannon';
+      const upgradeOptions = (['range', 'damage', 'speed'] as const)
+        .filter((id) => {
+          const level = id === 'range' ? tower.rangeLevel : id === 'damage' ? tower.damageLevel : tower.speedLevel;
+          return level < TOWER_UPGRADES[id].maxLevel;
+        })
+        .map((id) => ({
+          id,
+          label: TOWER_UPGRADES[id].label,
+          deltaText: getTowerUpgradeDeltaText(id),
+          cost: UPGRADE_COST,
+          canAfford: coins >= UPGRADE_COST,
+        }));
+      selectionDialog.update({
+        selectedCount: 1,
+        inRangeCount: 1,
+        isBankSelected: false,
+        selectedTowerTypeId: null,
+        selectedStructureLabel: label,
+        bankTotal: null,
+        canBankAdd1: false,
+        canBankAdd10: false,
+        canBankRemove1: false,
+        canBankRemove10: false,
+        showRepair: false,
+        buildingCoords: null,
+        buildingHealth: null,
+        upgradeOptions,
+        towerDetails: {
+          builtBy: '',
+          killCount: 0,
+          range: tower.range,
+          damage: tower.damage,
+          speed: 1 / tower.shootCadence,
+          dps: tower.damage / tower.shootCadence,
+          rangeLevel: tower.rangeLevel,
+          damageLevel: tower.damageLevel,
+          speedLevel: tower.speedLevel,
+        },
+        canRepair: false,
+        canDelete: false,
+        repairCost: null,
+        repairStatus: null,
+      });
+    };
 
     const mobDeathVisualTemplate = mobTemplate.clone(true);
     const particleSystem = createParticleSystem(scene);
+    const smokePoofEffect = createSmokePoofEffect(scene);
+    smokePoofEffect.setSmokeTemplate(smokeModel);
     const DEATH_FLASH_TINT = new THREE.Color(0xff2a2a);
     const MOB_DEATH_GROUND_OFFSET_Y = -0.65;
     const MOB_DEATH_HEADING_OFFSET = Math.PI;
@@ -725,23 +921,157 @@ Promise.all([
       if (obj instanceof THREE.Mesh) obj.raycast = THREE.Mesh.prototype.raycast;
     });
 
-    installPointerHandler((event) => {
-      if ((event.target as HTMLElement).closest('#sandboxSelectionPanel, .hud-energy')) return;
+    const cannonRigDemoGroup = new THREE.Group();
+    cannonRigDemoGroup.position.set(cannonRigDemoX, 0, 0);
+    scene.add(cannonRigDemoGroup);
+
+    const cannonTowerMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 2),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    cannonTowerMesh.position.set(0, 1, 0);
+    cannonRigDemoGroup.add(cannonTowerMesh);
+
+    const cannonRig = createCannonVisualRig(cannonRaw);
+    if (cannonRig) {
+      cannonRig.root.position.copy(cannonTowerMesh.position);
+      cannonRig.root.position.y -= 1;
+      cannonRigDemoGroup.add(cannonRig.root);
+    } else {
+      const cannonFallback = cannon.clone(true);
+      cannonFallback.position.copy(cannonTowerMesh.position);
+      cannonFallback.position.y -= 1;
+      cannonRigDemoGroup.add(cannonFallback);
+    }
+    const cannonTowerPos = new THREE.Vector3(cannonRigDemoX, 1, 0);
+    cannonRigDemoGroup.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) obj.raycast = THREE.Mesh.prototype.raycast;
+    });
+
+    type SandboxCannonState = { range: number; damage: number; shootCadence: number; rangeLevel: number; damageLevel: number; speedLevel: number };
+    const sandboxCannon: SandboxCannonState = { range: 9, damage: 24, shootCadence: 0.6, rangeLevel: 0, damageLevel: 0, speedLevel: 0 };
+
+    const cannonMobs: SandboxMob[] = [];
+    const activeCannonballs: CannonballProjectile[] = [];
+    const cannonballGravity = new THREE.Vector3(0, -CANNONBALL_GRAVITY, 0);
+    const CANNON_RIG_DEMO_SPAWN_DIST = 5;
+    const cannonSpawnLeft = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, -CANNON_RIG_DEMO_SPAWN_DIST);
+    const cannonSpawnRight = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, CANNON_RIG_DEMO_SPAWN_DIST);
+    let cannonRespawnTimer = 0;
+    let cannonShootCooldown = 0;
+
+    let cannonSelected = false;
+
+    const pickCannonMobInRange = (): SandboxMob | null => {
+      let best: SandboxMob | null = null;
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (const mob of cannonMobs) {
+        if (mob.hp <= 0) continue;
+        const d = mob.position.distanceTo(cannonTowerPos);
+        if (d <= sandboxCannon.range && d < bestDist) {
+          bestDist = d;
+          best = mob;
+        }
+      }
+      return best;
+    };
+
+    const spawnCannonMob = (_x: number, z: number) => {
+      const mesh = mobTemplate.clone(true);
+      const pos = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, z);
+      mesh.position.set(pos.x - cannonRigDemoX, pos.y, pos.z);
+      cannonRigDemoGroup.add(mesh);
+      cannonMobs.push({
+        mesh,
+        hp: MOB_MAX_HP,
+        maxHp: MOB_MAX_HP,
+        position: pos,
+        velocity: new THREE.Vector3(0, 0, 0),
+      });
+    };
+
+    const spawnCannonball = (launchPos: THREE.Vector3, velocity: THREE.Vector3) => {
+      const mesh = cannonballTemplate.clone(true);
+      placeCannonballAtPosition(mesh, launchPos);
+      scene.add(mesh);
+      activeCannonballs.push({
+        mesh,
+        position: launchPos.clone(),
+        velocity: velocity.clone(),
+        gravityDelay: CANNONBALL_GRAVITY_DELAY,
+        radius: CANNONBALL_RADIUS,
+        ttl: CANNONBALL_MAX_LIFETIME,
+        damage: sandboxCannon.damage,
+        aoeRadius: CANNONBALL_AOE_RADIUS,
+      });
+    };
+
+    const applyCannonballAoE = (impactPos: THREE.Vector3, damage: number, aoeRadius: number) => {
+      smokePoofEffect.spawnSmokePoof(impactPos, {
+        scaleMultiplier: 2.5,
+        count: 18,
+        spreadMultiplier: 2.2,
+      });
+      for (const mob of cannonMobs) {
+        if (mob.hp <= 0) continue;
+        const distSq = mob.position.distanceToSquared(impactPos);
+        if (distSq <= aoeRadius * aoeRadius) {
+          const mobCenter = new THREE.Vector3(mob.position.x, MOB_BASE_Y + 0.3, mob.position.z);
+          const hitDir = mobCenter.clone().sub(impactPos);
+          if (hitDir.lengthSq() > 1e-8) {
+            const dir = hitDir.normalize();
+            mob.lastHitDirection = dir.clone();
+            mob.velocity.addScaledVector(dir, CANNONBALL_KNOCKBACK);
+          }
+          mob.hp -= damage;
+        }
+      }
+    };
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const updatePointer = (e: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+    const selectionTargetScratch = new THREE.Vector3();
+    installPointerHandler((event) => {
+      if ((event.target as HTMLElement).closest('.selection-dialog, .hud-energy')) return;
+      updatePointer(event);
+      camera.updateMatrixWorld();
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObject(rigDemoGroup, true);
-      if (hits.length > 0) {
+      const ballistaHits = raycaster.intersectObject(rigDemoGroup, true);
+      const cannonHits = raycaster.intersectObject(cannonRigDemoGroup, true);
+      const knollHits = raycaster.intersectObject(knollGroup, true);
+      if (ballistaHits.length > 0) {
         ballistaSelected = true;
-        updateSelectionPanel();
+        cannonSelected = false;
+        updateSelectionDialog();
         setMoveTarget(towerPos.clone());
         return;
       }
+      if (cannonHits.length > 0) {
+        ballistaSelected = false;
+        cannonSelected = true;
+        updateSelectionDialog();
+        setMoveTarget(cannonTowerPos.clone());
+        return;
+      }
+      if (knollHits.length > 0) {
+        ballistaSelected = false;
+        cannonSelected = false;
+        updateSelectionDialog();
+        knollHits[0]!.object.getWorldPosition(selectionTargetScratch);
+        setMoveTarget(selectionTargetScratch);
+        return;
+      }
+      const hadSelection = ballistaSelected || cannonSelected;
       ballistaSelected = false;
-      updateSelectionPanel();
+      cannonSelected = false;
+      updateSelectionDialog();
       const point = getGroundPoint(event);
-      if (point) setMoveTarget(point);
+      if (point && !hadSelection) setMoveTarget(point);
     });
 
     const mobs: SandboxMob[] = [];
@@ -812,8 +1142,18 @@ Promise.all([
     const closestScratch = new THREE.Vector3();
     const mobCenterScratch = new THREE.Vector3();
 
+    const cannonLaunchPosScratch = new THREE.Vector3();
+    const cannonLaunchQuatScratch = new THREE.Quaternion();
+    const cannonTargetPosScratch = new THREE.Vector3();
+    const cannonPrevPosScratch = new THREE.Vector3();
+    const cannonStepScratch = new THREE.Vector3();
+    const cannonClosestScratch = new THREE.Vector3();
+    const cannonMobCenterScratch = new THREE.Vector3();
+    const GROUND_Y = 0;
+
     const updateRigDemo = (delta: number) => {
       towerShootCooldown = Math.max(0, towerShootCooldown - delta);
+      cannonShootCooldown = Math.max(0, cannonShootCooldown - delta);
 
       for (let i = mobs.length - 1; i >= 0; i -= 1) {
         const mob = mobs[i]!;
@@ -822,6 +1162,23 @@ Promise.all([
           particleSystem.spawnMobDeathEffects(mob.position);
           rigDemoGroup.remove(mob.mesh);
           mobs.splice(i, 1);
+        }
+      }
+
+      for (let i = cannonMobs.length - 1; i >= 0; i -= 1) {
+        const mob = cannonMobs[i]!;
+        if (mob.hp <= 0) {
+          spawnMobDeathVisual(mob);
+          particleSystem.spawnMobDeathEffects(mob.position);
+          cannonRigDemoGroup.remove(mob.mesh);
+          cannonMobs.splice(i, 1);
+        } else {
+          mob.position.x += mob.velocity.x * delta;
+          mob.position.z += mob.velocity.z * delta;
+          mob.mesh.position.x = mob.position.x - cannonRigDemoX;
+          mob.mesh.position.z = mob.position.z;
+          mob.velocity.x *= 0.92;
+          mob.velocity.z *= 0.92;
         }
       }
 
@@ -836,6 +1193,18 @@ Promise.all([
             spawnMob(0, spawnRight.z);
             nextSpawnSide = 'left';
           }
+        }
+      }
+
+      if (cannonMobs.length === 0) {
+        cannonRespawnTimer -= delta;
+        if (cannonRespawnTimer <= 0) {
+          cannonRespawnTimer = RIG_DEMO_RESPAWN_DELAY;
+          const CANNON_MOB_OFFSET = 0.5;
+          spawnCannonMob(0, cannonSpawnLeft.z - CANNON_MOB_OFFSET);
+          spawnCannonMob(0, cannonSpawnLeft.z + CANNON_MOB_OFFSET);
+          spawnCannonMob(0, cannonSpawnRight.z - CANNON_MOB_OFFSET);
+          spawnCannonMob(0, cannonSpawnRight.z + CANNON_MOB_OFFSET);
         }
       }
 
@@ -876,6 +1245,38 @@ Promise.all([
         }
       } else if (rig) {
         updateBallistaRigTracking(rig, towerPos, null, null, delta);
+      }
+
+      const cannonTarget = pickCannonMobInRange();
+      if (cannonTarget && cannonRig) {
+        cannonTargetPosScratch.copy(cannonTarget.position).setY(MOB_BASE_Y + 0.3);
+        const cannonLaunchVelComputed = cannonTargetPosScratch
+          .clone()
+          .sub(cannonTowerPos)
+          .normalize()
+          .multiplyScalar(CANNONBALL_SPEED);
+
+        const { aimAligned } = updateCannonRigTracking(
+          cannonRig,
+          cannonTowerPos,
+          cannonTargetPosScratch,
+          cannonLaunchVelComputed,
+          delta
+        );
+        if (aimAligned && cannonShootCooldown <= 0) {
+          getCannonMuzzleLaunchTransform(
+            cannonRig,
+            cannonLaunchPosScratch,
+            cannonLaunchQuatScratch
+          );
+          const cannonLaunchDir = new THREE.Vector3();
+          getCannonMuzzleLaunchDirection(cannonRig, cannonLaunchDir);
+          const cannonLaunchVel = cannonLaunchDir.multiplyScalar(CANNONBALL_SPEED);
+          spawnCannonball(cannonLaunchPosScratch, cannonLaunchVel);
+          cannonShootCooldown = sandboxCannon.shootCadence;
+        }
+      } else if (cannonRig) {
+        updateCannonRigTracking(cannonRig, cannonTowerPos, null, null, delta);
       }
 
       for (let i = activeArrows.length - 1; i >= 0; i -= 1) {
@@ -938,6 +1339,72 @@ Promise.all([
           hitMob.hp -= proj.damage;
           scene.remove(proj.mesh);
           activeArrows.splice(i, 1);
+        }
+      }
+
+      for (let i = activeCannonballs.length - 1; i >= 0; i -= 1) {
+        const proj = activeCannonballs[i]!;
+        proj.ttl -= delta;
+        if (proj.ttl <= 0) {
+          applyCannonballAoE(proj.position, proj.damage, proj.aoeRadius);
+          scene.remove(proj.mesh);
+          activeCannonballs.splice(i, 1);
+          continue;
+        }
+
+        cannonPrevPosScratch.copy(proj.position);
+        let gravDt = delta;
+        if (proj.gravityDelay > 0) {
+          const step = Math.min(proj.gravityDelay, delta);
+          proj.gravityDelay -= step;
+          gravDt = delta - step;
+        }
+        proj.velocity.y += cannonballGravity.y * gravDt;
+        proj.position.addScaledVector(proj.velocity, delta);
+        placeCannonballAtPosition(proj.mesh, proj.position);
+
+        if (proj.position.y <= GROUND_Y) {
+          applyCannonballAoE(proj.position, proj.damage, proj.aoeRadius);
+          scene.remove(proj.mesh);
+          activeCannonballs.splice(i, 1);
+          continue;
+        }
+
+        cannonStepScratch.copy(proj.position).sub(cannonPrevPosScratch);
+        const segLenSq = cannonStepScratch.lengthSq();
+        let hitMob: SandboxMob | null = null;
+        let bestT = Number.POSITIVE_INFINITY;
+
+        for (const mob of cannonMobs) {
+          if (mob.hp <= 0) continue;
+          cannonMobCenterScratch.copy(mob.position).setY(MOB_BASE_Y + 0.3);
+          const combined = 0.5 + proj.radius;
+          let t = 0;
+          if (segLenSq > 1e-8) {
+            const deltaP = cannonMobCenterScratch.clone().sub(cannonPrevPosScratch);
+            t = THREE.MathUtils.clamp(
+              deltaP.dot(cannonStepScratch) / segLenSq,
+              0,
+              1
+            );
+          }
+          cannonClosestScratch.copy(cannonPrevPosScratch).addScaledVector(cannonStepScratch, t);
+          if (
+            cannonClosestScratch.distanceToSquared(cannonMobCenterScratch) >
+            combined * combined
+          )
+            continue;
+          if (t < bestT) {
+            bestT = t;
+            hitMob = mob;
+          }
+        }
+
+        if (hitMob) {
+          const impactPos = cannonClosestScratch.clone();
+          applyCannonballAoE(impactPos, proj.damage, proj.aoeRadius);
+          scene.remove(proj.mesh);
+          activeCannonballs.splice(i, 1);
         }
       }
     };
@@ -1004,6 +1471,7 @@ Promise.all([
       updateRigDemo(delta);
       updateMobDeathVisuals(delta);
       particleSystem.updateParticles(delta);
+      smokePoofEffect.updateSmokePoofs(delta);
 
       if (coinHudRenderer && coinHudRoot.children.length > 0) {
         const rect = coinHudCanvasEl?.getBoundingClientRect();
