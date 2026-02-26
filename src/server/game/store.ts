@@ -72,10 +72,7 @@ const parseVec2 = (value: unknown) => {
 };
 
 const parseStructureType = (value: unknown): StructureState['type'] =>
-  value === 'tower' ||
-  value === 'tree' ||
-  value === 'rock' ||
-  value === 'bank'
+  value === 'tower' || value === 'tree' || value === 'rock' || value === 'bank'
     ? value
     : 'wall';
 
@@ -124,7 +121,9 @@ const parseStructure = (value: unknown): StructureState => {
       createdAtMs: 0,
     };
   }
-  const parseStructureMetadata = (raw: unknown): StructureMetadata | undefined => {
+  const parseStructureMetadata = (
+    raw: unknown
+  ): StructureMetadata | undefined => {
     if (!isRecord(raw)) return undefined;
     const out: StructureMetadata = {};
     const treeFootprint = Number(raw.treeFootprint ?? 0);
@@ -808,9 +807,7 @@ export const consumeRateLimitToken = async (
   return false;
 };
 
-export const removePlayers = async (
-  playerIds: string[]
-): Promise<void> => {
+export const removePlayers = async (playerIds: string[]): Promise<void> => {
   if (playerIds.length === 0) return;
   const keys = getGameRedisKeys();
   await Promise.all([
@@ -851,9 +848,7 @@ export const refreshLeaderLock = async (
   return true;
 };
 
-export const releaseLeaderLock = async (
-  ownerToken: string
-): Promise<void> => {
+export const releaseLeaderLock = async (ownerToken: string): Promise<void> => {
   const keys = getGameRedisKeys();
   const tx = await redis.watch(keys.leaderLock);
   const current = await redis.get(keys.leaderLock);

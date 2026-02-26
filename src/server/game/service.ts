@@ -157,9 +157,10 @@ const percentile = (values: number[], p: number): number => {
   return sorted[idx] ?? 0;
 };
 
-const ensureStaticMap = (
-  world: { structures: Record<string, StructureState>; meta: { lastTickMs: number; worldVersion: number } }
-): { upserts: StructureState[]; removes: string[] } => {
+const ensureStaticMap = (world: {
+  structures: Record<string, StructureState>;
+  meta: { lastTickMs: number; worldVersion: number };
+}): { upserts: StructureState[]; removes: string[] } => {
   const removes = sanitizeStaticMapStructures(world.structures);
   if (hasStaticMapStructures(world.structures)) {
     if (removes.length > 0) world.meta.worldVersion += 1;
@@ -194,7 +195,11 @@ export const runLeaderLoop = async (
 
   const acquired = await acquireLeaderLock(ownerToken, LEADER_LOCK_TTL_SECONDS);
   if (!acquired) {
-    return { ownerToken, durationMs: Date.now() - startedAt, ticksProcessed: 0 };
+    return {
+      ownerToken,
+      durationMs: Date.now() - startedAt,
+      ticksProcessed: 0,
+    };
   }
 
   console.info('Leader loop started', { ownerToken, channel });
@@ -212,7 +217,10 @@ export const runLeaderLoop = async (
         break;
       }
 
-      const stillRefreshed = await refreshLeaderLock(ownerToken, LEADER_LOCK_TTL_SECONDS);
+      const stillRefreshed = await refreshLeaderLock(
+        ownerToken,
+        LEADER_LOCK_TTL_SECONDS
+      );
       if (!stillRefreshed) {
         console.warn('Leader lock lost during refresh', { ownerToken });
         break;
@@ -240,7 +248,11 @@ export const runLeaderLoop = async (
             )
           );
           const staleBroadcastStartedAtMs = Date.now();
-          await broadcast(world.meta.worldVersion, world.meta.tickSeq, staleDeltas);
+          await broadcast(
+            world.meta.worldVersion,
+            world.meta.tickSeq,
+            staleDeltas
+          );
           stageBroadcastMs += Date.now() - staleBroadcastStartedAtMs;
         }
       }
@@ -260,7 +272,9 @@ export const runLeaderLoop = async (
           requiresPathRefresh: true,
         };
         const bootstrapBroadcastStartedAtMs = Date.now();
-        await broadcast(world.meta.worldVersion, world.meta.tickSeq, [bootstrapDelta]);
+        await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
+          bootstrapDelta,
+        ]);
         stageBroadcastMs += Date.now() - bootstrapBroadcastStartedAtMs;
       }
 
@@ -396,9 +410,7 @@ export const joinGame = async (): Promise<JoinResponse> => {
       position: player.position,
     },
   };
-  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
-    joinDelta,
-  ]);
+  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [joinDelta]);
 
   return {
     type: 'join',
@@ -540,7 +552,9 @@ export const getGamePreview = async (): Promise<GamePreview> => {
   };
 };
 
-export const resyncGame = async (_playerId?: string): Promise<ResyncResponse> => {
+export const resyncGame = async (
+  _playerId?: string
+): Promise<ResyncResponse> => {
   const world = await loadWorldState();
   const staticSync = ensureStaticMap(world);
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
@@ -556,7 +570,10 @@ export const resyncGame = async (_playerId?: string): Promise<ResyncResponse> =>
 export const runMaintenance = async (): Promise<{ stalePlayers: number }> => {
   await trimCommandQueue();
   const nowMs = Date.now();
-  const stale = await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, 500);
+  const stale = await removeOldPlayersByLastSeen(
+    nowMs - PLAYER_TIMEOUT_MS,
+    500
+  );
   return {
     stalePlayers: stale.length,
   };

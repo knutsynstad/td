@@ -327,7 +327,8 @@ const rockRule: WorldGenRule = {
     for (const candidate of candidates) {
       if (state.rocks.length >= targetCount) break;
       const minSpacing = candidate.centerWeight > 0.72 ? 2 : 3;
-      if (isTooCloseToExistingRock(candidate.x, candidate.z, minSpacing)) continue;
+      if (isTooCloseToExistingRock(candidate.x, candidate.z, minSpacing))
+        continue;
       const placement = createRockPlacement(
         shapeSeed,
         candidate.x,
@@ -336,13 +337,9 @@ const rockRule: WorldGenRule = {
       );
       const halfX = placement.footprintX * 0.5;
       const halfZ = placement.footprintZ * 0.5;
-      if (
-        Math.abs(candidate.x) + halfX > context.worldBounds - context.margin
-      )
+      if (Math.abs(candidate.x) + halfX > context.worldBounds - context.margin)
         continue;
-      if (
-        Math.abs(candidate.z) + halfZ > context.worldBounds - context.margin
-      )
+      if (Math.abs(candidate.z) + halfZ > context.worldBounds - context.margin)
         continue;
       accepted.add(getKey(candidate.x, candidate.z));
       pushRock(state, placement);

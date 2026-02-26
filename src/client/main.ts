@@ -2206,7 +2206,10 @@ let coinModelTemplate: THREE.Object3D | null = null;
 let wallModelTemplate: THREE.Object3D | null = null;
 let playerModelTemplate: THREE.Object3D | null = null;
 const playerFacingOffset = { value: 0 };
-let arrowFacing: { anchorLocalPos: THREE.Vector3; forwardLocal: THREE.Vector3 } | null = null;
+let arrowFacing: {
+  anchorLocalPos: THREE.Vector3;
+  forwardLocal: THREE.Vector3;
+} | null = null;
 const towerBallistaRigs = new Map<Tower, BallistaVisualRig>();
 type RockVisualTemplate = {
   sourceUrl: string;
@@ -2681,7 +2684,8 @@ loadModelWithProgress(
   (gltf) => {
     playerModelTemplate = preparePlayerModel(gltf.scene);
     playerModelTemplate.updateMatrixWorld(true);
-    playerFacingOffset.value = computeFacingYawFromTemplate(playerModelTemplate);
+    playerFacingOffset.value =
+      computeFacingYawFromTemplate(playerModelTemplate);
 
     const swapPlayerMesh = () => {
       const savedX = player.mesh.position.x;
@@ -3004,7 +3008,6 @@ const getForwardWaypointIndex = (
   return bestIdx;
 };
 
-
 const getSpawnContainerCorners = (spawnerPos: THREE.Vector3) => {
   const normal = getSpawnerOutwardNormal(spawnerPos);
   const tangent = getSpawnerTangent(spawnerPos);
@@ -3060,7 +3063,10 @@ const clampStagedMobToSpawnerIsland = (mob: MobEntity) => {
 const toCastleDisplayPoints = (points: THREE.Vector3[]) =>
   toCastleDisplayRoute(points, {
     castleCenter: castleCollider.center,
-    castleHalfSize: { x: castleCollider.halfSize.x, z: castleCollider.halfSize.z },
+    castleHalfSize: {
+      x: castleCollider.halfSize.x,
+      z: castleCollider.halfSize.z,
+    },
     gridSize: GRID_SIZE,
     castleFrontDirection: CASTLE_FRONT_DIRECTION,
   });
@@ -3392,7 +3398,6 @@ const syncServerClockSkew = (serverEpochMs: number) => {
 const toPerfTime = (serverEpochMs: number) =>
   performance.now() + (serverEpochMs - (Date.now() + serverClockSkewMs));
 
-
 const upsertRemoteNpc = (
   playerId: string,
   username: string,
@@ -3424,7 +3429,10 @@ const removeRemoteNpc = (playerId: string) => {
   remotePlayersById.delete(playerId);
 };
 
-const syncServerWaveSpawners = (wave: SharedWaveState, routesIncluded = true) => {
+const syncServerWaveSpawners = (
+  wave: SharedWaveState,
+  routesIncluded = true
+) => {
   syncAuthoritativeWaveSpawners({
     wave,
     routesIncluded,
@@ -3574,7 +3582,9 @@ const upsertServerStructure = (entry: SharedStructureState) => {
   }
 
   if (entry.type === 'tree') {
-    const treeFootprint = clampTreeFootprint(entry.metadata?.treeFootprint ?? 2);
+    const treeFootprint = clampTreeFootprint(
+      entry.metadata?.treeFootprint ?? 2
+    );
     const size = getTreeBuildSizeForFootprint(treeFootprint);
     const half = size.clone().multiplyScalar(0.5);
     const center = snapCenterToBuildGrid(targetCenter, size);
@@ -3598,11 +3608,17 @@ const upsertServerStructure = (entry: SharedStructureState) => {
       applyTreeVisualToMesh(mesh);
     }
     scene.add(mesh);
-    const collider = structureStore.addTreeCollider(center, half, mesh, entry.maxHp, {
-      playerBuilt: entry.ownerId !== 'Map',
-      createdAtMs: entry.createdAtMs,
-      lastDecayTickMs: entry.createdAtMs,
-    });
+    const collider = structureStore.addTreeCollider(
+      center,
+      half,
+      mesh,
+      entry.maxHp,
+      {
+        playerBuilt: entry.ownerId !== 'Map',
+        createdAtMs: entry.createdAtMs,
+        lastDecayTickMs: entry.createdAtMs,
+      }
+    );
     const state = structureStore.structureStates.get(collider);
     if (state) {
       state.hp = entry.hp;
@@ -3779,11 +3795,7 @@ const applyServerMobUpdateValues = (
   existing.hp = hp;
   existing.maxHp = resolvedMaxHp;
   const prev = serverMobSampleById.get(mobId);
-  const currentPos = serverMobDeltaPosScratch.set(
-    posX,
-    existing.baseY,
-    posZ
-  );
+  const currentPos = serverMobDeltaPosScratch.set(posX, existing.baseY, posZ);
   const currentVel = serverMobDeltaVelScratch.set(velX, 0, velZ);
   const hasPrev =
     !!prev &&
@@ -3812,7 +3824,9 @@ const applyServerMobUpdateValues = (
       from:
         hasPrev && prev
           ? prev.position.clone()
-          : currentPos.clone().addScaledVector(currentVel, -delta.tickMs / 1000),
+          : currentPos
+              .clone()
+              .addScaledVector(currentVel, -delta.tickMs / 1000),
       to: currentPos.clone(),
       velocity: currentVel.clone(),
       t0: toPerfTime(fromServerMs),
@@ -3979,7 +3993,11 @@ const applyServerSnapshot = (snapshot: SharedWorldState) => {
     upsertServerMobFromSnapshot(mob);
     serverMobSampleById.set(mob.mobId, {
       serverTimeMs: snapshot.meta.lastTickMs,
-      position: new THREE.Vector3(mob.position.x, MOB_HEIGHT * 0.5, mob.position.z),
+      position: new THREE.Vector3(
+        mob.position.x,
+        MOB_HEIGHT * 0.5,
+        mob.position.z
+      ),
       velocity: new THREE.Vector3(mob.velocity.x, 0, mob.velocity.z),
       receivedAtPerfMs: performance.now(),
     });
@@ -4217,7 +4235,6 @@ const createTowerAt = (
   towers.push(tower);
   return tower;
 };
-
 
 const gameState = createGameState(ENERGY_CAP);
 let isDraggingWall = false;
@@ -5773,7 +5790,9 @@ const updateSelectionDialog = () => {
       : selectedType === 'rock' && selectedCollider
         ? getNatureLabel(
             'rock',
-            Math.floor(selectedCollider.center.x * 31 + selectedCollider.center.z)
+            Math.floor(
+              selectedCollider.center.x * 31 + selectedCollider.center.z
+            )
           )
         : selectedType === 'bank'
           ? 'Castle'
@@ -6037,7 +6056,11 @@ const getWallLinePlacement = (
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
   if (authoritativeBridge) {
-    const { validPositions } = getWallLinePlacement(start, end, gameState.energy);
+    const { validPositions } = getWallLinePlacement(
+      start,
+      end,
+      gameState.energy
+    );
     if (validPositions.length === 0) return false;
     const now = Date.now();
     void authoritativeBridge.sendBuildStructures(
@@ -6417,11 +6440,7 @@ const getProjectileMobCandidates = (
   projectileMidpointScratch.copy(from).add(to).multiplyScalar(0.5);
   const segmentLength = from.distanceTo(to);
   const queryRadius = segmentLength * 0.5 + radius + MOB_WIDTH;
-  return spatialGrid.getNearbyInto(
-    projectileMidpointScratch,
-    queryRadius,
-    out
-  );
+  return spatialGrid.getNearbyInto(projectileMidpointScratch, queryRadius, out);
 };
 
 const getTowerLaunchTransform = (
@@ -6488,8 +6507,16 @@ const updateTowerArrowProjectiles = (delta: number) => {
     }
     projectile.position.addScaledVector(projectile.velocity, delta);
     if (arrowFacing) {
-      orientArrowToVelocity(projectile.mesh, projectile.velocity, arrowFacing.forwardLocal);
-      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+      orientArrowToVelocity(
+        projectile.mesh,
+        projectile.velocity,
+        arrowFacing.forwardLocal
+      );
+      placeArrowMeshAtFacing(
+        projectile.mesh,
+        projectile.position,
+        arrowFacing.anchorLocalPos
+      );
     }
 
     projectileStepScratch
@@ -6542,7 +6569,11 @@ const updateTowerArrowProjectiles = (delta: number) => {
     if (!hitMob) continue;
     projectile.position.copy(projectileHitPointScratch);
     if (arrowFacing) {
-      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+      placeArrowMeshAtFacing(
+        projectile.mesh,
+        projectile.position,
+        arrowFacing.anchorLocalPos
+      );
     }
     setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity);
     if (serverAuthoritative) {
@@ -6610,8 +6641,16 @@ const updatePlayerArrowProjectiles = (delta: number) => {
     }
     projectile.position.addScaledVector(projectile.velocity, delta);
     if (arrowFacing) {
-      orientArrowToVelocity(projectile.mesh, projectile.velocity, arrowFacing.forwardLocal);
-      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+      orientArrowToVelocity(
+        projectile.mesh,
+        projectile.velocity,
+        arrowFacing.forwardLocal
+      );
+      placeArrowMeshAtFacing(
+        projectile.mesh,
+        projectile.position,
+        arrowFacing.anchorLocalPos
+      );
     }
 
     projectileStepScratch
@@ -6664,7 +6703,11 @@ const updatePlayerArrowProjectiles = (delta: number) => {
     if (!hitMob) continue;
     projectile.position.copy(projectileHitPointScratch);
     if (arrowFacing) {
-      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+      placeArrowMeshAtFacing(
+        projectile.mesh,
+        projectile.position,
+        arrowFacing.anchorLocalPos
+      );
     }
     setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity);
     if (serverAuthoritative) {
@@ -7007,7 +7050,8 @@ const tick = (now: number, delta: number) => {
     clampStagedMobToSpawnerIsland(mob);
   }
 
-  const waveComplete = gameState.wave > 0 && !serverWaveActive && mobs.length === 0;
+  const waveComplete =
+    gameState.wave > 0 && !serverWaveActive && mobs.length === 0;
 
   if (tickFrameCounter % 2 === 0) {
     cachedSelectedMob = pickSelectedMob();
@@ -7148,9 +7192,7 @@ const tick = (now: number, delta: number) => {
   dir.shadow.camera.updateMatrixWorld();
 
   camera.position.copy(player.mesh.position).add(cameraOffset);
-  camera.lookAt(
-    player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5)
-  );
+  camera.lookAt(player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5));
   camera.updateMatrixWorld();
   const renderStartedAtMs = performance.now();
   updateMobInstanceRender(now);
@@ -7259,8 +7301,10 @@ const tick = (now: number, delta: number) => {
         frameStageSamples.reduce((sum, sample) => sum + sample.targetingMs, 0) /
         sampleCount;
       const avgProjectile =
-        frameStageSamples.reduce((sum, sample) => sum + sample.projectileMs, 0) /
-        sampleCount;
+        frameStageSamples.reduce(
+          (sum, sample) => sum + sample.projectileMs,
+          0
+        ) / sampleCount;
       const avgRender =
         frameStageSamples.reduce((sum, sample) => sum + sample.renderMs, 0) /
         sampleCount;

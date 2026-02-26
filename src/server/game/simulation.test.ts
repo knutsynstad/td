@@ -163,7 +163,9 @@ describe('runSimulation', () => {
     const result = runSimulation(gameWorld, runUntilMs, [], maxSteps);
 
     expect(result.world.mobs['99999']).toBeUndefined();
-    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    const entityDelta = result.deltas.find(
+      (delta) => delta.type === 'entityDelta'
+    );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
       expect(entityDelta.despawnedMobIds).toContain(99999);
@@ -185,7 +187,10 @@ describe('runSimulation', () => {
         spawnAccumulator: 0,
         gateOpen: true,
         routeState: 'blocked',
-        route: [{ x: 0, z: -61 }, { x: 0, z: 7 }],
+        route: [
+          { x: 0, z: -61 },
+          { x: 0, z: 7 },
+        ],
       },
     ];
     gameWorld.mobs['88888'] = {
@@ -340,7 +345,10 @@ describe('runSimulation', () => {
         spawnAccumulator: 0,
         gateOpen: true,
         routeState: 'reachable',
-        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+        route: [
+          { x: 0, z: -5 },
+          { x: 0, z: 0 },
+        ],
       },
     ];
     for (let i = 0; i < 16; i += 1) {
@@ -355,7 +363,9 @@ describe('runSimulation', () => {
       };
     }
     const result = runSimulation(gameWorld, nowMs + 100, [], 1);
-    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    const entityDelta = result.deltas.find(
+      (delta) => delta.type === 'entityDelta'
+    );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
       if (entityDelta.mobSlices) {
@@ -388,7 +398,10 @@ describe('runSimulation', () => {
         spawnAccumulator: 0,
         gateOpen: true,
         routeState: 'reachable',
-        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+        route: [
+          { x: 0, z: -5 },
+          { x: 0, z: 0 },
+        ],
       },
     ];
     for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
@@ -403,7 +416,9 @@ describe('runSimulation', () => {
       };
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
-    const entityDelta = result.deltas.find((delta) => delta.type === 'entityDelta');
+    const entityDelta = result.deltas.find(
+      (delta) => delta.type === 'entityDelta'
+    );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
       expect(entityDelta.tickSeq % intervalTicks).not.toBe(0);
@@ -434,7 +449,10 @@ describe('runSimulation', () => {
         spawnAccumulator: 0,
         gateOpen: true,
         routeState: 'reachable',
-        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+        route: [
+          { x: 0, z: -5 },
+          { x: 0, z: 0 },
+        ],
       },
     ];
     for (let i = 0; i < FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25; i += 1) {
@@ -449,7 +467,9 @@ describe('runSimulation', () => {
       };
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
-    const entityDeltas = result.deltas.filter((delta) => delta.type === 'entityDelta');
+    const entityDeltas = result.deltas.filter(
+      (delta) => delta.type === 'entityDelta'
+    );
     expect(entityDeltas.length).toBe(2);
     for (let i = 0; i < entityDeltas.length; i += 1) {
       const entityDelta = entityDeltas[i]!;
@@ -471,7 +491,9 @@ describe('runSimulation', () => {
         expect(pool.ids.length).toBe(pool.maxHp!.length);
       }
     }
-    const allMobIds = new Set(entityDeltas.flatMap((delta) => delta.mobPool?.ids ?? []));
+    const allMobIds = new Set(
+      entityDeltas.flatMap((delta) => delta.mobPool?.ids ?? [])
+    );
     expect(allMobIds.size).toBe(FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25);
     expect(entityDeltas[0]?.despawnedMobIds).toHaveLength(0);
   });
@@ -492,7 +514,10 @@ describe('runSimulation', () => {
         spawnAccumulator: 0,
         gateOpen: true,
         routeState: 'reachable',
-        route: [{ x: 0, z: -5 }, { x: 0, z: 0 }],
+        route: [
+          { x: 0, z: -5 },
+          { x: 0, z: 0 },
+        ],
       },
     ];
     for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
@@ -522,7 +547,9 @@ describe('runSimulation', () => {
       },
     ];
     const first = runSimulation(gameWorld, nowMs + SIM_TICK_MS, commandNow, 1);
-    const firstEntity = first.deltas.find((delta) => delta.type === 'entityDelta');
+    const firstEntity = first.deltas.find(
+      (delta) => delta.type === 'entityDelta'
+    );
     expect(firstEntity?.type).toBe('entityDelta');
     if (firstEntity?.type === 'entityDelta') {
       expect(firstEntity.fullMobList).toBe(true);

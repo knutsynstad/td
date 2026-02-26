@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildStaticMapStructures, sanitizeStaticMapStructures } from './staticStructures';
+import {
+  buildStaticMapStructures,
+  sanitizeStaticMapStructures,
+} from './staticStructures';
 
 const WORLD_BOUNDS = 64;
 const SPAWNER_ENTRY_INSET_CELLS = 3;
@@ -16,10 +19,7 @@ type Aabb = {
 };
 
 const intersectsAabb = (a: Aabb, b: Aabb): boolean =>
-  a.minX <= b.maxX &&
-  a.maxX >= b.minX &&
-  a.minZ <= b.maxZ &&
-  a.maxZ >= b.minZ;
+  a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 
 const getSpawnerClearanceZones = (): Aabb[] => {
   const entryCoord = WORLD_BOUNDS - SPAWNER_ENTRY_INSET_CELLS;
@@ -116,7 +116,10 @@ describe('buildStaticMapStructures', () => {
     };
     const removed = sanitizeStaticMapStructures(structures);
     expect(removed).toEqual(
-      expect.arrayContaining(['map-tree-castle-camper', 'map-rock-spawn-camper'])
+      expect.arrayContaining([
+        'map-tree-castle-camper',
+        'map-rock-spawn-camper',
+      ])
     );
     expect(structures['map-tree-castle-camper']).toBeUndefined();
     expect(structures['map-rock-spawn-camper']).toBeUndefined();

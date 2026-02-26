@@ -221,7 +221,10 @@ export class SelectionDialog {
       });
     }
     if (towerDetails) {
-      infoItems.push({ label: 'Damage per second', value: towerDetails.dps.toFixed(1) });
+      infoItems.push({
+        label: 'Damage per second',
+        value: towerDetails.dps.toFixed(1),
+      });
       infoItems.push({
         label: 'Kills',
         value: String(towerDetails.killCount),
@@ -247,7 +250,8 @@ export class SelectionDialog {
               value: string
             ) => {
               const upgrade = upgradesById.get(upgradeId);
-              const disabled = !upgrade || upgradesDisabled || !upgrade.canAfford;
+              const disabled =
+                !upgrade || upgradesDisabled || !upgrade.canAfford;
               const upgradeContent = upgrade
                 ? `<span class="selection-dialog__stat-upgrade-line">Upgrade</span><span class="selection-dialog__stat-upgrade-cost">${buildCoinCostMarkup(upgrade.cost, 'Coin cost')}</span>`
                 : '<span class="selection-dialog__stat-upgrade-line">Max</span>';
@@ -293,10 +297,9 @@ export class SelectionDialog {
         </div>`
       : '';
 
-    const deleteBtnMarkup =
-      !isBankSelected
-        ? `<button class="selection-dialog__delete-btn" data-delete ${canDelete ? '' : 'disabled'} aria-label="Delete"><svg class="selection-dialog__delete-icon" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm80-160h80v-360h-80v360Zm160 0h80v-360h-80v360Z"/></svg></button>`
-        : '';
+    const deleteBtnMarkup = !isBankSelected
+      ? `<button class="selection-dialog__delete-btn" data-delete ${canDelete ? '' : 'disabled'} aria-label="Delete"><svg class="selection-dialog__delete-icon" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm80-160h80v-360h-80v360Zm160 0h80v-360h-80v360Z"/></svg></button>`
+      : '';
 
     this.formSlot.innerHTML = `
       <div class="selection-dialog__header">

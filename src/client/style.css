@@ -765,7 +765,8 @@ canvas {
   cursor: not-allowed;
 }
 
-.selection-dialog__bank-adjust-btn:disabled .selection-dialog__bank-adjust-label {
+.selection-dialog__bank-adjust-btn:disabled
+  .selection-dialog__bank-adjust-label {
   color: rgba(0, 0, 0, 0.5);
 }
 
@@ -1520,4 +1521,3 @@ canvas {
   font-size: 0.75rem;
   color: rgba(230, 238, 247, 0.7);
 }
-

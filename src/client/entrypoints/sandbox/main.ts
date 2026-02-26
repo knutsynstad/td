@@ -148,7 +148,8 @@ const cameraOffset = new THREE.Vector3(
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 const SANDBOX_COINS = 9001;
-const coinHudCanvasEl = document.querySelector<HTMLCanvasElement>('#sandboxCoinCanvas');
+const coinHudCanvasEl =
+  document.querySelector<HTMLCanvasElement>('#sandboxCoinCanvas');
 const coinHudScene = new THREE.Scene();
 const coinHudCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 50);
 coinHudCamera.position.set(0, 0.8, 3);
@@ -299,7 +300,12 @@ const loadModelWithPreparer = (
   preparer: (source: THREE.Object3D) => THREE.Object3D
 ): Promise<THREE.Object3D> =>
   new Promise((resolve, reject) => {
-    loader.load(url, (gltf) => resolve(preparer(gltf.scene)), undefined, reject);
+    loader.load(
+      url,
+      (gltf) => resolve(preparer(gltf.scene)),
+      undefined,
+      reject
+    );
   });
 
 const knollGroup = new THREE.Group();
@@ -334,7 +340,11 @@ const isEditableTarget = (): boolean => {
   const el = document.activeElement;
   if (!el || el === document.body) return false;
   const tag = (el as HTMLElement).tagName?.toLowerCase();
-  return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable;
+  return (
+    tag === 'input' ||
+    tag === 'textarea' ||
+    (el as HTMLElement).isContentEditable
+  );
 };
 
 window.addEventListener('keydown', (event) => {
@@ -357,14 +367,16 @@ const installPointerHandler = (handler: (event: PointerEvent) => void) => {
   renderer.domElement.addEventListener('pointerdown', handler);
 };
 installPointerHandler((event) => {
-  if ((event.target as HTMLElement).closest('.selection-dialog, .hud-energy')) return;
+  if ((event.target as HTMLElement).closest('.selection-dialog, .hud-energy'))
+    return;
   const point = getGroundPoint(event);
   if (point) setMoveTarget(point);
 });
 
 const ensureRaycastable = (obj: THREE.Object3D) => {
   obj.traverse((child) => {
-    if (child instanceof THREE.Mesh) child.raycast = THREE.Mesh.prototype.raycast;
+    if (child instanceof THREE.Mesh)
+      child.raycast = THREE.Mesh.prototype.raycast;
   });
 };
 
@@ -499,7 +511,13 @@ Promise.all([
       const treeLineX = cx;
       const treeLineZStart = 0;
       for (let f = 1; f <= 4; f += 1) {
-        placeModel(tree, treeLineX, treeLineZStart - (f - 1) * TREE_SPACING, f / 2, Math.PI * 0.5);
+        placeModel(
+          tree,
+          treeLineX,
+          treeLineZStart - (f - 1) * TREE_SPACING,
+          f / 2,
+          Math.PI * 0.5
+        );
       }
       cx += TREE_TO_ROCK_GAP;
 
@@ -575,83 +593,81 @@ Promise.all([
       };
     }
   )
-  .then(({ towerBallista, cannon, cannonRaw, cannonballTemplate, smokeModel, mobTemplate, arrowTemplate, rigDemoX, cannonRigDemoX }) => {
-    const arrowFacing = computeArrowFacingFromTemplate(arrowTemplate);
+  .then(
+    ({
+      towerBallista,
+      cannon,
+      cannonRaw,
+      cannonballTemplate,
+      smokeModel,
+      mobTemplate,
+      arrowTemplate,
+      rigDemoX,
+      cannonRigDemoX,
+    }) => {
+      const arrowFacing = computeArrowFacingFromTemplate(arrowTemplate);
 
-    let coins = SANDBOX_COINS;
-    const energyCountEl = document.getElementById('sandboxEnergyCount');
-    const updateCoinsDisplay = () => {
-      if (energyCountEl) energyCountEl.textContent = String(coins);
-    };
-    updateCoinsDisplay();
-
-    type SandboxTowerState = { range: number; damage: number; shootCadence: number; rangeLevel: number; damageLevel: number; speedLevel: number };
-    const sandboxTower: SandboxTowerState = { range: 8, damage: 16, shootCadence: 0.25, rangeLevel: 0, damageLevel: 0, speedLevel: 0 };
-
-    let ballistaSelected = false;
-
-    const applyUpgrade = (id: 'range' | 'damage' | 'speed') => {
-      if (coins < UPGRADE_COST) return;
-      const tower = ballistaSelected ? sandboxTower : sandboxCannon;
-      const rangeLevel = ballistaSelected ? sandboxTower.rangeLevel : sandboxCannon.rangeLevel;
-      const damageLevel = ballistaSelected ? sandboxTower.damageLevel : sandboxCannon.damageLevel;
-      const speedLevel = ballistaSelected ? sandboxTower.speedLevel : sandboxCannon.speedLevel;
-      if (id === 'range' && rangeLevel < 5) {
-        coins -= UPGRADE_COST;
-        tower.rangeLevel += 1;
-        tower.range += 1;
-      } else if (id === 'damage' && damageLevel < 5) {
-        coins -= UPGRADE_COST;
-        tower.damageLevel += 1;
-        tower.damage += 1;
-      } else if (id === 'speed' && speedLevel < 5) {
-        coins -= UPGRADE_COST;
-        tower.speedLevel += 1;
-        const shotsPerSecond = (ballistaSelected ? 4 : 2) + tower.speedLevel * (ballistaSelected ? 2 : 1);
-        tower.shootCadence = 1 / shotsPerSecond;
-      }
+      let coins = SANDBOX_COINS;
+      const energyCountEl = document.getElementById('sandboxEnergyCount');
+      const updateCoinsDisplay = () => {
+        if (energyCountEl) energyCountEl.textContent = String(coins);
+      };
       updateCoinsDisplay();
-      updateSelectionDialog();
-    };
 
-    const selectionDialog = new SelectionDialog(
-      app,
-      {
-        selectedCount: 0,
-        inRangeCount: 0,
-        isBankSelected: false,
-        selectedTowerTypeId: null,
-        selectedStructureLabel: '',
-        bankTotal: null,
-        canBankAdd1: false,
-        canBankAdd10: false,
-        canBankRemove1: false,
-        canBankRemove10: false,
-        showRepair: false,
-        buildingCoords: null,
-        buildingHealth: null,
-        upgradeOptions: [],
-        towerDetails: null,
-        canRepair: false,
-        canDelete: false,
-        repairCost: null,
-        repairStatus: null,
-      },
-      {
-        onUpgrade: applyUpgrade,
-        onRepair: () => {},
-        onDelete: () => {},
-        onBankAdd1: () => {},
-        onBankAdd10: () => {},
-        onBankRemove1: () => {},
-        onBankRemove10: () => {},
-      }
-    );
+      type SandboxTowerState = {
+        range: number;
+        damage: number;
+        shootCadence: number;
+        rangeLevel: number;
+        damageLevel: number;
+        speedLevel: number;
+      };
+      const sandboxTower: SandboxTowerState = {
+        range: 8,
+        damage: 16,
+        shootCadence: 0.25,
+        rangeLevel: 0,
+        damageLevel: 0,
+        speedLevel: 0,
+      };
 
-    const updateSelectionDialog = () => {
-      const anySelected = ballistaSelected || cannonSelected;
-      if (!anySelected) {
-        selectionDialog.update({
+      let ballistaSelected = false;
+
+      const applyUpgrade = (id: 'range' | 'damage' | 'speed') => {
+        if (coins < UPGRADE_COST) return;
+        const tower = ballistaSelected ? sandboxTower : sandboxCannon;
+        const rangeLevel = ballistaSelected
+          ? sandboxTower.rangeLevel
+          : sandboxCannon.rangeLevel;
+        const damageLevel = ballistaSelected
+          ? sandboxTower.damageLevel
+          : sandboxCannon.damageLevel;
+        const speedLevel = ballistaSelected
+          ? sandboxTower.speedLevel
+          : sandboxCannon.speedLevel;
+        if (id === 'range' && rangeLevel < 5) {
+          coins -= UPGRADE_COST;
+          tower.rangeLevel += 1;
+          tower.range += 1;
+        } else if (id === 'damage' && damageLevel < 5) {
+          coins -= UPGRADE_COST;
+          tower.damageLevel += 1;
+          tower.damage += 1;
+        } else if (id === 'speed' && speedLevel < 5) {
+          coins -= UPGRADE_COST;
+          tower.speedLevel += 1;
+          const shotsPerSecond =
+            (ballistaSelected ? 4 : 2) +
+            tower.speedLevel * (ballistaSelected ? 2 : 1);
+          tower.shootCadence = 1 / shotsPerSecond;
+        }
+        updateCoinsDisplay();
+        updateSelectionDialog();
+      };
+
+      const selectionDialog = new SelectionDialog(
+        app,
+        {
           selectedCount: 0,
           inRangeCount: 0,
           isBankSelected: false,
@@ -671,836 +687,946 @@ Promise.all([
           canDelete: false,
           repairCost: null,
           repairStatus: null,
-        });
-        return;
-      }
-      const tower = ballistaSelected ? sandboxTower : sandboxCannon;
-      const label = ballistaSelected ? 'Ballista' : 'Cannon';
-      const upgradeOptions = (['range', 'damage', 'speed'] as const)
-        .filter((id) => {
-          const level = id === 'range' ? tower.rangeLevel : id === 'damage' ? tower.damageLevel : tower.speedLevel;
-          return level < TOWER_UPGRADES[id].maxLevel;
-        })
-        .map((id) => ({
-          id,
-          label: TOWER_UPGRADES[id].label,
-          deltaText: getTowerUpgradeDeltaText(id),
-          cost: UPGRADE_COST,
-          canAfford: coins >= UPGRADE_COST,
-        }));
-      selectionDialog.update({
-        selectedCount: 1,
-        inRangeCount: 1,
-        isBankSelected: false,
-        selectedTowerTypeId: null,
-        selectedStructureLabel: label,
-        bankTotal: null,
-        canBankAdd1: false,
-        canBankAdd10: false,
-        canBankRemove1: false,
-        canBankRemove10: false,
-        showRepair: false,
-        buildingCoords: null,
-        buildingHealth: null,
-        upgradeOptions,
-        towerDetails: {
-          builtBy: '',
-          killCount: 0,
-          range: tower.range,
-          damage: tower.damage,
-          speed: 1 / tower.shootCadence,
-          dps: tower.damage / tower.shootCadence,
-          rangeLevel: tower.rangeLevel,
-          damageLevel: tower.damageLevel,
-          speedLevel: tower.speedLevel,
         },
-        canRepair: false,
-        canDelete: false,
-        repairCost: null,
-        repairStatus: null,
-      });
-    };
-
-    const mobDeathVisualTemplate = mobTemplate.clone(true);
-    const particleSystem = createParticleSystem(scene);
-    const smokePoofEffect = createSmokePoofEffect(scene);
-    smokePoofEffect.setSmokeTemplate(smokeModel);
-    const DEATH_FLASH_TINT = new THREE.Color(0xff2a2a);
-    const MOB_DEATH_GROUND_OFFSET_Y = -0.65;
-    const MOB_DEATH_HEADING_OFFSET = Math.PI;
-
-    type DeathVisual = {
-      root: THREE.Object3D;
-      materials: THREE.Material[];
-      age: number;
-      heading: number;
-      fallSign: number;
-      startX: number;
-      startZ: number;
-      startY: number;
-      knockbackX: number;
-      knockbackZ: number;
-    };
-    const activeMobDeathVisuals: DeathVisual[] = [];
-    const TEMP_BASE_COLOR = new THREE.Color();
-
-    const spawnMobDeathVisual = (mob: SandboxMob) => {
-      const deathRoot = new THREE.Group();
-      const corpse = mobDeathVisualTemplate.clone(true);
-      const corpseBounds = new THREE.Box3().setFromObject(corpse);
-      if (!corpseBounds.isEmpty()) {
-        corpse.position.y -= corpseBounds.min.y;
-      }
-      deathRoot.add(corpse);
-      deathRoot.position.copy(mob.position);
-      const DEATH_VISUAL_LIFT_Y = 0.3;
-      deathRoot.position.y += MOB_DEATH_GROUND_OFFSET_Y + DEATH_VISUAL_LIFT_Y;
-      const startX = deathRoot.position.x;
-      const startZ = deathRoot.position.z;
-      const startY = deathRoot.position.y;
-      const headingSpeedSq =
-        mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z;
-      let heading =
-        headingSpeedSq > 1e-6
-          ? Math.atan2(mob.velocity.x, mob.velocity.z) + MOB_DEATH_HEADING_OFFSET
-          : MOB_DEATH_HEADING_OFFSET;
-      const fallSignFallback =
-        ((mob.mesh.id * 2654435761) >>> 0) % 2 === 0 ? 1 : -1;
-      let fallSign = fallSignFallback;
-      let knockbackX = 0;
-      let knockbackZ = 0;
-      if (mob.lastHitDirection) {
-        const hitDirX = mob.lastHitDirection.x;
-        const hitDirZ = mob.lastHitDirection.z;
-        const hitLenSq = hitDirX * hitDirX + hitDirZ * hitDirZ;
-        if (hitLenSq > 1e-8) {
-          const hitLenInv = 1 / Math.sqrt(hitLenSq);
-          const normalizedHitDirX = hitDirX * hitLenInv;
-          const normalizedHitDirZ = hitDirZ * hitLenInv;
-          heading =
-            Math.atan2(normalizedHitDirX, normalizedHitDirZ) +
-            MOB_DEATH_HEADING_OFFSET;
-          fallSign = -1;
-          const DEATH_KNOCKBACK_DISTANCE = 2.6;
-          knockbackX = normalizedHitDirX * DEATH_KNOCKBACK_DISTANCE;
-          knockbackZ = normalizedHitDirZ * DEATH_KNOCKBACK_DISTANCE;
+        {
+          onUpgrade: applyUpgrade,
+          onRepair: () => {},
+          onDelete: () => {},
+          onBankAdd1: () => {},
+          onBankAdd10: () => {},
+          onBankRemove1: () => {},
+          onBankRemove10: () => {},
         }
-      }
-      deathRoot.rotation.y = heading;
+      );
 
-      const deathMaterials: THREE.Material[] = [];
-      corpse.traverse((node) => {
-        if (!(node instanceof THREE.Mesh)) return;
-        const clonedMaterial = Array.isArray(node.material)
-          ? node.material.map((m) => m.clone())
-          : node.material.clone();
-        const asArray = Array.isArray(clonedMaterial)
-          ? clonedMaterial
-          : [clonedMaterial];
-        for (const material of asArray) {
-          material.transparent = true;
-          material.opacity = 1;
-          material.depthWrite = false;
-          const tintableMaterial = material as THREE.Material & { color?: THREE.Color };
-          if (tintableMaterial.color) {
-            tintableMaterial.userData.deathFlashBaseColorHex =
-              tintableMaterial.color.getHex();
+      const updateSelectionDialog = () => {
+        const anySelected = ballistaSelected || cannonSelected;
+        if (!anySelected) {
+          selectionDialog.update({
+            selectedCount: 0,
+            inRangeCount: 0,
+            isBankSelected: false,
+            selectedTowerTypeId: null,
+            selectedStructureLabel: '',
+            bankTotal: null,
+            canBankAdd1: false,
+            canBankAdd10: false,
+            canBankRemove1: false,
+            canBankRemove10: false,
+            showRepair: false,
+            buildingCoords: null,
+            buildingHealth: null,
+            upgradeOptions: [],
+            towerDetails: null,
+            canRepair: false,
+            canDelete: false,
+            repairCost: null,
+            repairStatus: null,
+          });
+          return;
+        }
+        const tower = ballistaSelected ? sandboxTower : sandboxCannon;
+        const label = ballistaSelected ? 'Ballista' : 'Cannon';
+        const upgradeOptions = (['range', 'damage', 'speed'] as const)
+          .filter((id) => {
+            const level =
+              id === 'range'
+                ? tower.rangeLevel
+                : id === 'damage'
+                  ? tower.damageLevel
+                  : tower.speedLevel;
+            return level < TOWER_UPGRADES[id].maxLevel;
+          })
+          .map((id) => ({
+            id,
+            label: TOWER_UPGRADES[id].label,
+            deltaText: getTowerUpgradeDeltaText(id),
+            cost: UPGRADE_COST,
+            canAfford: coins >= UPGRADE_COST,
+          }));
+        selectionDialog.update({
+          selectedCount: 1,
+          inRangeCount: 1,
+          isBankSelected: false,
+          selectedTowerTypeId: null,
+          selectedStructureLabel: label,
+          bankTotal: null,
+          canBankAdd1: false,
+          canBankAdd10: false,
+          canBankRemove1: false,
+          canBankRemove10: false,
+          showRepair: false,
+          buildingCoords: null,
+          buildingHealth: null,
+          upgradeOptions,
+          towerDetails: {
+            builtBy: '',
+            killCount: 0,
+            range: tower.range,
+            damage: tower.damage,
+            speed: 1 / tower.shootCadence,
+            dps: tower.damage / tower.shootCadence,
+            rangeLevel: tower.rangeLevel,
+            damageLevel: tower.damageLevel,
+            speedLevel: tower.speedLevel,
+          },
+          canRepair: false,
+          canDelete: false,
+          repairCost: null,
+          repairStatus: null,
+        });
+      };
+
+      const mobDeathVisualTemplate = mobTemplate.clone(true);
+      const particleSystem = createParticleSystem(scene);
+      const smokePoofEffect = createSmokePoofEffect(scene);
+      smokePoofEffect.setSmokeTemplate(smokeModel);
+      const DEATH_FLASH_TINT = new THREE.Color(0xff2a2a);
+      const MOB_DEATH_GROUND_OFFSET_Y = -0.65;
+      const MOB_DEATH_HEADING_OFFSET = Math.PI;
+
+      type DeathVisual = {
+        root: THREE.Object3D;
+        materials: THREE.Material[];
+        age: number;
+        heading: number;
+        fallSign: number;
+        startX: number;
+        startZ: number;
+        startY: number;
+        knockbackX: number;
+        knockbackZ: number;
+      };
+      const activeMobDeathVisuals: DeathVisual[] = [];
+      const TEMP_BASE_COLOR = new THREE.Color();
+
+      const spawnMobDeathVisual = (mob: SandboxMob) => {
+        const deathRoot = new THREE.Group();
+        const corpse = mobDeathVisualTemplate.clone(true);
+        const corpseBounds = new THREE.Box3().setFromObject(corpse);
+        if (!corpseBounds.isEmpty()) {
+          corpse.position.y -= corpseBounds.min.y;
+        }
+        deathRoot.add(corpse);
+        deathRoot.position.copy(mob.position);
+        const DEATH_VISUAL_LIFT_Y = 0.3;
+        deathRoot.position.y += MOB_DEATH_GROUND_OFFSET_Y + DEATH_VISUAL_LIFT_Y;
+        const startX = deathRoot.position.x;
+        const startZ = deathRoot.position.z;
+        const startY = deathRoot.position.y;
+        const headingSpeedSq =
+          mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z;
+        let heading =
+          headingSpeedSq > 1e-6
+            ? Math.atan2(mob.velocity.x, mob.velocity.z) +
+              MOB_DEATH_HEADING_OFFSET
+            : MOB_DEATH_HEADING_OFFSET;
+        const fallSignFallback =
+          ((mob.mesh.id * 2654435761) >>> 0) % 2 === 0 ? 1 : -1;
+        let fallSign = fallSignFallback;
+        let knockbackX = 0;
+        let knockbackZ = 0;
+        if (mob.lastHitDirection) {
+          const hitDirX = mob.lastHitDirection.x;
+          const hitDirZ = mob.lastHitDirection.z;
+          const hitLenSq = hitDirX * hitDirX + hitDirZ * hitDirZ;
+          if (hitLenSq > 1e-8) {
+            const hitLenInv = 1 / Math.sqrt(hitLenSq);
+            const normalizedHitDirX = hitDirX * hitLenInv;
+            const normalizedHitDirZ = hitDirZ * hitLenInv;
+            heading =
+              Math.atan2(normalizedHitDirX, normalizedHitDirZ) +
+              MOB_DEATH_HEADING_OFFSET;
+            fallSign = -1;
+            const DEATH_KNOCKBACK_DISTANCE = 2.6;
+            knockbackX = normalizedHitDirX * DEATH_KNOCKBACK_DISTANCE;
+            knockbackZ = normalizedHitDirZ * DEATH_KNOCKBACK_DISTANCE;
           }
-          deathMaterials.push(material);
         }
-        node.material = clonedMaterial;
-        node.castShadow = true;
-        node.receiveShadow = true;
+        deathRoot.rotation.y = heading;
+
+        const deathMaterials: THREE.Material[] = [];
+        corpse.traverse((node) => {
+          if (!(node instanceof THREE.Mesh)) return;
+          const clonedMaterial = Array.isArray(node.material)
+            ? node.material.map((m) => m.clone())
+            : node.material.clone();
+          const asArray = Array.isArray(clonedMaterial)
+            ? clonedMaterial
+            : [clonedMaterial];
+          for (const material of asArray) {
+            material.transparent = true;
+            material.opacity = 1;
+            material.depthWrite = false;
+            const tintableMaterial = material as THREE.Material & {
+              color?: THREE.Color;
+            };
+            if (tintableMaterial.color) {
+              tintableMaterial.userData.deathFlashBaseColorHex =
+                tintableMaterial.color.getHex();
+            }
+            deathMaterials.push(material);
+          }
+          node.material = clonedMaterial;
+          node.castShadow = true;
+          node.receiveShadow = true;
+        });
+        scene.add(deathRoot);
+
+        activeMobDeathVisuals.push({
+          root: deathRoot,
+          materials: deathMaterials,
+          age: 0,
+          heading,
+          fallSign,
+          startX,
+          startZ,
+          startY,
+          knockbackX,
+          knockbackZ,
+        });
+      };
+
+      const FALL_DURATION = 0.5;
+      const HOLD_DURATION = 1.15;
+      const FADE_DURATION = 1.0;
+      const HIT_FLASH_HOLD_DURATION = 0.32;
+      const HIT_FLASH_LERP_OUT_DURATION = 0.2;
+      const KNOCKBACK_DURATION = 0.38;
+      const TOTAL_DEATH_DURATION =
+        FALL_DURATION + HOLD_DURATION + FADE_DURATION;
+      const MAX_FALL_ANGLE = Math.PI * 0.56;
+      const SINK_DISTANCE = 0.85;
+      const MIN_DEATH_Y = -2;
+
+      const updateMobDeathVisuals = (delta: number) => {
+        for (let i = activeMobDeathVisuals.length - 1; i >= 0; i -= 1) {
+          const visual = activeMobDeathVisuals[i]!;
+          visual.age += delta;
+          const clampedFallT = clamp(visual.age / FALL_DURATION, 0, 1);
+          const easedFall = 1 - (1 - clampedFallT) * (1 - clampedFallT);
+          const knockbackT = clamp(visual.age / KNOCKBACK_DURATION, 0, 1);
+          const knockbackEase =
+            1 - (1 - knockbackT) * (1 - knockbackT) * (1 - knockbackT);
+          visual.root.position.x =
+            visual.startX + visual.knockbackX * knockbackEase;
+          visual.root.position.z =
+            visual.startZ + visual.knockbackZ * knockbackEase;
+          visual.root.rotation.set(0, visual.heading, 0);
+          visual.root.rotateX(visual.fallSign * MAX_FALL_ANGLE * easedFall);
+          const hitFlashStrength =
+            visual.age <= HIT_FLASH_HOLD_DURATION
+              ? 1
+              : clamp(
+                  1 -
+                    (visual.age - HIT_FLASH_HOLD_DURATION) /
+                      HIT_FLASH_LERP_OUT_DURATION,
+                  0,
+                  1
+                );
+          const fadeStart = FALL_DURATION + HOLD_DURATION;
+          const fadeT = clamp((visual.age - fadeStart) / FADE_DURATION, 0, 1);
+          const sinkEase = 1 - (1 - fadeT) * (1 - fadeT);
+          visual.root.position.y = Math.max(
+            visual.startY - SINK_DISTANCE * sinkEase,
+            MIN_DEATH_Y
+          );
+          const opacity = 1 - fadeT;
+          for (const material of visual.materials) {
+            const tintableMaterial = material as THREE.Material & {
+              color?: THREE.Color;
+            };
+            if (tintableMaterial.color) {
+              const baseColorHex = tintableMaterial.userData
+                .deathFlashBaseColorHex as number | undefined;
+              if (baseColorHex !== undefined) {
+                TEMP_BASE_COLOR.setHex(baseColorHex);
+                tintableMaterial.color
+                  .copy(TEMP_BASE_COLOR)
+                  .lerp(DEATH_FLASH_TINT, hitFlashStrength);
+              }
+            }
+            material.opacity = opacity;
+          }
+          if (visual.age >= TOTAL_DEATH_DURATION) {
+            scene.remove(visual.root);
+            for (const material of visual.materials) {
+              material.dispose();
+            }
+            activeMobDeathVisuals.splice(i, 1);
+          }
+        }
+      };
+
+      const rigDemoGroup = new THREE.Group();
+      rigDemoGroup.position.set(rigDemoX, 0, 0);
+      scene.add(rigDemoGroup);
+
+      const towerMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      towerMesh.position.set(0, 1, 0);
+      rigDemoGroup.add(towerMesh);
+
+      const rig = createBallistaVisualRig(towerBallista);
+      if (rig) {
+        rig.root.position.copy(towerMesh.position);
+        rig.root.position.y -= 1;
+        rigDemoGroup.add(rig.root);
+      } else {
+        const fallback = towerBallista.clone(true);
+        fallback.position.copy(towerMesh.position);
+        fallback.position.y -= 1;
+        rigDemoGroup.add(fallback);
+      }
+      const towerPos = new THREE.Vector3(rigDemoX, 1, 0);
+      rigDemoGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh)
+          obj.raycast = THREE.Mesh.prototype.raycast;
       });
-      scene.add(deathRoot);
 
-      activeMobDeathVisuals.push({
-        root: deathRoot,
-        materials: deathMaterials,
-        age: 0,
-        heading,
-        fallSign,
-        startX,
-        startZ,
-        startY,
-        knockbackX,
-        knockbackZ,
+      const cannonRigDemoGroup = new THREE.Group();
+      cannonRigDemoGroup.position.set(cannonRigDemoX, 0, 0);
+      scene.add(cannonRigDemoGroup);
+
+      const cannonTowerMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      cannonTowerMesh.position.set(0, 1, 0);
+      cannonRigDemoGroup.add(cannonTowerMesh);
+
+      const cannonRig = createCannonVisualRig(cannonRaw);
+      if (cannonRig) {
+        cannonRig.root.position.copy(cannonTowerMesh.position);
+        cannonRig.root.position.y -= 1;
+        cannonRigDemoGroup.add(cannonRig.root);
+      } else {
+        const cannonFallback = cannon.clone(true);
+        cannonFallback.position.copy(cannonTowerMesh.position);
+        cannonFallback.position.y -= 1;
+        cannonRigDemoGroup.add(cannonFallback);
+      }
+      const cannonTowerPos = new THREE.Vector3(cannonRigDemoX, 1, 0);
+      cannonRigDemoGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh)
+          obj.raycast = THREE.Mesh.prototype.raycast;
       });
-    };
 
-    const FALL_DURATION = 0.5;
-    const HOLD_DURATION = 1.15;
-    const FADE_DURATION = 1.0;
-    const HIT_FLASH_HOLD_DURATION = 0.32;
-    const HIT_FLASH_LERP_OUT_DURATION = 0.2;
-    const KNOCKBACK_DURATION = 0.38;
-    const TOTAL_DEATH_DURATION = FALL_DURATION + HOLD_DURATION + FADE_DURATION;
-    const MAX_FALL_ANGLE = Math.PI * 0.56;
-    const SINK_DISTANCE = 0.85;
-    const MIN_DEATH_Y = -2;
+      type SandboxCannonState = {
+        range: number;
+        damage: number;
+        shootCadence: number;
+        rangeLevel: number;
+        damageLevel: number;
+        speedLevel: number;
+      };
+      const sandboxCannon: SandboxCannonState = {
+        range: 9,
+        damage: 24,
+        shootCadence: 0.6,
+        rangeLevel: 0,
+        damageLevel: 0,
+        speedLevel: 0,
+      };
 
-    const updateMobDeathVisuals = (delta: number) => {
-      for (let i = activeMobDeathVisuals.length - 1; i >= 0; i -= 1) {
-        const visual = activeMobDeathVisuals[i]!;
-        visual.age += delta;
-        const clampedFallT = clamp(visual.age / FALL_DURATION, 0, 1);
-        const easedFall = 1 - (1 - clampedFallT) * (1 - clampedFallT);
-        const knockbackT = clamp(visual.age / KNOCKBACK_DURATION, 0, 1);
-        const knockbackEase =
-          1 - (1 - knockbackT) * (1 - knockbackT) * (1 - knockbackT);
-        visual.root.position.x = visual.startX + visual.knockbackX * knockbackEase;
-        visual.root.position.z = visual.startZ + visual.knockbackZ * knockbackEase;
-        visual.root.rotation.set(0, visual.heading, 0);
-        visual.root.rotateX(visual.fallSign * MAX_FALL_ANGLE * easedFall);
-        const hitFlashStrength =
-          visual.age <= HIT_FLASH_HOLD_DURATION
-            ? 1
-            : clamp(
-                1 -
-                  (visual.age - HIT_FLASH_HOLD_DURATION) /
-                    HIT_FLASH_LERP_OUT_DURATION,
-                0,
-                1
-              );
-        const fadeStart = FALL_DURATION + HOLD_DURATION;
-        const fadeT = clamp((visual.age - fadeStart) / FADE_DURATION, 0, 1);
-        const sinkEase = 1 - (1 - fadeT) * (1 - fadeT);
-        visual.root.position.y = Math.max(
-          visual.startY - SINK_DISTANCE * sinkEase,
-          MIN_DEATH_Y
-        );
-        const opacity = 1 - fadeT;
-        for (const material of visual.materials) {
-          const tintableMaterial = material as THREE.Material & { color?: THREE.Color };
-          if (tintableMaterial.color) {
-            const baseColorHex = tintableMaterial.userData
-              .deathFlashBaseColorHex as number | undefined;
-            if (baseColorHex !== undefined) {
-              TEMP_BASE_COLOR.setHex(baseColorHex);
-              tintableMaterial.color
-                .copy(TEMP_BASE_COLOR)
-                .lerp(DEATH_FLASH_TINT, hitFlashStrength);
+      const cannonMobs: SandboxMob[] = [];
+      const activeCannonballs: CannonballProjectile[] = [];
+      const cannonballGravity = new THREE.Vector3(0, -CANNONBALL_GRAVITY, 0);
+      const CANNON_RIG_DEMO_SPAWN_DIST = 5;
+      const cannonSpawnLeft = new THREE.Vector3(
+        cannonRigDemoX,
+        MOB_BASE_Y,
+        -CANNON_RIG_DEMO_SPAWN_DIST
+      );
+      const cannonSpawnRight = new THREE.Vector3(
+        cannonRigDemoX,
+        MOB_BASE_Y,
+        CANNON_RIG_DEMO_SPAWN_DIST
+      );
+      let cannonRespawnTimer = 0;
+      let cannonShootCooldown = 0;
+
+      let cannonSelected = false;
+
+      const pickCannonMobInRange = (): SandboxMob | null => {
+        let best: SandboxMob | null = null;
+        let bestDist = Number.POSITIVE_INFINITY;
+        for (const mob of cannonMobs) {
+          if (mob.hp <= 0) continue;
+          const d = mob.position.distanceTo(cannonTowerPos);
+          if (d <= sandboxCannon.range && d < bestDist) {
+            bestDist = d;
+            best = mob;
+          }
+        }
+        return best;
+      };
+
+      const spawnCannonMob = (_x: number, z: number) => {
+        const mesh = mobTemplate.clone(true);
+        const pos = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, z);
+        mesh.position.set(pos.x - cannonRigDemoX, pos.y, pos.z);
+        cannonRigDemoGroup.add(mesh);
+        cannonMobs.push({
+          mesh,
+          hp: MOB_MAX_HP,
+          maxHp: MOB_MAX_HP,
+          position: pos,
+          velocity: new THREE.Vector3(0, 0, 0),
+        });
+      };
+
+      const spawnCannonball = (
+        launchPos: THREE.Vector3,
+        velocity: THREE.Vector3
+      ) => {
+        const mesh = cannonballTemplate.clone(true);
+        placeCannonballAtPosition(mesh, launchPos);
+        scene.add(mesh);
+        activeCannonballs.push({
+          mesh,
+          position: launchPos.clone(),
+          velocity: velocity.clone(),
+          gravityDelay: CANNONBALL_GRAVITY_DELAY,
+          radius: CANNONBALL_RADIUS,
+          ttl: CANNONBALL_MAX_LIFETIME,
+          damage: sandboxCannon.damage,
+          aoeRadius: CANNONBALL_AOE_RADIUS,
+        });
+      };
+
+      const applyCannonballAoE = (
+        impactPos: THREE.Vector3,
+        damage: number,
+        aoeRadius: number
+      ) => {
+        smokePoofEffect.spawnSmokePoof(impactPos, {
+          scaleMultiplier: 2.5,
+          count: 18,
+          spreadMultiplier: 2.2,
+        });
+        for (const mob of cannonMobs) {
+          if (mob.hp <= 0) continue;
+          const distSq = mob.position.distanceToSquared(impactPos);
+          if (distSq <= aoeRadius * aoeRadius) {
+            const mobCenter = new THREE.Vector3(
+              mob.position.x,
+              MOB_BASE_Y + 0.3,
+              mob.position.z
+            );
+            const hitDir = mobCenter.clone().sub(impactPos);
+            if (hitDir.lengthSq() > 1e-8) {
+              const dir = hitDir.normalize();
+              mob.lastHitDirection = dir.clone();
+              mob.velocity.addScaledVector(dir, CANNONBALL_KNOCKBACK);
+            }
+            mob.hp -= damage;
+          }
+        }
+      };
+
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      const updatePointer = (e: PointerEvent) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      };
+      const selectionTargetScratch = new THREE.Vector3();
+      installPointerHandler((event) => {
+        if (
+          (event.target as HTMLElement).closest(
+            '.selection-dialog, .hud-energy'
+          )
+        )
+          return;
+        updatePointer(event);
+        camera.updateMatrixWorld();
+        raycaster.setFromCamera(pointer, camera);
+        const ballistaHits = raycaster.intersectObject(rigDemoGroup, true);
+        const cannonHits = raycaster.intersectObject(cannonRigDemoGroup, true);
+        const knollHits = raycaster.intersectObject(knollGroup, true);
+        if (ballistaHits.length > 0) {
+          ballistaSelected = true;
+          cannonSelected = false;
+          updateSelectionDialog();
+          setMoveTarget(towerPos.clone());
+          return;
+        }
+        if (cannonHits.length > 0) {
+          ballistaSelected = false;
+          cannonSelected = true;
+          updateSelectionDialog();
+          setMoveTarget(cannonTowerPos.clone());
+          return;
+        }
+        if (knollHits.length > 0) {
+          ballistaSelected = false;
+          cannonSelected = false;
+          updateSelectionDialog();
+          knollHits[0]!.object.getWorldPosition(selectionTargetScratch);
+          setMoveTarget(selectionTargetScratch);
+          return;
+        }
+        const hadSelection = ballistaSelected || cannonSelected;
+        ballistaSelected = false;
+        cannonSelected = false;
+        updateSelectionDialog();
+        const point = getGroundPoint(event);
+        if (point && !hadSelection) setMoveTarget(point);
+      });
+
+      const mobs: SandboxMob[] = [];
+      const activeArrows: ArrowProjectile[] = [];
+      const arrowGravity = new THREE.Vector3(0, -BALLISTA_ARROW_GRAVITY, 0);
+      const RIG_DEMO_SPAWN_DIST = 5;
+      const spawnLeft = new THREE.Vector3(
+        rigDemoX,
+        MOB_BASE_Y,
+        -RIG_DEMO_SPAWN_DIST
+      );
+      const spawnRight = new THREE.Vector3(
+        rigDemoX,
+        MOB_BASE_Y,
+        RIG_DEMO_SPAWN_DIST
+      );
+      let nextSpawnSide: 'left' | 'right' = 'left';
+      let respawnTimer = 0;
+
+      const pickMobInRange = (): SandboxMob | null => {
+        let best: SandboxMob | null = null;
+        let bestDist = Number.POSITIVE_INFINITY;
+        for (const mob of mobs) {
+          if (mob.hp <= 0) continue;
+          const d = mob.position.distanceTo(towerPos);
+          if (d <= sandboxTower.range && d < bestDist) {
+            bestDist = d;
+            best = mob;
+          }
+        }
+        return best;
+      };
+
+      const spawnMob = (_x: number, z: number) => {
+        const mesh = mobTemplate.clone(true);
+        const pos = new THREE.Vector3(rigDemoX, MOB_BASE_Y, z);
+        mesh.position.set(pos.x - rigDemoX, pos.y, pos.z);
+        rigDemoGroup.add(mesh);
+        mobs.push({
+          mesh,
+          hp: MOB_MAX_HP,
+          maxHp: MOB_MAX_HP,
+          position: pos,
+          velocity: new THREE.Vector3(0, 0, 0),
+        });
+      };
+
+      const spawnArrow = (
+        launchPos: THREE.Vector3,
+        quat: THREE.Quaternion,
+        velocity: THREE.Vector3
+      ) => {
+        const mesh = arrowTemplate.clone(true);
+        mesh.quaternion.copy(quat);
+        orientArrowToVelocity(mesh, velocity, arrowFacing.forwardLocal);
+        placeArrowMeshAtFacing(mesh, launchPos, arrowFacing.anchorLocalPos);
+        scene.add(mesh);
+        activeArrows.push({
+          mesh,
+          position: launchPos.clone(),
+          velocity: velocity.clone(),
+          gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
+          radius: BALLISTA_ARROW_RADIUS,
+          ttl: BALLISTA_ARROW_MAX_LIFETIME,
+          damage: sandboxTower.damage,
+        });
+      };
+
+      let towerShootCooldown = 0;
+      const launchPosScratch = new THREE.Vector3();
+      const launchQuatScratch = new THREE.Quaternion();
+      const targetPosScratch = new THREE.Vector3();
+
+      const prevPosScratch = new THREE.Vector3();
+      const stepScratch = new THREE.Vector3();
+      const closestScratch = new THREE.Vector3();
+      const mobCenterScratch = new THREE.Vector3();
+
+      const cannonLaunchPosScratch = new THREE.Vector3();
+      const cannonLaunchQuatScratch = new THREE.Quaternion();
+      const cannonTargetPosScratch = new THREE.Vector3();
+      const cannonPrevPosScratch = new THREE.Vector3();
+      const cannonStepScratch = new THREE.Vector3();
+      const cannonClosestScratch = new THREE.Vector3();
+      const cannonMobCenterScratch = new THREE.Vector3();
+      const GROUND_Y = 0;
+
+      const updateRigDemo = (delta: number) => {
+        towerShootCooldown = Math.max(0, towerShootCooldown - delta);
+        cannonShootCooldown = Math.max(0, cannonShootCooldown - delta);
+
+        for (let i = mobs.length - 1; i >= 0; i -= 1) {
+          const mob = mobs[i]!;
+          if (mob.hp <= 0) {
+            spawnMobDeathVisual(mob);
+            particleSystem.spawnMobDeathEffects(mob.position);
+            rigDemoGroup.remove(mob.mesh);
+            mobs.splice(i, 1);
+          }
+        }
+
+        for (let i = cannonMobs.length - 1; i >= 0; i -= 1) {
+          const mob = cannonMobs[i]!;
+          if (mob.hp <= 0) {
+            spawnMobDeathVisual(mob);
+            particleSystem.spawnMobDeathEffects(mob.position);
+            cannonRigDemoGroup.remove(mob.mesh);
+            cannonMobs.splice(i, 1);
+          } else {
+            mob.position.x += mob.velocity.x * delta;
+            mob.position.z += mob.velocity.z * delta;
+            mob.mesh.position.x = mob.position.x - cannonRigDemoX;
+            mob.mesh.position.z = mob.position.z;
+            mob.velocity.x *= 0.92;
+            mob.velocity.z *= 0.92;
+          }
+        }
+
+        if (mobs.length === 0) {
+          respawnTimer -= delta;
+          if (respawnTimer <= 0) {
+            respawnTimer = RIG_DEMO_RESPAWN_DELAY;
+            if (nextSpawnSide === 'left') {
+              spawnMob(0, spawnLeft.z);
+              nextSpawnSide = 'right';
+            } else {
+              spawnMob(0, spawnRight.z);
+              nextSpawnSide = 'left';
             }
           }
-          material.opacity = opacity;
         }
-        if (visual.age >= TOTAL_DEATH_DURATION) {
-          scene.remove(visual.root);
-          for (const material of visual.materials) {
-            material.dispose();
-          }
-          activeMobDeathVisuals.splice(i, 1);
-        }
-      }
-    };
 
-    const rigDemoGroup = new THREE.Group();
-    rigDemoGroup.position.set(rigDemoX, 0, 0);
-    scene.add(rigDemoGroup);
-
-    const towerMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(2, 2, 2),
-      new THREE.MeshBasicMaterial({ visible: false })
-    );
-    towerMesh.position.set(0, 1, 0);
-    rigDemoGroup.add(towerMesh);
-
-    const rig = createBallistaVisualRig(towerBallista);
-    if (rig) {
-      rig.root.position.copy(towerMesh.position);
-      rig.root.position.y -= 1;
-      rigDemoGroup.add(rig.root);
-    } else {
-      const fallback = towerBallista.clone(true);
-      fallback.position.copy(towerMesh.position);
-      fallback.position.y -= 1;
-      rigDemoGroup.add(fallback);
-    }
-    const towerPos = new THREE.Vector3(rigDemoX, 1, 0);
-    rigDemoGroup.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) obj.raycast = THREE.Mesh.prototype.raycast;
-    });
-
-    const cannonRigDemoGroup = new THREE.Group();
-    cannonRigDemoGroup.position.set(cannonRigDemoX, 0, 0);
-    scene.add(cannonRigDemoGroup);
-
-    const cannonTowerMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(2, 2, 2),
-      new THREE.MeshBasicMaterial({ visible: false })
-    );
-    cannonTowerMesh.position.set(0, 1, 0);
-    cannonRigDemoGroup.add(cannonTowerMesh);
-
-    const cannonRig = createCannonVisualRig(cannonRaw);
-    if (cannonRig) {
-      cannonRig.root.position.copy(cannonTowerMesh.position);
-      cannonRig.root.position.y -= 1;
-      cannonRigDemoGroup.add(cannonRig.root);
-    } else {
-      const cannonFallback = cannon.clone(true);
-      cannonFallback.position.copy(cannonTowerMesh.position);
-      cannonFallback.position.y -= 1;
-      cannonRigDemoGroup.add(cannonFallback);
-    }
-    const cannonTowerPos = new THREE.Vector3(cannonRigDemoX, 1, 0);
-    cannonRigDemoGroup.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) obj.raycast = THREE.Mesh.prototype.raycast;
-    });
-
-    type SandboxCannonState = { range: number; damage: number; shootCadence: number; rangeLevel: number; damageLevel: number; speedLevel: number };
-    const sandboxCannon: SandboxCannonState = { range: 9, damage: 24, shootCadence: 0.6, rangeLevel: 0, damageLevel: 0, speedLevel: 0 };
-
-    const cannonMobs: SandboxMob[] = [];
-    const activeCannonballs: CannonballProjectile[] = [];
-    const cannonballGravity = new THREE.Vector3(0, -CANNONBALL_GRAVITY, 0);
-    const CANNON_RIG_DEMO_SPAWN_DIST = 5;
-    const cannonSpawnLeft = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, -CANNON_RIG_DEMO_SPAWN_DIST);
-    const cannonSpawnRight = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, CANNON_RIG_DEMO_SPAWN_DIST);
-    let cannonRespawnTimer = 0;
-    let cannonShootCooldown = 0;
-
-    let cannonSelected = false;
-
-    const pickCannonMobInRange = (): SandboxMob | null => {
-      let best: SandboxMob | null = null;
-      let bestDist = Number.POSITIVE_INFINITY;
-      for (const mob of cannonMobs) {
-        if (mob.hp <= 0) continue;
-        const d = mob.position.distanceTo(cannonTowerPos);
-        if (d <= sandboxCannon.range && d < bestDist) {
-          bestDist = d;
-          best = mob;
-        }
-      }
-      return best;
-    };
-
-    const spawnCannonMob = (_x: number, z: number) => {
-      const mesh = mobTemplate.clone(true);
-      const pos = new THREE.Vector3(cannonRigDemoX, MOB_BASE_Y, z);
-      mesh.position.set(pos.x - cannonRigDemoX, pos.y, pos.z);
-      cannonRigDemoGroup.add(mesh);
-      cannonMobs.push({
-        mesh,
-        hp: MOB_MAX_HP,
-        maxHp: MOB_MAX_HP,
-        position: pos,
-        velocity: new THREE.Vector3(0, 0, 0),
-      });
-    };
-
-    const spawnCannonball = (launchPos: THREE.Vector3, velocity: THREE.Vector3) => {
-      const mesh = cannonballTemplate.clone(true);
-      placeCannonballAtPosition(mesh, launchPos);
-      scene.add(mesh);
-      activeCannonballs.push({
-        mesh,
-        position: launchPos.clone(),
-        velocity: velocity.clone(),
-        gravityDelay: CANNONBALL_GRAVITY_DELAY,
-        radius: CANNONBALL_RADIUS,
-        ttl: CANNONBALL_MAX_LIFETIME,
-        damage: sandboxCannon.damage,
-        aoeRadius: CANNONBALL_AOE_RADIUS,
-      });
-    };
-
-    const applyCannonballAoE = (impactPos: THREE.Vector3, damage: number, aoeRadius: number) => {
-      smokePoofEffect.spawnSmokePoof(impactPos, {
-        scaleMultiplier: 2.5,
-        count: 18,
-        spreadMultiplier: 2.2,
-      });
-      for (const mob of cannonMobs) {
-        if (mob.hp <= 0) continue;
-        const distSq = mob.position.distanceToSquared(impactPos);
-        if (distSq <= aoeRadius * aoeRadius) {
-          const mobCenter = new THREE.Vector3(mob.position.x, MOB_BASE_Y + 0.3, mob.position.z);
-          const hitDir = mobCenter.clone().sub(impactPos);
-          if (hitDir.lengthSq() > 1e-8) {
-            const dir = hitDir.normalize();
-            mob.lastHitDirection = dir.clone();
-            mob.velocity.addScaledVector(dir, CANNONBALL_KNOCKBACK);
-          }
-          mob.hp -= damage;
-        }
-      }
-    };
-
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    const updatePointer = (e: PointerEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    };
-    const selectionTargetScratch = new THREE.Vector3();
-    installPointerHandler((event) => {
-      if ((event.target as HTMLElement).closest('.selection-dialog, .hud-energy')) return;
-      updatePointer(event);
-      camera.updateMatrixWorld();
-      raycaster.setFromCamera(pointer, camera);
-      const ballistaHits = raycaster.intersectObject(rigDemoGroup, true);
-      const cannonHits = raycaster.intersectObject(cannonRigDemoGroup, true);
-      const knollHits = raycaster.intersectObject(knollGroup, true);
-      if (ballistaHits.length > 0) {
-        ballistaSelected = true;
-        cannonSelected = false;
-        updateSelectionDialog();
-        setMoveTarget(towerPos.clone());
-        return;
-      }
-      if (cannonHits.length > 0) {
-        ballistaSelected = false;
-        cannonSelected = true;
-        updateSelectionDialog();
-        setMoveTarget(cannonTowerPos.clone());
-        return;
-      }
-      if (knollHits.length > 0) {
-        ballistaSelected = false;
-        cannonSelected = false;
-        updateSelectionDialog();
-        knollHits[0]!.object.getWorldPosition(selectionTargetScratch);
-        setMoveTarget(selectionTargetScratch);
-        return;
-      }
-      const hadSelection = ballistaSelected || cannonSelected;
-      ballistaSelected = false;
-      cannonSelected = false;
-      updateSelectionDialog();
-      const point = getGroundPoint(event);
-      if (point && !hadSelection) setMoveTarget(point);
-    });
-
-    const mobs: SandboxMob[] = [];
-    const activeArrows: ArrowProjectile[] = [];
-    const arrowGravity = new THREE.Vector3(0, -BALLISTA_ARROW_GRAVITY, 0);
-    const RIG_DEMO_SPAWN_DIST = 5;
-    const spawnLeft = new THREE.Vector3(rigDemoX, MOB_BASE_Y, -RIG_DEMO_SPAWN_DIST);
-    const spawnRight = new THREE.Vector3(rigDemoX, MOB_BASE_Y, RIG_DEMO_SPAWN_DIST);
-    let nextSpawnSide: 'left' | 'right' = 'left';
-    let respawnTimer = 0;
-
-    const pickMobInRange = (): SandboxMob | null => {
-      let best: SandboxMob | null = null;
-      let bestDist = Number.POSITIVE_INFINITY;
-      for (const mob of mobs) {
-        if (mob.hp <= 0) continue;
-        const d = mob.position.distanceTo(towerPos);
-        if (d <= sandboxTower.range && d < bestDist) {
-          bestDist = d;
-          best = mob;
-        }
-      }
-      return best;
-    };
-
-    const spawnMob = (_x: number, z: number) => {
-      const mesh = mobTemplate.clone(true);
-      const pos = new THREE.Vector3(rigDemoX, MOB_BASE_Y, z);
-      mesh.position.set(pos.x - rigDemoX, pos.y, pos.z);
-      rigDemoGroup.add(mesh);
-      mobs.push({
-        mesh,
-        hp: MOB_MAX_HP,
-        maxHp: MOB_MAX_HP,
-        position: pos,
-        velocity: new THREE.Vector3(0, 0, 0),
-      });
-    };
-
-    const spawnArrow = (
-      launchPos: THREE.Vector3,
-      quat: THREE.Quaternion,
-      velocity: THREE.Vector3
-    ) => {
-      const mesh = arrowTemplate.clone(true);
-      mesh.quaternion.copy(quat);
-      orientArrowToVelocity(mesh, velocity, arrowFacing.forwardLocal);
-      placeArrowMeshAtFacing(mesh, launchPos, arrowFacing.anchorLocalPos);
-      scene.add(mesh);
-      activeArrows.push({
-        mesh,
-        position: launchPos.clone(),
-        velocity: velocity.clone(),
-        gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
-        radius: BALLISTA_ARROW_RADIUS,
-        ttl: BALLISTA_ARROW_MAX_LIFETIME,
-        damage: sandboxTower.damage,
-      });
-    };
-
-    let towerShootCooldown = 0;
-    const launchPosScratch = new THREE.Vector3();
-    const launchQuatScratch = new THREE.Quaternion();
-    const targetPosScratch = new THREE.Vector3();
-
-    const prevPosScratch = new THREE.Vector3();
-    const stepScratch = new THREE.Vector3();
-    const closestScratch = new THREE.Vector3();
-    const mobCenterScratch = new THREE.Vector3();
-
-    const cannonLaunchPosScratch = new THREE.Vector3();
-    const cannonLaunchQuatScratch = new THREE.Quaternion();
-    const cannonTargetPosScratch = new THREE.Vector3();
-    const cannonPrevPosScratch = new THREE.Vector3();
-    const cannonStepScratch = new THREE.Vector3();
-    const cannonClosestScratch = new THREE.Vector3();
-    const cannonMobCenterScratch = new THREE.Vector3();
-    const GROUND_Y = 0;
-
-    const updateRigDemo = (delta: number) => {
-      towerShootCooldown = Math.max(0, towerShootCooldown - delta);
-      cannonShootCooldown = Math.max(0, cannonShootCooldown - delta);
-
-      for (let i = mobs.length - 1; i >= 0; i -= 1) {
-        const mob = mobs[i]!;
-        if (mob.hp <= 0) {
-          spawnMobDeathVisual(mob);
-          particleSystem.spawnMobDeathEffects(mob.position);
-          rigDemoGroup.remove(mob.mesh);
-          mobs.splice(i, 1);
-        }
-      }
-
-      for (let i = cannonMobs.length - 1; i >= 0; i -= 1) {
-        const mob = cannonMobs[i]!;
-        if (mob.hp <= 0) {
-          spawnMobDeathVisual(mob);
-          particleSystem.spawnMobDeathEffects(mob.position);
-          cannonRigDemoGroup.remove(mob.mesh);
-          cannonMobs.splice(i, 1);
-        } else {
-          mob.position.x += mob.velocity.x * delta;
-          mob.position.z += mob.velocity.z * delta;
-          mob.mesh.position.x = mob.position.x - cannonRigDemoX;
-          mob.mesh.position.z = mob.position.z;
-          mob.velocity.x *= 0.92;
-          mob.velocity.z *= 0.92;
-        }
-      }
-
-      if (mobs.length === 0) {
-        respawnTimer -= delta;
-        if (respawnTimer <= 0) {
-          respawnTimer = RIG_DEMO_RESPAWN_DELAY;
-          if (nextSpawnSide === 'left') {
-            spawnMob(0, spawnLeft.z);
-            nextSpawnSide = 'right';
-          } else {
-            spawnMob(0, spawnRight.z);
-            nextSpawnSide = 'left';
+        if (cannonMobs.length === 0) {
+          cannonRespawnTimer -= delta;
+          if (cannonRespawnTimer <= 0) {
+            cannonRespawnTimer = RIG_DEMO_RESPAWN_DELAY;
+            const CANNON_MOB_OFFSET = 0.5;
+            spawnCannonMob(0, cannonSpawnLeft.z - CANNON_MOB_OFFSET);
+            spawnCannonMob(0, cannonSpawnLeft.z + CANNON_MOB_OFFSET);
+            spawnCannonMob(0, cannonSpawnRight.z - CANNON_MOB_OFFSET);
+            spawnCannonMob(0, cannonSpawnRight.z + CANNON_MOB_OFFSET);
           }
         }
-      }
 
-      if (cannonMobs.length === 0) {
-        cannonRespawnTimer -= delta;
-        if (cannonRespawnTimer <= 0) {
-          cannonRespawnTimer = RIG_DEMO_RESPAWN_DELAY;
-          const CANNON_MOB_OFFSET = 0.5;
-          spawnCannonMob(0, cannonSpawnLeft.z - CANNON_MOB_OFFSET);
-          spawnCannonMob(0, cannonSpawnLeft.z + CANNON_MOB_OFFSET);
-          spawnCannonMob(0, cannonSpawnRight.z - CANNON_MOB_OFFSET);
-          spawnCannonMob(0, cannonSpawnRight.z + CANNON_MOB_OFFSET);
-        }
-      }
+        const target = pickMobInRange();
+        if (target) {
+          targetPosScratch.copy(target.position).setY(MOB_BASE_Y + 0.3);
+          const launchVel = targetPosScratch
+            .clone()
+            .sub(towerPos)
+            .normalize()
+            .multiplyScalar(BALLISTA_ARROW_SPEED);
 
-      const target = pickMobInRange();
-      if (target) {
-        targetPosScratch.copy(target.position).setY(MOB_BASE_Y + 0.3);
-        const launchVel = targetPosScratch
-          .clone()
-          .sub(towerPos)
-          .normalize()
-          .multiplyScalar(BALLISTA_ARROW_SPEED);
-
-        if (rig) {
-          const { aimAligned } = updateBallistaRigTracking(
-            rig,
-            towerPos,
-            targetPosScratch,
-            launchVel,
-            delta
-          );
-          if (aimAligned && towerShootCooldown <= 0) {
-            getBallistaArrowLaunchTransform(
+          if (rig) {
+            const { aimAligned } = updateBallistaRigTracking(
               rig,
-              launchPosScratch,
-              launchQuatScratch
+              towerPos,
+              targetPosScratch,
+              launchVel,
+              delta
+            );
+            if (aimAligned && towerShootCooldown <= 0) {
+              getBallistaArrowLaunchTransform(
+                rig,
+                launchPosScratch,
+                launchQuatScratch
+              );
+              spawnArrow(launchPosScratch, launchQuatScratch, launchVel);
+              towerShootCooldown = sandboxTower.shootCadence;
+            }
+          } else if (towerShootCooldown <= 0) {
+            launchPosScratch.copy(towerPos).setY(towerPos.y + 0.5);
+            launchQuatScratch.setFromUnitVectors(
+              new THREE.Vector3(0, -1, 0),
+              launchVel.clone().normalize()
             );
             spawnArrow(launchPosScratch, launchQuatScratch, launchVel);
             towerShootCooldown = sandboxTower.shootCadence;
           }
-        } else if (towerShootCooldown <= 0) {
-          launchPosScratch.copy(towerPos).setY(towerPos.y + 0.5);
-          launchQuatScratch.setFromUnitVectors(
-            new THREE.Vector3(0, -1, 0),
-            launchVel.clone().normalize()
-          );
-          spawnArrow(launchPosScratch, launchQuatScratch, launchVel);
-          towerShootCooldown = sandboxTower.shootCadence;
-        }
-      } else if (rig) {
-        updateBallistaRigTracking(rig, towerPos, null, null, delta);
-      }
-
-      const cannonTarget = pickCannonMobInRange();
-      if (cannonTarget && cannonRig) {
-        cannonTargetPosScratch.copy(cannonTarget.position).setY(MOB_BASE_Y + 0.3);
-        const cannonLaunchVelComputed = cannonTargetPosScratch
-          .clone()
-          .sub(cannonTowerPos)
-          .normalize()
-          .multiplyScalar(CANNONBALL_SPEED);
-
-        const { aimAligned } = updateCannonRigTracking(
-          cannonRig,
-          cannonTowerPos,
-          cannonTargetPosScratch,
-          cannonLaunchVelComputed,
-          delta
-        );
-        if (aimAligned && cannonShootCooldown <= 0) {
-          getCannonMuzzleLaunchTransform(
-            cannonRig,
-            cannonLaunchPosScratch,
-            cannonLaunchQuatScratch
-          );
-          const cannonLaunchDir = new THREE.Vector3();
-          getCannonMuzzleLaunchDirection(cannonRig, cannonLaunchDir);
-          const cannonLaunchVel = cannonLaunchDir.multiplyScalar(CANNONBALL_SPEED);
-          spawnCannonball(cannonLaunchPosScratch, cannonLaunchVel);
-          cannonShootCooldown = sandboxCannon.shootCadence;
-        }
-      } else if (cannonRig) {
-        updateCannonRigTracking(cannonRig, cannonTowerPos, null, null, delta);
-      }
-
-      for (let i = activeArrows.length - 1; i >= 0; i -= 1) {
-        const proj = activeArrows[i]!;
-        proj.ttl -= delta;
-        if (proj.ttl <= 0) {
-          scene.remove(proj.mesh);
-          activeArrows.splice(i, 1);
-          continue;
+        } else if (rig) {
+          updateBallistaRigTracking(rig, towerPos, null, null, delta);
         }
 
-        prevPosScratch.copy(proj.position);
-        let gravDt = delta;
-        if (proj.gravityDelay > 0) {
-          const step = Math.min(proj.gravityDelay, delta);
-          proj.gravityDelay -= step;
-          gravDt = delta - step;
-        }
-        proj.velocity.y += arrowGravity.y * gravDt;
-        proj.position.addScaledVector(proj.velocity, delta);
-        orientArrowToVelocity(proj.mesh, proj.velocity, arrowFacing.forwardLocal);
-        placeArrowMeshAtFacing(
-          proj.mesh,
-          proj.position,
-          arrowFacing.anchorLocalPos
-        );
-
-        stepScratch.copy(proj.position).sub(prevPosScratch);
-        const segLenSq = stepScratch.lengthSq();
-        let hitMob: SandboxMob | null = null;
-        let bestT = Number.POSITIVE_INFINITY;
-
-        for (const mob of mobs) {
-          if (mob.hp <= 0) continue;
-          mobCenterScratch.copy(mob.position).setY(MOB_BASE_Y + 0.3);
-          const combined = 0.5 + proj.radius;
-          let t = 0;
-          if (segLenSq > 1e-8) {
-            const deltaP = mobCenterScratch.clone().sub(prevPosScratch);
-            t = THREE.MathUtils.clamp(
-              deltaP.dot(stepScratch) / segLenSq,
-              0,
-              1
-            );
-          }
-          closestScratch.copy(prevPosScratch).addScaledVector(stepScratch, t);
-          if (
-            closestScratch.distanceToSquared(mobCenterScratch) >
-            combined * combined
-          )
-            continue;
-          if (t < bestT) {
-            bestT = t;
-            hitMob = mob;
-          }
-        }
-
-        if (hitMob) {
-          hitMob.lastHitDirection = proj.velocity.clone().normalize();
-          hitMob.hp -= proj.damage;
-          scene.remove(proj.mesh);
-          activeArrows.splice(i, 1);
-        }
-      }
-
-      for (let i = activeCannonballs.length - 1; i >= 0; i -= 1) {
-        const proj = activeCannonballs[i]!;
-        proj.ttl -= delta;
-        if (proj.ttl <= 0) {
-          applyCannonballAoE(proj.position, proj.damage, proj.aoeRadius);
-          scene.remove(proj.mesh);
-          activeCannonballs.splice(i, 1);
-          continue;
-        }
-
-        cannonPrevPosScratch.copy(proj.position);
-        let gravDt = delta;
-        if (proj.gravityDelay > 0) {
-          const step = Math.min(proj.gravityDelay, delta);
-          proj.gravityDelay -= step;
-          gravDt = delta - step;
-        }
-        proj.velocity.y += cannonballGravity.y * gravDt;
-        proj.position.addScaledVector(proj.velocity, delta);
-        placeCannonballAtPosition(proj.mesh, proj.position);
-
-        if (proj.position.y <= GROUND_Y) {
-          applyCannonballAoE(proj.position, proj.damage, proj.aoeRadius);
-          scene.remove(proj.mesh);
-          activeCannonballs.splice(i, 1);
-          continue;
-        }
-
-        cannonStepScratch.copy(proj.position).sub(cannonPrevPosScratch);
-        const segLenSq = cannonStepScratch.lengthSq();
-        let hitMob: SandboxMob | null = null;
-        let bestT = Number.POSITIVE_INFINITY;
-
-        for (const mob of cannonMobs) {
-          if (mob.hp <= 0) continue;
-          cannonMobCenterScratch.copy(mob.position).setY(MOB_BASE_Y + 0.3);
-          const combined = 0.5 + proj.radius;
-          let t = 0;
-          if (segLenSq > 1e-8) {
-            const deltaP = cannonMobCenterScratch.clone().sub(cannonPrevPosScratch);
-            t = THREE.MathUtils.clamp(
-              deltaP.dot(cannonStepScratch) / segLenSq,
-              0,
-              1
-            );
-          }
-          cannonClosestScratch.copy(cannonPrevPosScratch).addScaledVector(cannonStepScratch, t);
-          if (
-            cannonClosestScratch.distanceToSquared(cannonMobCenterScratch) >
-            combined * combined
-          )
-            continue;
-          if (t < bestT) {
-            bestT = t;
-            hitMob = mob;
-          }
-        }
-
-        if (hitMob) {
-          const impactPos = cannonClosestScratch.clone();
-          applyCannonballAoE(impactPos, proj.damage, proj.aoeRadius);
-          scene.remove(proj.mesh);
-          activeCannonballs.splice(i, 1);
-        }
-      }
-    };
-
-    const updatePlayerMotion = (delta: number) => {
-      const keyboardDir = inputController.getKeyboardMoveDirection({
-        camera,
-        keyboardForward,
-        keyboardRight,
-        keyboardMoveDir,
-      });
-      if (keyboardDir) {
-        const keyboardMoveDistance = Math.max(GRID_SIZE, player.speed * 0.35);
-        setMoveTarget(
-          player.mesh.position
+        const cannonTarget = pickCannonMobInRange();
+        if (cannonTarget && cannonRig) {
+          cannonTargetPosScratch
+            .copy(cannonTarget.position)
+            .setY(MOB_BASE_Y + 0.3);
+          const cannonLaunchVelComputed = cannonTargetPosScratch
             .clone()
-            .addScaledVector(keyboardDir, keyboardMoveDistance)
-        );
-        wasKeyboardMoving = true;
-      } else if (wasKeyboardMoving) {
-        setMoveTarget(player.mesh.position.clone());
-        wasKeyboardMoving = false;
-      }
+            .sub(cannonTowerPos)
+            .normalize()
+            .multiplyScalar(CANNONBALL_SPEED);
 
-      const dx = player.target.x - player.mesh.position.x;
-      const dz = player.target.z - player.mesh.position.z;
-      const distSq = dx * dx + dz * dz;
-      if (distSq < 0.01) {
-        player.velocity.set(0, 0, 0);
-      } else {
-        const len = Math.sqrt(distSq);
-        player.velocity.set((dx / len) * player.speed, 0, (dz / len) * player.speed);
-      }
-
-      player.mesh.position.x += player.velocity.x * delta;
-      player.mesh.position.z += player.velocity.z * delta;
-      player.mesh.position.x = clamp(
-        player.mesh.position.x,
-        -SANDBOX_BOUNDS,
-        SANDBOX_BOUNDS
-      );
-      player.mesh.position.z = clamp(
-        player.mesh.position.z,
-        -SANDBOX_BOUNDS,
-        SANDBOX_BOUNDS
-      );
-      player.mesh.position.y = player.baseY;
-
-      const vx = player.velocity.x;
-      const vz = player.velocity.z;
-      if (vx * vx + vz * vz > 1e-6) {
-        player.mesh.rotation.y = Math.atan2(vx, vz) + Math.PI;
-      }
-    };
-
-    let lastTime = performance.now() / 1000;
-    const animate = () => {
-      requestAnimationFrame(animate);
-      const now = performance.now() / 1000;
-      const delta = Math.min(now - lastTime, 0.1);
-      lastTime = now;
-
-      updatePlayerMotion(delta);
-      updateRigDemo(delta);
-      updateMobDeathVisuals(delta);
-      particleSystem.updateParticles(delta);
-      smokePoofEffect.updateSmokePoofs(delta);
-
-      if (coinHudRenderer && coinHudRoot.children.length > 0) {
-        const rect = coinHudCanvasEl?.getBoundingClientRect();
-        if (rect) {
-          const w = Math.max(1, Math.round(rect.width));
-          const h = Math.max(1, Math.round(rect.height));
-          coinHudRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-          coinHudRenderer.setSize(w, h, false);
-          coinHudCamera.aspect = w / h;
-          coinHudCamera.updateProjectionMatrix();
+          const { aimAligned } = updateCannonRigTracking(
+            cannonRig,
+            cannonTowerPos,
+            cannonTargetPosScratch,
+            cannonLaunchVelComputed,
+            delta
+          );
+          if (aimAligned && cannonShootCooldown <= 0) {
+            getCannonMuzzleLaunchTransform(
+              cannonRig,
+              cannonLaunchPosScratch,
+              cannonLaunchQuatScratch
+            );
+            const cannonLaunchDir = new THREE.Vector3();
+            getCannonMuzzleLaunchDirection(cannonRig, cannonLaunchDir);
+            const cannonLaunchVel =
+              cannonLaunchDir.multiplyScalar(CANNONBALL_SPEED);
+            spawnCannonball(cannonLaunchPosScratch, cannonLaunchVel);
+            cannonShootCooldown = sandboxCannon.shootCadence;
+          }
+        } else if (cannonRig) {
+          updateCannonRigTracking(cannonRig, cannonTowerPos, null, null, delta);
         }
-        coinHudRoot.rotation.y += delta * 1.75;
-        coinHudRenderer.render(coinHudScene, coinHudCamera);
-      }
 
-      camera.position.copy(player.mesh.position).add(cameraOffset);
-      camera.lookAt(
-        player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5)
-      );
+        for (let i = activeArrows.length - 1; i >= 0; i -= 1) {
+          const proj = activeArrows[i]!;
+          proj.ttl -= delta;
+          if (proj.ttl <= 0) {
+            scene.remove(proj.mesh);
+            activeArrows.splice(i, 1);
+            continue;
+          }
 
-      dir.target.position.copy(player.mesh.position);
-      dir.position.copy(player.mesh.position).add(dirShadowFollowOffset);
-      dir.target.updateMatrixWorld();
-      dir.updateMatrixWorld();
+          prevPosScratch.copy(proj.position);
+          let gravDt = delta;
+          if (proj.gravityDelay > 0) {
+            const step = Math.min(proj.gravityDelay, delta);
+            proj.gravityDelay -= step;
+            gravDt = delta - step;
+          }
+          proj.velocity.y += arrowGravity.y * gravDt;
+          proj.position.addScaledVector(proj.velocity, delta);
+          orientArrowToVelocity(
+            proj.mesh,
+            proj.velocity,
+            arrowFacing.forwardLocal
+          );
+          placeArrowMeshAtFacing(
+            proj.mesh,
+            proj.position,
+            arrowFacing.anchorLocalPos
+          );
 
-      renderer.render(scene, camera);
-    };
-    animate();
-  })
+          stepScratch.copy(proj.position).sub(prevPosScratch);
+          const segLenSq = stepScratch.lengthSq();
+          let hitMob: SandboxMob | null = null;
+          let bestT = Number.POSITIVE_INFINITY;
+
+          for (const mob of mobs) {
+            if (mob.hp <= 0) continue;
+            mobCenterScratch.copy(mob.position).setY(MOB_BASE_Y + 0.3);
+            const combined = 0.5 + proj.radius;
+            let t = 0;
+            if (segLenSq > 1e-8) {
+              const deltaP = mobCenterScratch.clone().sub(prevPosScratch);
+              t = THREE.MathUtils.clamp(
+                deltaP.dot(stepScratch) / segLenSq,
+                0,
+                1
+              );
+            }
+            closestScratch.copy(prevPosScratch).addScaledVector(stepScratch, t);
+            if (
+              closestScratch.distanceToSquared(mobCenterScratch) >
+              combined * combined
+            )
+              continue;
+            if (t < bestT) {
+              bestT = t;
+              hitMob = mob;
+            }
+          }
+
+          if (hitMob) {
+            hitMob.lastHitDirection = proj.velocity.clone().normalize();
+            hitMob.hp -= proj.damage;
+            scene.remove(proj.mesh);
+            activeArrows.splice(i, 1);
+          }
+        }
+
+        for (let i = activeCannonballs.length - 1; i >= 0; i -= 1) {
+          const proj = activeCannonballs[i]!;
+          proj.ttl -= delta;
+          if (proj.ttl <= 0) {
+            applyCannonballAoE(proj.position, proj.damage, proj.aoeRadius);
+            scene.remove(proj.mesh);
+            activeCannonballs.splice(i, 1);
+            continue;
+          }
+
+          cannonPrevPosScratch.copy(proj.position);
+          let gravDt = delta;
+          if (proj.gravityDelay > 0) {
+            const step = Math.min(proj.gravityDelay, delta);
+            proj.gravityDelay -= step;
+            gravDt = delta - step;
+          }
+          proj.velocity.y += cannonballGravity.y * gravDt;
+          proj.position.addScaledVector(proj.velocity, delta);
+          placeCannonballAtPosition(proj.mesh, proj.position);
+
+          if (proj.position.y <= GROUND_Y) {
+            applyCannonballAoE(proj.position, proj.damage, proj.aoeRadius);
+            scene.remove(proj.mesh);
+            activeCannonballs.splice(i, 1);
+            continue;
+          }
+
+          cannonStepScratch.copy(proj.position).sub(cannonPrevPosScratch);
+          const segLenSq = cannonStepScratch.lengthSq();
+          let hitMob: SandboxMob | null = null;
+          let bestT = Number.POSITIVE_INFINITY;
+
+          for (const mob of cannonMobs) {
+            if (mob.hp <= 0) continue;
+            cannonMobCenterScratch.copy(mob.position).setY(MOB_BASE_Y + 0.3);
+            const combined = 0.5 + proj.radius;
+            let t = 0;
+            if (segLenSq > 1e-8) {
+              const deltaP = cannonMobCenterScratch
+                .clone()
+                .sub(cannonPrevPosScratch);
+              t = THREE.MathUtils.clamp(
+                deltaP.dot(cannonStepScratch) / segLenSq,
+                0,
+                1
+              );
+            }
+            cannonClosestScratch
+              .copy(cannonPrevPosScratch)
+              .addScaledVector(cannonStepScratch, t);
+            if (
+              cannonClosestScratch.distanceToSquared(cannonMobCenterScratch) >
+              combined * combined
+            )
+              continue;
+            if (t < bestT) {
+              bestT = t;
+              hitMob = mob;
+            }
+          }
+
+          if (hitMob) {
+            const impactPos = cannonClosestScratch.clone();
+            applyCannonballAoE(impactPos, proj.damage, proj.aoeRadius);
+            scene.remove(proj.mesh);
+            activeCannonballs.splice(i, 1);
+          }
+        }
+      };
+
+      const updatePlayerMotion = (delta: number) => {
+        const keyboardDir = inputController.getKeyboardMoveDirection({
+          camera,
+          keyboardForward,
+          keyboardRight,
+          keyboardMoveDir,
+        });
+        if (keyboardDir) {
+          const keyboardMoveDistance = Math.max(GRID_SIZE, player.speed * 0.35);
+          setMoveTarget(
+            player.mesh.position
+              .clone()
+              .addScaledVector(keyboardDir, keyboardMoveDistance)
+          );
+          wasKeyboardMoving = true;
+        } else if (wasKeyboardMoving) {
+          setMoveTarget(player.mesh.position.clone());
+          wasKeyboardMoving = false;
+        }
+
+        const dx = player.target.x - player.mesh.position.x;
+        const dz = player.target.z - player.mesh.position.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < 0.01) {
+          player.velocity.set(0, 0, 0);
+        } else {
+          const len = Math.sqrt(distSq);
+          player.velocity.set(
+            (dx / len) * player.speed,
+            0,
+            (dz / len) * player.speed
+          );
+        }
+
+        player.mesh.position.x += player.velocity.x * delta;
+        player.mesh.position.z += player.velocity.z * delta;
+        player.mesh.position.x = clamp(
+          player.mesh.position.x,
+          -SANDBOX_BOUNDS,
+          SANDBOX_BOUNDS
+        );
+        player.mesh.position.z = clamp(
+          player.mesh.position.z,
+          -SANDBOX_BOUNDS,
+          SANDBOX_BOUNDS
+        );
+        player.mesh.position.y = player.baseY;
+
+        const vx = player.velocity.x;
+        const vz = player.velocity.z;
+        if (vx * vx + vz * vz > 1e-6) {
+          player.mesh.rotation.y = Math.atan2(vx, vz) + Math.PI;
+        }
+      };
+
+      let lastTime = performance.now() / 1000;
+      const animate = () => {
+        requestAnimationFrame(animate);
+        const now = performance.now() / 1000;
+        const delta = Math.min(now - lastTime, 0.1);
+        lastTime = now;
+
+        updatePlayerMotion(delta);
+        updateRigDemo(delta);
+        updateMobDeathVisuals(delta);
+        particleSystem.updateParticles(delta);
+        smokePoofEffect.updateSmokePoofs(delta);
+
+        if (coinHudRenderer && coinHudRoot.children.length > 0) {
+          const rect = coinHudCanvasEl?.getBoundingClientRect();
+          if (rect) {
+            const w = Math.max(1, Math.round(rect.width));
+            const h = Math.max(1, Math.round(rect.height));
+            coinHudRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            coinHudRenderer.setSize(w, h, false);
+            coinHudCamera.aspect = w / h;
+            coinHudCamera.updateProjectionMatrix();
+          }
+          coinHudRoot.rotation.y += delta * 1.75;
+          coinHudRenderer.render(coinHudScene, coinHudCamera);
+        }
+
+        camera.position.copy(player.mesh.position).add(cameraOffset);
+        camera.lookAt(player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5));
+
+        dir.target.position.copy(player.mesh.position);
+        dir.position.copy(player.mesh.position).add(dirShadowFollowOffset);
+        dir.target.updateMatrixWorld();
+        dir.updateMatrixWorld();
+
+        renderer.render(scene, camera);
+      };
+      animate();
+    }
+  )
   .catch((err) => {
     console.error('Failed to load sandbox models:', err);
   });

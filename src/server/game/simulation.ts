@@ -223,14 +223,8 @@ const getSpawnerSpawnPoint = (side: SideDef): { x: number; z: number } => {
   const baseX = side.door.x + side.outward.x * STAGING_ISLAND_DISTANCE;
   const baseZ = side.door.z + side.outward.z * STAGING_ISLAND_DISTANCE;
   return {
-    x:
-      baseX +
-      side.tangent.x * lateralJitter +
-      towardMapX * alongBridgeJitter,
-    z:
-      baseZ +
-      side.tangent.z * lateralJitter +
-      towardMapZ * alongBridgeJitter,
+    x: baseX + side.tangent.x * lateralJitter + towardMapX * alongBridgeJitter,
+    z: baseZ + side.tangent.z * lateralJitter + towardMapZ * alongBridgeJitter,
   };
 };
 
@@ -309,7 +303,10 @@ const buildFlowField = (
   nextToGoal.fill(-1);
 
   const toCellNearest = (x: number, z: number): [number, number] => {
-    const cx = Math.max(0, Math.min(width - 1, Math.round((x - minWX) / GRID_SIZE)));
+    const cx = Math.max(
+      0,
+      Math.min(width - 1, Math.round((x - minWX) / GRID_SIZE))
+    );
     const cz = Math.max(
       0,
       Math.min(height - 1, Math.round((z - minWZ) / GRID_SIZE))
@@ -332,13 +329,22 @@ const buildFlowField = (
     const maxX = centerX + halfX;
     const minZ = centerZ - halfZ;
     const maxZ = centerZ + halfZ;
-    const sx = Math.max(0, Math.min(width - 1, Math.floor((minX - minWX) / GRID_SIZE)));
+    const sx = Math.max(
+      0,
+      Math.min(width - 1, Math.floor((minX - minWX) / GRID_SIZE))
+    );
     const sz = Math.max(
       0,
       Math.min(height - 1, Math.floor((minZ - minWZ) / GRID_SIZE))
     );
-    const ex = Math.max(0, Math.min(width - 1, Math.ceil((maxX - minWX) / GRID_SIZE)));
-    const ez = Math.max(0, Math.min(height - 1, Math.ceil((maxZ - minWZ) / GRID_SIZE)));
+    const ex = Math.max(
+      0,
+      Math.min(width - 1, Math.ceil((maxX - minWX) / GRID_SIZE))
+    );
+    const ez = Math.max(
+      0,
+      Math.min(height - 1, Math.ceil((maxZ - minWZ) / GRID_SIZE))
+    );
     for (let z = sz; z <= ez; z += 1) {
       for (let x = sx; x <= ex; x += 1) {
         passable[toIdx(x, z)] = 0;
@@ -500,7 +506,11 @@ const buildFlowField = (
   };
 };
 
-const getNearestGoalDistance = (goals: Array<{ x: number; z: number }>, x: number, z: number) => {
+const getNearestGoalDistance = (
+  goals: Array<{ x: number; z: number }>,
+  x: number,
+  z: number
+) => {
   let best = Number.POSITIVE_INFINITY;
   for (const goal of goals) {
     const d = distance(goal.x, goal.z, x, z);
@@ -512,15 +522,24 @@ const getNearestGoalDistance = (goals: Array<{ x: number; z: number }>, x: numbe
 const buildSpawnerRoute = (
   field: FlowField,
   start: { x: number; z: number }
-): { route: Array<{ x: number; z: number }>; routeState: 'reachable' | 'blocked' } => {
+): {
+  route: Array<{ x: number; z: number }>;
+  routeState: 'reachable' | 'blocked';
+} => {
   const toCellNearest = (wx: number, wz: number): [number, number] => {
     const cx = Math.max(
       0,
-      Math.min(field.width - 1, Math.round((wx - field.minWX) / field.resolution))
+      Math.min(
+        field.width - 1,
+        Math.round((wx - field.minWX) / field.resolution)
+      )
     );
     const cz = Math.max(
       0,
-      Math.min(field.height - 1, Math.round((wz - field.minWZ) / field.resolution))
+      Math.min(
+        field.height - 1,
+        Math.round((wz - field.minWZ) / field.resolution)
+      )
     );
     return [cx, cz];
   };
@@ -613,13 +632,18 @@ const recomputeSpawnerRoutes = (world: WorldState): void => {
   for (const mob of Object.values(world.mobs)) {
     const route = routesBySpawner.get(mob.spawnerId) ?? [];
     const nearest = getNearestRouteIndex(route, mob.position);
-    mob.routeIndex = Math.max(0, Math.min(nearest, Math.max(0, route.length - 1)));
+    mob.routeIndex = Math.max(
+      0,
+      Math.min(nearest, Math.max(0, route.length - 1))
+    );
   }
 };
 
 const hasAtLeastOneReachableSpawner = (world: WorldState): boolean => {
   if (world.wave.spawners.length === 0) return true;
-  return world.wave.spawners.some((spawner) => spawner.routeState === 'reachable');
+  return world.wave.spawners.some(
+    (spawner) => spawner.routeState === 'reachable'
+  );
 };
 
 const collectAutoUnblockCandidates = (
@@ -630,7 +654,8 @@ const collectAutoUnblockCandidates = (
     .sort((a, b) => {
       const ownerPriorityA = a.ownerId === 'Map' ? 1 : 0;
       const ownerPriorityB = b.ownerId === 'Map' ? 1 : 0;
-      if (ownerPriorityA !== ownerPriorityB) return ownerPriorityA - ownerPriorityB;
+      if (ownerPriorityA !== ownerPriorityB)
+        return ownerPriorityA - ownerPriorityB;
       return b.createdAtMs - a.createdAtMs;
     });
 
@@ -731,12 +756,7 @@ const updateMobs = (
   );
   if (ENABLE_SERVER_TOWER_SPATIAL_DAMAGE) {
     for (const tower of towerList) {
-      spatialInsert(
-        towerSpatialIndex,
-        tower.center.x,
-        tower.center.z,
-        tower
-      );
+      spatialInsert(towerSpatialIndex, tower.center.x, tower.center.z, tower);
     }
   }
   const towerCandidateScratch: StructureState[] = [];
@@ -768,7 +788,8 @@ const updateMobs = (
           mob.position.z,
           currentTarget.x,
           currentTarget.z
-        ) <= MOB_ROUTE_REACH_RADIUS + Math.abs(laneOffset) * 0.9
+        ) <=
+        MOB_ROUTE_REACH_RADIUS + Math.abs(laneOffset) * 0.9
       ) {
         mob.routeIndex = Math.min(maxRouteIndex, mob.routeIndex + 1);
       }
@@ -864,7 +885,11 @@ const updateMobs = (
       );
     }
     const stuckTimedOut = (mob.stuckMs ?? 0) >= MOB_STUCK_TIMEOUT_MS;
-    if (mob.hp <= 0 || nearestGoalDistance < CASTLE_CAPTURE_RADIUS || stuckTimedOut) {
+    if (
+      mob.hp <= 0 ||
+      nearestGoalDistance < CASTLE_CAPTURE_RADIUS ||
+      stuckTimedOut
+    ) {
       despawnedIds.push(mob.mobId);
       delete world.mobs[mob.mobId];
       if (spawner) {
@@ -1190,7 +1215,8 @@ export const runSimulation = (
   const autoRemovedStructureIds = autoUnblockFullyBlockedPaths(world);
   if (autoRemovedStructureIds.length > 0) {
     for (const removedId of autoRemovedStructureIds) {
-      if (!structureRemoves.includes(removedId)) structureRemoves.push(removedId);
+      if (!structureRemoves.includes(removedId))
+        structureRemoves.push(removedId);
     }
     waveChanged = true;
     routesChanged = true;
@@ -1209,10 +1235,7 @@ export const runSimulation = (
       despawnedMobIds: [],
     });
   }
-  if (
-    structureUpserts.length > 0 ||
-    structureRemoves.length > 0
-  ) {
+  if (structureUpserts.length > 0 || structureRemoves.length > 0) {
     recomputeSpawnerRoutes(world);
     waveChanged = true;
     routesChanged = true;
@@ -1220,14 +1243,8 @@ export const runSimulation = (
       type: 'structureDelta',
       tickSeq: world.meta.tickSeq,
       worldVersion: world.meta.worldVersion + 1,
-      upserts: structureUpserts.slice(
-        0,
-        MAX_STRUCTURE_DELTA_UPSERTS
-      ),
-      removes: structureRemoves.slice(
-        0,
-        MAX_STRUCTURE_DELTA_REMOVES
-      ),
+      upserts: structureUpserts.slice(0, MAX_STRUCTURE_DELTA_UPSERTS),
+      removes: structureRemoves.slice(0, MAX_STRUCTURE_DELTA_REMOVES),
       requiresPathRefresh: true,
     };
     world.meta.worldVersion += 1;
@@ -1275,7 +1292,8 @@ export const runSimulation = (
 
   if (steps > 0) {
     const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);
-    const lastStructureChangeTickSeq = world.meta.lastStructureChangeTickSeq ?? 0;
+    const lastStructureChangeTickSeq =
+      world.meta.lastStructureChangeTickSeq ?? 0;
     const ticksSinceStructureChange = Math.max(
       0,
       world.meta.tickSeq - lastStructureChangeTickSeq
@@ -1324,10 +1342,7 @@ export const runSimulation = (
         deltas.push(chunkDelta);
       }
     } else {
-      const { pool, slices } = buildUnifiedMobDelta(
-        latestMobUpserts,
-        world
-      );
+      const { pool, slices } = buildUnifiedMobDelta(latestMobUpserts, world);
       const entityDelta: EntityDelta = {
         type: 'entityDelta',
         tickSeq: world.meta.tickSeq,

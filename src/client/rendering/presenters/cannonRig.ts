@@ -63,10 +63,7 @@ const getPartCaseInsensitive = (template: THREE.Object3D, name: string) => {
   return part ? part.clone(true) : null;
 };
 
-const getPartWithVariants = (
-  template: THREE.Object3D,
-  ...names: string[]
-) => {
+const getPartWithVariants = (template: THREE.Object3D, ...names: string[]) => {
   for (const name of names) {
     const part = getPartCaseInsensitive(template, name);
     if (part) return part;
@@ -82,9 +79,15 @@ const getPartByPrefix = (template: THREE.Object3D, prefix: string) => {
 export const createCannonVisualRig = (
   template: THREE.Object3D
 ): CannonVisualRig | null => {
-  const base = getPartWithVariants(template, 'Base', 'Base.001') ?? getPartByPrefix(template, 'Base');
-  const cradle = getPartWithVariants(template, 'Cradle', 'Cradle.001') ?? getPartByPrefix(template, 'Cradle');
-  const barrel = getPartCaseInsensitive(template, 'Barrel') ?? getPartByPrefix(template, 'Barrel');
+  const base =
+    getPartWithVariants(template, 'Base', 'Base.001') ??
+    getPartByPrefix(template, 'Base');
+  const cradle =
+    getPartWithVariants(template, 'Cradle', 'Cradle.001') ??
+    getPartByPrefix(template, 'Cradle');
+  const barrel =
+    getPartCaseInsensitive(template, 'Barrel') ??
+    getPartByPrefix(template, 'Barrel');
   const cradleRotation =
     getObjectByNameCaseInsensitive(template, 'Cradle Rotation') ??
     getObjectByNameCaseInsensitive(template, 'CradleRotation');
@@ -92,7 +95,8 @@ export const createCannonVisualRig = (
     getObjectByNameCaseInsensitive(template, 'Barrel Pivot') ??
     getObjectByNameCaseInsensitive(template, 'BarrelPivot') ??
     getObjectByNamePrefix(template, 'Barrel Pivot');
-  if (!base || !cradle || !barrel || !cradleRotation || !barrelPivot) return null;
+  if (!base || !cradle || !barrel || !cradleRotation || !barrelPivot)
+    return null;
 
   const muzzleAnchor = barrelPivot.clone(true);
   muzzleAnchor.position.set(0, 0, 0);

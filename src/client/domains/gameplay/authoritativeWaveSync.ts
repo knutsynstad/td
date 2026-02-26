@@ -50,7 +50,8 @@ const getDoorPositionForSpawnerId = (
   spawnerId: string,
   worldBounds: number
 ): THREE.Vector3 | null => {
-  if (spawnerId.endsWith('-north')) return new THREE.Vector3(0, 0, -worldBounds);
+  if (spawnerId.endsWith('-north'))
+    return new THREE.Vector3(0, 0, -worldBounds);
   if (spawnerId.endsWith('-east')) return new THREE.Vector3(worldBounds, 0, 0);
   if (spawnerId.endsWith('-south')) return new THREE.Vector3(0, 0, worldBounds);
   if (spawnerId.endsWith('-west')) return new THREE.Vector3(-worldBounds, 0, 0);
@@ -105,7 +106,10 @@ export const syncAuthoritativeWaveSpawners = (
   for (const entry of wave.spawners) {
     let spawner = spawnerById.get(entry.spawnerId);
     if (!spawner) {
-      const position = getDoorPositionForSpawnerId(entry.spawnerId, worldBounds);
+      const position = getDoorPositionForSpawnerId(
+        entry.spawnerId,
+        worldBounds
+      );
       if (!position) continue;
       spawner = {
         id: entry.spawnerId,
@@ -142,7 +146,10 @@ export const syncAuthoritativeWaveSpawners = (
       ];
       const fullDisplayPoints = [...stagingPreviewPoints, ...displayPoints];
       const connector = buildPathTilesFromPoints(
-        [getSpawnerBridgeExitPoint(spawner.position), getSpawnerEntryPoint(spawner.position)],
+        [
+          getSpawnerBridgeExitPoint(spawner.position),
+          getSpawnerEntryPoint(spawner.position),
+        ],
         staticColliders,
         worldBounds,
         castleRouteHalfWidthCells
@@ -161,17 +168,30 @@ export const syncAuthoritativeWaveSpawners = (
       if (entry.routeState === 'reachable') {
         const merged = new Map<string, THREE.Vector3>();
         for (const tile of connector.tiles) {
-          merged.set(`${tile.x},${tile.z}`, new THREE.Vector3(tile.x, 0, tile.z));
+          merged.set(
+            `${tile.x},${tile.z}`,
+            new THREE.Vector3(tile.x, 0, tile.z)
+          );
         }
         for (const tile of corridor.tiles) {
-          merged.set(`${tile.x},${tile.z}`, new THREE.Vector3(tile.x, 0, tile.z));
+          merged.set(
+            `${tile.x},${tile.z}`,
+            new THREE.Vector3(tile.x, 0, tile.z)
+          );
         }
         pathTilePositions.set(spawner.id, Array.from(merged.values()));
       } else {
         pathTilePositions.set(spawner.id, []);
       }
-      upsertSpawnerRouteOverlay(spawner.id, fullDisplayPoints, entry.routeState);
-      upsertSpawnContainerOverlay(spawner.id, getSpawnContainerCorners(spawner.position));
+      upsertSpawnerRouteOverlay(
+        spawner.id,
+        fullDisplayPoints,
+        entry.routeState
+      );
+      upsertSpawnContainerOverlay(
+        spawner.id,
+        getSpawnContainerCorners(spawner.position)
+      );
     }
     upsertStagingIslandsOverlay(
       getSpawnerAnchorId(spawner.position),

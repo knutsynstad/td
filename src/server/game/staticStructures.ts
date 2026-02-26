@@ -25,12 +25,14 @@ type Aabb = {
 };
 
 const intersectsAabb = (a: Aabb, b: Aabb): boolean =>
-  a.minX <= b.maxX &&
-  a.maxX >= b.minX &&
-  a.minZ <= b.maxZ &&
-  a.maxZ >= b.minZ;
+  a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 
-const toObstacleAabb = (x: number, z: number, halfX: number, halfZ: number): Aabb => ({
+const toObstacleAabb = (
+  x: number,
+  z: number,
+  halfX: number,
+  halfZ: number
+): Aabb => ({
   minX: x - halfX,
   maxX: x + halfX,
   minZ: z - halfZ,
@@ -80,7 +82,12 @@ const CASTLE_TREE_CLEARANCE_ZONE: Aabb = {
   maxZ: CASTLE_TREE_CLEARANCE_HALF_EXTENT,
 };
 
-const intersectsSpawnerClearance = (x: number, z: number, halfX: number, halfZ: number): boolean => {
+const intersectsSpawnerClearance = (
+  x: number,
+  z: number,
+  halfX: number,
+  halfZ: number
+): boolean => {
   const obstacleAabb = toObstacleAabb(x, z, halfX, halfZ);
   for (const clearance of getSpawnerClearanceZones()) {
     if (intersectsAabb(obstacleAabb, clearance)) return true;
@@ -93,21 +100,40 @@ const intersectsCastleTreeClearance = (
   z: number,
   halfX: number,
   halfZ: number
-): boolean => intersectsAabb(toObstacleAabb(x, z, halfX, halfZ), CASTLE_TREE_CLEARANCE_ZONE);
+): boolean =>
+  intersectsAabb(
+    toObstacleAabb(x, z, halfX, halfZ),
+    CASTLE_TREE_CLEARANCE_ZONE
+  );
 
 const isDisallowedStaticStructure = (structure: StructureState): boolean => {
   if (structure.ownerId !== 'Map') return false;
   if (structure.type === 'tree') {
     const half = (structure.metadata?.treeFootprint ?? 2) * 0.5;
     return (
-      intersectsSpawnerClearance(structure.center.x, structure.center.z, half, half) ||
-      intersectsCastleTreeClearance(structure.center.x, structure.center.z, half, half)
+      intersectsSpawnerClearance(
+        structure.center.x,
+        structure.center.z,
+        half,
+        half
+      ) ||
+      intersectsCastleTreeClearance(
+        structure.center.x,
+        structure.center.z,
+        half,
+        half
+      )
     );
   }
   if (structure.type === 'rock') {
     const halfX = (structure.metadata?.rock?.footprintX ?? 2) * 0.5;
     const halfZ = (structure.metadata?.rock?.footprintZ ?? 2) * 0.5;
-    return intersectsSpawnerClearance(structure.center.x, structure.center.z, halfX, halfZ);
+    return intersectsSpawnerClearance(
+      structure.center.x,
+      structure.center.z,
+      halfX,
+      halfZ
+    );
   }
   return false;
 };

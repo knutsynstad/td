@@ -243,7 +243,9 @@ const getSlot = (presetId: string) =>
     `.icon-generator__slot[data-preset-id="${presetId}"]`
   );
 const getCanvas = (presetId: string) =>
-  getSlot(presetId)?.querySelector<HTMLCanvasElement>('.icon-generator__preview');
+  getSlot(presetId)?.querySelector<HTMLCanvasElement>(
+    '.icon-generator__preview'
+  );
 
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
@@ -292,10 +294,7 @@ const isoDirection = new THREE.Vector3(
   Math.sin(isoRot) * Math.cos(isoAngle)
 ).normalize();
 
-const normalizeModel = (
-  source: THREE.Object3D,
-  scaleMultiplier = 1
-) => {
+const normalizeModel = (source: THREE.Object3D, scaleMultiplier = 1) => {
   const model = source.clone(true);
   tmpBox.setFromObject(model);
   if (tmpBox.isEmpty()) return model;
@@ -344,12 +343,20 @@ const applyOutline2D = (pixels: Uint8Array, size: number) => {
         const i = y * size + x;
         if (prev[i]) continue;
         const hasNeighbor = [
-          [-1, 0], [1, 0], [0, -1], [0, 1],
-          [-1, -1], [-1, 1], [1, -1], [1, 1],
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+          [-1, -1],
+          [-1, 1],
+          [1, -1],
+          [1, 1],
         ].some(([dx, dy]) => {
           const nx = x + dx;
           const ny = y + dy;
-          return nx >= 0 && nx < size && ny >= 0 && ny < size && prev[ny * size + nx];
+          return (
+            nx >= 0 && nx < size && ny >= 0 && ny < size && prev[ny * size + nx]
+          );
         });
         if (hasNeighbor) dilated[i] = 255;
       }
@@ -431,7 +438,10 @@ const pixelsToDataUrl = (pixels: Uint8Array) => {
     const srcY = ICON_SIZE - 1 - y;
     const srcRowOffset = srcY * ICON_SIZE * 4;
     const dstRowOffset = y * ICON_SIZE * 4;
-    out.set(pixels.subarray(srcRowOffset, srcRowOffset + ICON_SIZE * 4), dstRowOffset);
+    out.set(
+      pixels.subarray(srcRowOffset, srcRowOffset + ICON_SIZE * 4),
+      dstRowOffset
+    );
   }
   ctx.putImageData(imageData, 0, 0);
   return canvas.toDataURL('image/png');
@@ -469,8 +479,7 @@ const fitCameraToModel = (target: THREE.Object3D, zoomMultiplier = 1) => {
 
   // Pad extent so outline (drawn in pixels) is never clipped
   const outlinePadding = (2 * OUTLINE_THICKNESS) / ICON_SIZE;
-  camera.zoom =
-    (FILL_RATIO / (maxExtent + outlinePadding)) * zoomMultiplier;
+  camera.zoom = (FILL_RATIO / (maxExtent + outlinePadding)) * zoomMultiplier;
   camera.updateProjectionMatrix();
 };
 

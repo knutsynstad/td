@@ -67,9 +67,17 @@ const trimPathToCastleBoundary = (
   for (let i = 1; i < points.length; i += 1) {
     const prev = points[i - 1]!;
     const curr = points[i]!;
-    if (!isPointInsideCastle(prev, center, halfSize) && isPointInsideCastle(curr, center, halfSize)) {
+    if (
+      !isPointInsideCastle(prev, center, halfSize) &&
+      isPointInsideCastle(curr, center, halfSize)
+    ) {
       const clipped = points.slice(0, i).map((point) => point.clone());
-      const boundaryRaw = getCastleBoundaryIntersection(prev, curr, center, halfSize);
+      const boundaryRaw = getCastleBoundaryIntersection(
+        prev,
+        curr,
+        center,
+        halfSize
+      );
       const boundary = new THREE.Vector3(
         snapToGrid(boundaryRaw.x, gridSize),
         boundaryRaw.y,
@@ -130,8 +138,7 @@ const extendPathToCastleCenter = (
         const oneCellLateralAtB =
           Math.abs(b.x - snappedCenter.x) <= gridSize + 1e-6;
         const bToCLateralOne =
-          Math.abs(b.x - c.x) <= gridSize + 1e-6 &&
-          Math.abs(b.z - c.z) <= 1e-6;
+          Math.abs(b.x - c.x) <= gridSize + 1e-6 && Math.abs(b.z - c.z) <= 1e-6;
         const aToBFrontRun =
           Math.abs(a.x - b.x) <= 1e-6 &&
           Math.abs(a.z - b.z) >= 2 * gridSize - 1e-6;
@@ -151,8 +158,7 @@ const extendPathToCastleCenter = (
         const oneCellLateralAtB =
           Math.abs(b.z - snappedCenter.z) <= gridSize + 1e-6;
         const bToCLateralOne =
-          Math.abs(b.z - c.z) <= gridSize + 1e-6 &&
-          Math.abs(b.x - c.x) <= 1e-6;
+          Math.abs(b.z - c.z) <= gridSize + 1e-6 && Math.abs(b.x - c.x) <= 1e-6;
         const aToBFrontRun =
           Math.abs(a.z - b.z) <= 1e-6 &&
           Math.abs(a.x - b.x) >= 2 * gridSize - 1e-6;

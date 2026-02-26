@@ -61,9 +61,7 @@ export type SmokePoofEffect = {
   updateSmokePoofs: (delta: number) => void;
 };
 
-export const createSmokePoofEffect = (
-  scene: THREE.Scene
-): SmokePoofEffect => {
+export const createSmokePoofEffect = (scene: THREE.Scene): SmokePoofEffect => {
   const instances: SmokePoofInstance[] = [];
   let smokeTemplate: THREE.Object3D | null = null;
 
@@ -86,11 +84,13 @@ export const createSmokePoofEffect = (
         Math.random() * Math.PI,
         Math.random() * Math.PI
       );
-      const baseScale = SIZE_MULTIPLIER * (0.7 + Math.random() * 0.5) * scaleMult;
+      const baseScale =
+        SIZE_MULTIPLIER * (0.7 + Math.random() * 0.5) * scaleMult;
       root.scale.setScalar(0.4 * baseScale);
       const angle = Math.random() * Math.PI * 2;
       const speed =
-        (SPRAY_SPEED_MIN + Math.random() * (SPRAY_SPEED_MAX - SPRAY_SPEED_MIN)) *
+        (SPRAY_SPEED_MIN +
+          Math.random() * (SPRAY_SPEED_MAX - SPRAY_SPEED_MIN)) *
         spreadMult;
       const up =
         (SPRAY_UP_MIN + Math.random() * (SPRAY_UP_MAX - SPRAY_UP_MIN)) *
@@ -123,9 +123,7 @@ export const createSmokePoofEffect = (
       const inst = instances[i]!;
       inst.age += delta;
 
-      inst.root.position.add(
-        inst.velocity.clone().multiplyScalar(delta)
-      );
+      inst.root.position.add(inst.velocity.clone().multiplyScalar(delta));
 
       const popT = Math.min(1, inst.age / POP_DURATION);
       const popEase = 1 - (1 - popT) * (1 - popT);
@@ -136,10 +134,7 @@ export const createSmokePoofEffect = (
       const fadeT =
         inst.age <= fadeStart
           ? 1
-          : Math.max(
-              0,
-              1 - (inst.age - fadeStart) / FADE_DURATION
-            );
+          : Math.max(0, 1 - (inst.age - fadeStart) / FADE_DURATION);
       setObjectOpacity(inst.materials, fadeT);
 
       if (inst.age >= inst.maxAge) {

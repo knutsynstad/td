@@ -39,10 +39,7 @@ const TREE_LABELS: readonly string[] = [
   'Tree facts',
 ];
 
-export function getNatureLabel(
-  type: 'rock' | 'tree',
-  seed: number
-): string {
+export function getNatureLabel(type: 'rock' | 'tree', seed: number): string {
   const labels = type === 'rock' ? ROCK_LABELS : TREE_LABELS;
   const idx = ((seed % labels.length) + labels.length) % labels.length;
   return labels[idx] ?? labels[0]!;
