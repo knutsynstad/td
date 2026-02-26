@@ -21,6 +21,8 @@ export const prepareStaticModel = (source: THREE.Object3D): THREE.Object3D => {
   return model;
 };
 
+export const prepareStaticModelPreserveScale = prepareStaticModel;
+
 export const prepareCoinModel = (source: THREE.Object3D): THREE.Object3D => {
   const model = source.clone(true);
   const initialBounds = new THREE.Box3().setFromObject(model);

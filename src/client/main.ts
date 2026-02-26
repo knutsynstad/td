@@ -51,7 +51,6 @@ import {
 import {
   solveBallisticIntercept,
   computeFallbackBallisticVelocity,
-  rollAttackDamage,
 } from './domains/gameplay/projectiles';
 import {
   getUpgradeEnergyCost,
@@ -173,17 +172,45 @@ import { createInputController } from './domains/gameplay/inputController';
 import { updateHud } from './rendering/presenters/hudPresenter';
 import { renderVisibleMobInstances } from './rendering/presenters/renderCoordinator';
 import { buildCoinCostMarkup } from './ui/components/coinCost';
+import { createDomRefs } from './ui/domRefs';
 import {
-  computeArrowFacingFromTemplate,
-  orientArrowToVelocity,
-  placeArrowMeshAtFacing,
-} from './rendering/presenters/arrowProjectile';
+  ENABLE_CLIENT_FRAME_PROFILING,
+  ENABLE_INCREMENTAL_SPATIAL_GRID,
+  ENABLE_MOB_RENDER_LOD,
+  ENABLE_PROJECTILE_BROADPHASE,
+  FRAME_PROFILE_LOG_INTERVAL_MS,
+  FRAME_PROFILE_MAX_SAMPLES,
+  MOB_LOD_DISABLE_FAR_WIGGLE,
+  MOB_LOD_FAR_ANIMATION_STEP_MS,
+  MOB_LOD_FAR_DISTANCE,
+  MOB_LOD_MID_ANIMATION_STEP_MS,
+  MOB_LOD_NEAR_DISTANCE,
+  MOB_STAGING_BOUNDS_PADDING,
+  SPAWNER_ENTRY_INSET_CELLS,
+  STAGING_BRIDGE_LENGTH,
+  STAGING_BRIDGE_PATH_WIDTH,
+  STAGING_BRIDGE_WIDTH,
+  STAGING_ISLAND_DISTANCE,
+  STAGING_ISLAND_HEIGHT,
+  STAGING_ISLAND_SIZE,
+  STAGING_PLATFORM_Y,
+  TOWER_TARGET_REFRESH_INTERVAL_FRAMES,
+  CASTLE_ENTRY_GOAL_STRIP_HALF_WIDTH_CELLS,
+  CASTLE_ROUTE_HALF_WIDTH_CELLS,
+} from './clientConstants';
+import { createSpawnerHelpers } from './rendering/spawnerHelpers';
 import {
-  createBallistaVisualRig,
-  getBallistaArrowLaunchTransform,
+  prepareStaticModelPreserveScale,
+  prepareCoinModel,
+  preparePlayerModel,
+} from './rendering/modelRegistry';
+import { createVisualAppliers } from './rendering/visualApplication';
+import { computeArrowFacingFromTemplate } from './rendering/presenters/arrowProjectile';
+import {
   updateBallistaRigTracking,
   type BallistaVisualRig,
 } from './rendering/presenters/ballistaRig';
+import { createArrowProjectileSystem } from './rendering/presenters/arrowProjectileSystem';
 import { syncAuthoritativeWaveSpawners } from './domains/gameplay/authoritativeWaveSync';
 import { connectAuthoritativeBridge } from './integrations/authoritativeBridge';
 import {
@@ -252,35 +279,6 @@ const debugViewState: DebugViewState = {
   flowField: false,
   playerShootRange: false,
 };
-const ENABLE_CLIENT_FRAME_PROFILING = true;
-const FRAME_PROFILE_LOG_INTERVAL_MS = 10_000;
-const FRAME_PROFILE_MAX_SAMPLES = 240;
-const ENABLE_PROJECTILE_BROADPHASE = true;
-const ENABLE_INCREMENTAL_SPATIAL_GRID = true;
-const ENABLE_MOB_RENDER_LOD = true;
-const MOB_LOD_NEAR_DISTANCE = 25;
-const MOB_LOD_FAR_DISTANCE = 48;
-const MOB_LOD_MID_ANIMATION_STEP_MS = 33;
-const MOB_LOD_FAR_ANIMATION_STEP_MS = 90;
-const MOB_LOD_DISABLE_FAR_WIGGLE = true;
-const TOWER_TARGET_REFRESH_INTERVAL_FRAMES = 2;
-const STAGING_ISLAND_DISTANCE = 14;
-const STAGING_ISLAND_SIZE = 15;
-const STAGING_ISLAND_HEIGHT = 1;
-const STAGING_BRIDGE_SIDE_GROUND_ROWS = 1;
-const STAGING_BRIDGE_PATH_WIDTH = 3;
-const STAGING_BRIDGE_WIDTH =
-  STAGING_BRIDGE_PATH_WIDTH + STAGING_BRIDGE_SIDE_GROUND_ROWS * 2;
-const STAGING_BRIDGE_LENGTH = 11;
-const CASTLE_ROUTE_HALF_WIDTH_CELLS = Math.max(
-  0,
-  Math.floor(STAGING_BRIDGE_PATH_WIDTH * 0.5)
-);
-const CASTLE_ENTRY_GOAL_STRIP_HALF_WIDTH_CELLS = CASTLE_ROUTE_HALF_WIDTH_CELLS;
-const SPAWNER_ENTRY_INSET_CELLS = 3;
-const STAGING_PLATFORM_Y = Math.max(0, STAGING_ISLAND_HEIGHT - 1);
-const MOB_STAGING_BOUNDS_PADDING =
-  STAGING_ISLAND_DISTANCE + STAGING_ISLAND_SIZE * 0.5 + 2;
 app.innerHTML = `
   <div id="loadingScreen" class="loading-screen" role="status" aria-live="polite">
     <div class="loading-screen__panel">
@@ -362,58 +360,38 @@ app.innerHTML = `
   </div>
 `;
 
-const waveEl = document.querySelector<HTMLSpanElement>('#wave')!;
-const mobsRowEl = document.querySelector<HTMLDivElement>('#mobsRow')!;
-const mobsPrimaryEl = mobsRowEl.querySelector<HTMLDivElement>(
-  '.hud-status__primary'
-)!;
-const mobsSecondaryEl = mobsRowEl.querySelector<HTMLDivElement>(
-  '.hud-status__secondary'
-)!;
-const wallCountEl = document.querySelector<HTMLSpanElement>('#wallCount')!;
-const towerCountEl = document.querySelector<HTMLSpanElement>('#towerCount')!;
-const energyCountEl = document.querySelector<HTMLSpanElement>('#energyCount')!;
-const finalCountdownEl =
-  document.querySelector<HTMLDivElement>('#finalCountdown')!;
-const nextWaveRowEl = document.querySelector<HTMLDivElement>('#nextWaveRow')!;
-const nextWavePrimaryEl = nextWaveRowEl.querySelector<HTMLDivElement>(
-  '.hud-status__primary'
-)!;
-const nextWaveSecondaryEl = nextWaveRowEl.querySelector<HTMLDivElement>(
-  '.hud-status__secondary'
-)!;
-const eventBannerEl = document.querySelector<HTMLDivElement>('#eventBanner')!;
-const hudEl = document.getElementById('hud')!;
-const hudActionsEl = document.querySelector<HTMLDivElement>('.hud-actions')!;
-const hudStatusStackEl =
-  document.querySelector<HTMLDivElement>('.hud-status-stack')!;
-const hudEnergyEl = document.querySelector<HTMLDivElement>('.hud-energy')!;
-const buildWallBtn = document.querySelector<HTMLButtonElement>('#buildWall')!;
-const buildTowerBtn = document.querySelector<HTMLButtonElement>('#buildTower')!;
-const shootButton = document.querySelector<HTMLButtonElement>('#shootButton')!;
-const minimapWrapEl =
-  document.querySelector<HTMLDivElement>('#hudMinimapWrap')!;
-const minimapToggleBtn =
-  document.querySelector<HTMLButtonElement>('#hudMinimapToggle')!;
-const coinHudCanvasEl =
-  document.querySelector<HTMLCanvasElement>('#coinHudCanvas')!;
-const minimapCanvasEl =
-  document.querySelector<HTMLCanvasElement>('#hudMinimap')!;
-const buildModeTitleEl =
-  document.querySelector<HTMLSpanElement>('#buildModeTitle')!;
-const buildModeHintEl =
-  document.querySelector<HTMLSpanElement>('#buildModeHint')!;
-const buildModeCancelBtn =
-  document.querySelector<HTMLButtonElement>('#buildModeCancel')!;
-const loadingScreenEl =
-  document.querySelector<HTMLDivElement>('#loadingScreen')!;
-const loadingProgressFillEl = document.querySelector<HTMLDivElement>(
-  '#loadingProgressFill'
-)!;
-const loadingProgressLabelEl = document.querySelector<HTMLDivElement>(
-  '#loadingProgressLabel'
-)!;
-const minimapCtx = minimapCanvasEl.getContext('2d');
+const {
+  waveEl,
+  mobsRowEl,
+  mobsPrimaryEl,
+  mobsSecondaryEl,
+  wallCountEl,
+  towerCountEl,
+  energyCountEl,
+  finalCountdownEl,
+  nextWaveRowEl,
+  nextWavePrimaryEl,
+  nextWaveSecondaryEl,
+  eventBannerEl,
+  hudEl,
+  hudActionsEl,
+  hudStatusStackEl,
+  hudEnergyEl,
+  buildWallBtn,
+  buildTowerBtn,
+  shootButton,
+  minimapWrapEl,
+  minimapToggleBtn,
+  coinHudCanvasEl,
+  minimapCanvasEl,
+  buildModeTitleEl,
+  buildModeHintEl,
+  buildModeCancelBtn,
+  loadingScreenEl,
+  loadingProgressFillEl,
+  loadingProgressLabelEl,
+  minimapCtx,
+} = createDomRefs(app);
 const minimapCastleIcon = new Image();
 minimapCastleIcon.src = castleIconUrl;
 
@@ -1084,6 +1062,30 @@ const getRockTemplateForPlacement = (modelIndex: number) => {
 const hasAllRockTemplates = () =>
   rockTemplates.length >= ROCK_TEMPLATE_EXPECTED_COUNT;
 
+const {
+  applyTowerVisualToMesh,
+  applyTreeVisualToMesh,
+  applyRockVisualToMesh,
+  applyWallVisualToMesh,
+  setStructureVisualScale,
+} = createVisualAppliers({
+  scene,
+  hitboxLayer: HITBOX_LAYER,
+  towerBuildSize: TOWER_BUILD_SIZE,
+  treeBuildSize: TREE_BUILD_SIZE,
+  getTowerModelTemplate: () => towerModelTemplate,
+  getTreeModelTemplate: () => treeModelTemplate,
+  getWallModelTemplate: () => wallModelTemplate,
+  getRockTemplateForPlacement: (i) => {
+    const e = getRockTemplateForPlacement(i);
+    return e ? { template: e.template } : null;
+  },
+  towerBallistaRigs,
+  clampTreeFootprint,
+  getTreeScaleForFootprint,
+  defaultTreeFootprint: DEFAULT_TREE_FOOTPRINT,
+});
+
 const refreshAllRockVisuals = (forceRefresh: boolean) => {
   for (const [collider, state] of structureStore.structureStates.entries()) {
     if (collider.type !== 'rock') continue;
@@ -1105,211 +1107,12 @@ const registerRockTemplate = (sourceUrl: string, source: THREE.Object3D) => {
   rockVisualsNeedFullRefresh = true;
 };
 
-const prepareStaticModelPreserveScale = (source: THREE.Object3D) => {
-  const model = source.clone(true);
-  const bounds = new THREE.Box3().setFromObject(model);
-  if (bounds.isEmpty()) return model;
-  const center = new THREE.Vector3();
-  bounds.getCenter(center);
-  model.position.set(-center.x, -bounds.min.y, -center.z);
-  model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
-  });
-  return model;
-};
-
-const prepareCoinModel = (source: THREE.Object3D) => {
-  const model = source.clone(true);
-  const initialBounds = new THREE.Box3().setFromObject(model);
-  if (initialBounds.isEmpty()) return model;
-  const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
-  initialBounds.getSize(size);
-  initialBounds.getCenter(center);
-  const largestAxis = Math.max(size.x, size.y, size.z, 0.001);
-  const targetAxis = 1.2;
-  const uniformScale = targetAxis / largestAxis;
-  model.scale.multiplyScalar(uniformScale);
-  model.position.set(
-    -center.x * uniformScale,
-    -center.y * uniformScale,
-    -center.z * uniformScale
-  );
-  model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
-  });
-  return model;
-};
-
-const preparePlayerModel = (source: THREE.Object3D) => {
-  const model = source.clone(true);
-  const bounds = new THREE.Box3().setFromObject(model);
-  if (!bounds.isEmpty()) {
-    const center = new THREE.Vector3();
-    bounds.getCenter(center);
-    // Pivot at bottom (authored at 0); mesh.position.y = 0 places bottom on ground
-    model.position.set(-center.x, -bounds.min.y, -center.z);
-  }
-  model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
-  });
-  return model;
-};
-
 const disposeCapsuleMesh = (obj: THREE.Object3D) => {
   if (obj instanceof THREE.Mesh && obj.geometry && obj.material) {
     obj.geometry.dispose();
     const mat = obj.material;
     if (Array.isArray(mat)) for (const m of mat) m.dispose();
     else mat.dispose();
-  }
-};
-
-const applyTowerVisualToMesh = (mesh: THREE.Mesh, tower?: Tower) => {
-  if (!towerModelTemplate) return;
-  if (mesh.userData.outlineTarget) return;
-  const rig = createBallistaVisualRig(towerModelTemplate);
-  const towerVisual = rig?.root ?? towerModelTemplate.clone(true);
-  towerVisual.position.copy(mesh.position);
-  towerVisual.position.y -= TOWER_BUILD_SIZE.y * 0.5;
-  towerVisual.userData.isTowerVisual = true;
-  scene.add(towerVisual);
-  mesh.userData.outlineTarget = towerVisual;
-  mesh.userData.linkedVisual = towerVisual;
-  // Keep collision/raycast hitboxes out of render + outline passes.
-  mesh.layers.set(HITBOX_LAYER);
-  if (tower && rig) {
-    towerBallistaRigs.set(tower, rig);
-  }
-  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial;
-  hitboxMaterial.transparent = true;
-  hitboxMaterial.opacity = 0;
-  hitboxMaterial.colorWrite = false;
-  hitboxMaterial.depthWrite = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-};
-
-const applyTreeVisualToMesh = (mesh: THREE.Mesh) => {
-  if (!treeModelTemplate) return;
-  if (mesh.userData.outlineTarget) return;
-  const footprint = clampTreeFootprint(
-    Number(mesh.userData.treeFootprint ?? DEFAULT_TREE_FOOTPRINT)
-  );
-  const footprintScale = getTreeScaleForFootprint(footprint);
-  const treeVisual = treeModelTemplate.clone(true);
-  treeVisual.position.copy(mesh.position);
-  treeVisual.position.y -= TREE_BUILD_SIZE.y * 0.5 * footprintScale;
-  treeVisual.scale.setScalar(footprintScale);
-  treeVisual.userData.isTreeVisual = true;
-  scene.add(treeVisual);
-  mesh.userData.outlineTarget = treeVisual;
-  mesh.userData.linkedVisual = treeVisual;
-  // Keep collision/raycast hitboxes out of render + outline passes.
-  mesh.layers.set(HITBOX_LAYER);
-  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial;
-  hitboxMaterial.transparent = true;
-  hitboxMaterial.opacity = 0;
-  hitboxMaterial.colorWrite = false;
-  hitboxMaterial.depthWrite = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-};
-
-const applyRockVisualToMesh = (mesh: THREE.Mesh, forceRefresh = false) => {
-  const modelIndex = (mesh.userData.rockModelIndex as number | undefined) ?? 0;
-  const template = getRockTemplateForPlacement(modelIndex);
-  if (!template) return;
-  if (mesh.userData.outlineTarget && !forceRefresh) return;
-  if (forceRefresh) {
-    const existingVisual = mesh.userData.linkedVisual as
-      | THREE.Object3D
-      | undefined;
-    if (existingVisual) {
-      existingVisual.traverse((node) => {
-        if (!(node instanceof THREE.Mesh)) return;
-        node.geometry.dispose();
-        if (Array.isArray(node.material)) {
-          for (const material of node.material) material.dispose();
-        } else {
-          node.material.dispose();
-        }
-      });
-      scene.remove(existingVisual);
-    }
-    delete mesh.userData.linkedVisual;
-    delete mesh.userData.outlineTarget;
-  }
-  const yawQuarterTurns =
-    (mesh.userData.rockYawQuarterTurns as number | undefined) ?? 0;
-  const yaw = yawQuarterTurns * (Math.PI * 0.5);
-  const footprintX = Math.max(1, Number(mesh.userData.rockFootprintX ?? 1));
-  const footprintZ = Math.max(1, Number(mesh.userData.rockFootprintZ ?? 1));
-  const quarterTurns = ((Math.round(yawQuarterTurns) % 4) + 4) % 4;
-  const isQuarterTurn = quarterTurns % 2 === 1;
-  const visualScaleX = isQuarterTurn ? footprintZ : footprintX;
-  const visualScaleZ = isQuarterTurn ? footprintX : footprintZ;
-  const verticalScale = Math.max(
-    0.65,
-    Number(mesh.userData.rockVerticalScale ?? 1)
-  );
-  const mirrorX = mesh.userData.rockMirrorX === true;
-  const mirrorZ = mesh.userData.rockMirrorZ === true;
-  const rockVisual = template.template.clone(true);
-  rockVisual.position.copy(mesh.position);
-  rockVisual.position.y = 0;
-  rockVisual.scale.set(
-    visualScaleX * (mirrorX ? -1 : 1),
-    verticalScale,
-    visualScaleZ * (mirrorZ ? -1 : 1)
-  );
-  rockVisual.rotation.y = yaw;
-  rockVisual.userData.isRockVisual = true;
-  scene.add(rockVisual);
-  mesh.userData.outlineTarget = rockVisual;
-  mesh.userData.linkedVisual = rockVisual;
-  mesh.layers.set(HITBOX_LAYER);
-  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial;
-  hitboxMaterial.transparent = true;
-  hitboxMaterial.opacity = 0;
-  hitboxMaterial.colorWrite = false;
-  hitboxMaterial.depthWrite = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-};
-
-const applyWallVisualToMesh = (mesh: THREE.Mesh) => {
-  if (!wallModelTemplate) return;
-  if (mesh.userData.outlineTarget) return;
-  const wallVisual = wallModelTemplate.clone(true);
-  wallVisual.position.copy(mesh.position);
-  wallVisual.position.y -= 0.5;
-  wallVisual.userData.isWallVisual = true;
-  scene.add(wallVisual);
-  mesh.userData.outlineTarget = wallVisual;
-  mesh.userData.linkedVisual = wallVisual;
-  // Keep collision/raycast hitboxes out of render + outline passes.
-  mesh.layers.set(HITBOX_LAYER);
-  const hitboxMaterial = mesh.material as THREE.MeshStandardMaterial;
-  hitboxMaterial.transparent = true;
-  hitboxMaterial.opacity = 0;
-  hitboxMaterial.colorWrite = false;
-  hitboxMaterial.depthWrite = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-};
-
-const setStructureVisualScale = (mesh: THREE.Mesh, scale: number) => {
-  mesh.scale.setScalar(scale);
-  const linkedVisual = mesh.userData.linkedVisual as THREE.Object3D | undefined;
-  if (linkedVisual) {
-    linkedVisual.scale.setScalar(scale);
   }
 };
 
@@ -1681,7 +1484,6 @@ const pendingSpawnerPathRefresh = new Set<string>();
 const pendingSpawnerPathOrder: string[] = [];
 const PATHLINE_REFRESH_BUDGET_PER_FRAME = 2;
 const collisionNearbyScratch: Entity[] = [];
-const rangeCandidateScratch: Entity[] = [];
 const spawnerRouteOverlay = new SpawnerPathOverlay(scene);
 
 const mobInstanceMesh = new THREE.InstancedMesh(
@@ -1768,111 +1570,24 @@ const mobLogicGeometry = new THREE.BoxGeometry(
 const mobLogicMaterial = new THREE.MeshBasicMaterial({ visible: false });
 const mobInstanceDummy = new THREE.Object3D();
 
-const getSpawnerOutwardNormal = (pos: THREE.Vector3) => {
-  if (Math.abs(pos.x) >= Math.abs(pos.z)) {
-    return new THREE.Vector3(Math.sign(pos.x || 1), 0, 0);
-  }
-  return new THREE.Vector3(0, 0, Math.sign(pos.z || 1));
-};
-
-const getSpawnerTangent = (pos: THREE.Vector3) => {
-  const normal = getSpawnerOutwardNormal(pos);
-  return new THREE.Vector3(-normal.z, 0, normal.x);
-};
-
-const getSpawnerEntryPoint = (pos: THREE.Vector3) => {
-  const normal = getSpawnerOutwardNormal(pos);
-  const insetDistance = GRID_SIZE * SPAWNER_ENTRY_INSET_CELLS;
-  const x = Math.round(pos.x - normal.x * insetDistance);
-  const z = Math.round(pos.z - normal.z * insetDistance);
-  return new THREE.Vector3(
-    clamp(x, -WORLD_BOUNDS + insetDistance, WORLD_BOUNDS - insetDistance),
-    0,
-    clamp(z, -WORLD_BOUNDS + insetDistance, WORLD_BOUNDS - insetDistance)
-  );
-};
-
-const getStagingIslandCenter = (spawnerPos: THREE.Vector3) => {
-  const normal = getSpawnerOutwardNormal(spawnerPos);
-  return spawnerPos.clone().addScaledVector(normal, STAGING_ISLAND_DISTANCE);
-};
-
-const getSpawnerAnchorId = (spawnerPos: THREE.Vector3) =>
-  `anchor-${Math.round(spawnerPos.x)},${Math.round(spawnerPos.z)}`;
-
-const getSpawnerTowardMap = (spawnerPos: THREE.Vector3) => {
-  return getSpawnerOutwardNormal(spawnerPos).multiplyScalar(-1);
-};
-
-const getSpawnerGatePoint = (spawnerPos: THREE.Vector3) => {
-  const center = getStagingIslandCenter(spawnerPos);
-  const towardMap = getSpawnerTowardMap(spawnerPos);
-  const islandHalf = STAGING_ISLAND_SIZE * 0.5;
-  return center.addScaledVector(towardMap, islandHalf - 0.35);
-};
-
-const getSpawnerBridgeExitPoint = (spawnerPos: THREE.Vector3) => {
-  const towardMap = getSpawnerTowardMap(spawnerPos);
-  return spawnerPos.clone().addScaledVector(towardMap, GRID_SIZE * 0.35);
-};
-
-const buildLaneWaypointsForSpawner = (
-  spawner: WaveSpawner,
-  lanePathPoints: THREE.Vector3[] | undefined
-) => {
-  if (!lanePathPoints || lanePathPoints.length === 0) return undefined;
-  const entryPoint = getSpawnerEntryPoint(spawner.position);
-  return [
-    getSpawnerGatePoint(spawner.position),
-    getSpawnerBridgeExitPoint(spawner.position),
-    entryPoint.clone(),
-    ...lanePathPoints.slice(1).map((point) => point.clone()),
-  ];
-};
-
-const getForwardWaypointIndex = (
-  pos: THREE.Vector3,
-  waypoints: THREE.Vector3[],
-  minIndex = 0
-): number => {
-  if (waypoints.length <= 1) return 0;
-  let bestIdx = clamp(Math.floor(minIndex), 0, waypoints.length - 1);
-  let bestDistSq = Number.POSITIVE_INFINITY;
-  for (let i = bestIdx; i < waypoints.length; i += 1) {
-    const wp = waypoints[i]!;
-    const dx = wp.x - pos.x;
-    const dz = wp.z - pos.z;
-    const distSq = dx * dx + dz * dz;
-    if (distSq < bestDistSq) {
-      bestDistSq = distSq;
-      bestIdx = i;
-    }
-  }
-  // Keep current forward progress without skipping route corners.
-  return bestIdx;
-};
-
-const getSpawnContainerCorners = (spawnerPos: THREE.Vector3) => {
-  const normal = getSpawnerOutwardNormal(spawnerPos);
-  const tangent = getSpawnerTangent(spawnerPos);
-  const center = getStagingIslandCenter(spawnerPos);
-  const half = STAGING_ISLAND_SIZE * 0.5 - 0.8;
-  return [
-    center
-      .clone()
-      .addScaledVector(tangent, -half)
-      .addScaledVector(normal, -half),
-    center
-      .clone()
-      .addScaledVector(tangent, half)
-      .addScaledVector(normal, -half),
-    center.clone().addScaledVector(tangent, half).addScaledVector(normal, half),
-    center
-      .clone()
-      .addScaledVector(tangent, -half)
-      .addScaledVector(normal, half),
-  ];
-};
+const spawnerHelpers = createSpawnerHelpers({
+  gridSize: GRID_SIZE,
+  worldBounds: WORLD_BOUNDS,
+  spawnerEntryInsetCells: SPAWNER_ENTRY_INSET_CELLS,
+  stagingIslandDistance: STAGING_ISLAND_DISTANCE,
+  stagingIslandSize: STAGING_ISLAND_SIZE,
+});
+const {
+  getSpawnerOutwardNormal,
+  getSpawnerEntryPoint,
+  getStagingIslandCenter,
+  getSpawnerAnchorId,
+  getSpawnerGatePoint,
+  getSpawnerBridgeExitPoint,
+  buildLaneWaypointsForSpawner,
+  getForwardWaypointIndex,
+  getSpawnContainerCorners,
+} = spawnerHelpers;
 
 const renderAllCardinalStagingIslands = () => {
   for (const door of borderDoors) {
@@ -3655,18 +3370,9 @@ const towerArrowGravity = new THREE.Vector3(0, -BALLISTA_ARROW_GRAVITY, 0);
 const towerLaunchPosScratch = new THREE.Vector3();
 const towerLaunchQuatScratch = new THREE.Quaternion();
 const towerTargetPosScratch = new THREE.Vector3();
-const towerAimPointScratch = new THREE.Vector3();
 const playerLaunchPosScratch = new THREE.Vector3();
 const playerTargetPosScratch = new THREE.Vector3();
-const projectilePrevPosScratch = new THREE.Vector3();
-const projectileStepScratch = new THREE.Vector3();
-const projectileClosestPointScratch = new THREE.Vector3();
-const projectileDeltaScratch = new THREE.Vector3();
-const projectileMobCenterScratch = new THREE.Vector3();
-const projectileHitPointScratch = new THREE.Vector3();
 const projectileHitDirectionScratch = new THREE.Vector3();
-const projectileMidpointScratch = new THREE.Vector3();
-const projectileBroadphaseCandidatesScratch: Entity[] = [];
 const frameStageSamples: Array<{
   totalMs: number;
   spatialMs: number;
@@ -3729,6 +3435,40 @@ const spawnFloatingDamageText = (
     driftX: (Math.random() - 0.5) * 20,
   });
 };
+
+const {
+  spawnTowerArrowProjectile,
+  spawnPlayerArrowProjectile,
+  updateTowerArrowProjectiles,
+  updatePlayerArrowProjectiles,
+  getTowerLaunchTransform,
+  pickMobInRange,
+  pickSelectedMob,
+} = createArrowProjectileSystem({
+  scene,
+  spatialGrid,
+  mobs,
+  player,
+  activeArrowProjectiles,
+  activePlayerArrowProjectiles,
+  towerBallistaRigs,
+  getArrowModelTemplate: () => arrowModelTemplate,
+  getArrowFacing: () => arrowFacing,
+  getTowerArrowGravity: () => towerArrowGravity,
+  isServerAuthoritative,
+  markMobHitFlash,
+  spawnFloatingDamageText,
+  setMobLastHitDirection: (mob, step, velocity) =>
+    setMobLastHitDirection(mob, step, velocity),
+  towerHeight: TOWER_HEIGHT,
+  mobWidth: MOB_WIDTH,
+  playerShootRange: PLAYER_SHOOT_RANGE,
+  gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
+  arrowRadius: BALLISTA_ARROW_RADIUS,
+  arrowMaxLifetime: BALLISTA_ARROW_MAX_LIFETIME,
+  shootDamage: SHOOT_DAMAGE,
+  enableProjectileBroadphase: ENABLE_PROJECTILE_BROADPHASE,
+});
 
 const updateFloatingDamageTexts = (delta: number) => {
   for (let i = activeDamageTexts.length - 1; i >= 0; i -= 1) {
@@ -4930,332 +4670,6 @@ const clearWaveOverlays = () => {
   renderAllCardinalStagingIslands();
   pendingSpawnerPathRefresh.clear();
   pendingSpawnerPathOrder.length = 0;
-};
-
-const pickMobInRange = (center: THREE.Vector3, radius: number) => {
-  let best: Entity | null = null;
-  let bestDistToBase = Number.POSITIVE_INFINITY;
-  const candidates = spatialGrid.getNearbyInto(
-    center,
-    radius,
-    rangeCandidateScratch
-  );
-  for (const mob of candidates) {
-    if (mob.kind !== 'mob') continue;
-    if (mob.staged) continue;
-    if ((mob.hp ?? 0) <= 0) continue;
-    const distToCenter = mob.mesh.position.distanceTo(center);
-    if (distToCenter > radius) continue;
-    const distToBase = mob.mesh.position.length();
-    if (distToBase < bestDistToBase) {
-      best = mob;
-      bestDistToBase = distToBase;
-    }
-  }
-  return best;
-};
-
-const pickSelectedMob = () =>
-  pickMobInRange(player.mesh.position, PLAYER_SHOOT_RANGE);
-
-const getProjectileMobCandidates = (
-  from: THREE.Vector3,
-  to: THREE.Vector3,
-  radius: number,
-  out: Entity[]
-) => {
-  if (!ENABLE_PROJECTILE_BROADPHASE) {
-    out.length = 0;
-    for (const mob of mobs) out.push(mob);
-    return out;
-  }
-  projectileMidpointScratch.copy(from).add(to).multiplyScalar(0.5);
-  const segmentLength = from.distanceTo(to);
-  const queryRadius = segmentLength * 0.5 + radius + MOB_WIDTH;
-  return spatialGrid.getNearbyInto(projectileMidpointScratch, queryRadius, out);
-};
-
-const getTowerLaunchTransform = (
-  tower: Tower,
-  rig: BallistaVisualRig | undefined,
-  outPosition: THREE.Vector3,
-  outQuaternion: THREE.Quaternion
-) => {
-  if (rig) {
-    rig.root.updateMatrixWorld(true);
-    getBallistaArrowLaunchTransform(rig, outPosition, outQuaternion);
-    return;
-  }
-  outPosition.copy(tower.mesh.position);
-  outPosition.y += TOWER_HEIGHT * 0.5;
-  outQuaternion.identity();
-};
-
-const spawnTowerArrowProjectile = (
-  tower: Tower,
-  launchPos: THREE.Vector3,
-  launchQuaternion: THREE.Quaternion,
-  launchVelocity: THREE.Vector3
-) => {
-  if (!arrowModelTemplate || !arrowFacing) return;
-  const mesh = arrowModelTemplate.clone(true);
-  mesh.quaternion.copy(launchQuaternion);
-  orientArrowToVelocity(mesh, launchVelocity, arrowFacing.forwardLocal);
-  placeArrowMeshAtFacing(mesh, launchPos, arrowFacing.anchorLocalPos);
-  scene.add(mesh);
-  activeArrowProjectiles.push({
-    mesh,
-    position: launchPos.clone(),
-    velocity: launchVelocity.clone(),
-    gravity: towerArrowGravity,
-    gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
-    radius: BALLISTA_ARROW_RADIUS,
-    ttl: BALLISTA_ARROW_MAX_LIFETIME,
-    damage: tower.damage,
-    sourceTower: tower,
-  });
-};
-
-const updateTowerArrowProjectiles = (delta: number) => {
-  const serverAuthoritative = isServerAuthoritative();
-  for (let i = activeArrowProjectiles.length - 1; i >= 0; i -= 1) {
-    const projectile = activeArrowProjectiles[i]!;
-    projectile.ttl -= delta;
-    if (projectile.ttl <= 0) {
-      scene.remove(projectile.mesh);
-      activeArrowProjectiles.splice(i, 1);
-      continue;
-    }
-
-    projectilePrevPosScratch.copy(projectile.position);
-    let gravityDt = delta;
-    if (projectile.gravityDelay > 0) {
-      const delayStep = Math.min(projectile.gravityDelay, delta);
-      projectile.gravityDelay -= delayStep;
-      gravityDt = delta - delayStep;
-    }
-    if (gravityDt > 0) {
-      projectile.velocity.addScaledVector(projectile.gravity, gravityDt);
-    }
-    projectile.position.addScaledVector(projectile.velocity, delta);
-    if (arrowFacing) {
-      orientArrowToVelocity(
-        projectile.mesh,
-        projectile.velocity,
-        arrowFacing.forwardLocal
-      );
-      placeArrowMeshAtFacing(
-        projectile.mesh,
-        projectile.position,
-        arrowFacing.anchorLocalPos
-      );
-    }
-
-    projectileStepScratch
-      .copy(projectile.position)
-      .sub(projectilePrevPosScratch);
-    const segmentLenSq = projectileStepScratch.lengthSq();
-    let hitMob: MobEntity | null = null;
-    let bestT = Number.POSITIVE_INFINITY;
-
-    const projectileCandidates = getProjectileMobCandidates(
-      projectilePrevPosScratch,
-      projectile.position,
-      projectile.radius,
-      projectileBroadphaseCandidatesScratch
-    );
-    for (const mob of projectileCandidates) {
-      if (mob.kind !== 'mob') continue;
-      if (mob.staged) continue;
-      if ((mob.hp ?? 0) <= 0) continue;
-      projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3);
-      const combinedRadius = mob.radius + projectile.radius;
-      let t = 0;
-      if (segmentLenSq > 1e-8) {
-        projectileDeltaScratch
-          .copy(projectileMobCenterScratch)
-          .sub(projectilePrevPosScratch);
-        t = THREE.MathUtils.clamp(
-          projectileDeltaScratch.dot(projectileStepScratch) / segmentLenSq,
-          0,
-          1
-        );
-      }
-      projectileClosestPointScratch
-        .copy(projectilePrevPosScratch)
-        .addScaledVector(projectileStepScratch, t);
-      if (
-        projectileClosestPointScratch.distanceToSquared(
-          projectileMobCenterScratch
-        ) >
-        combinedRadius * combinedRadius
-      )
-        continue;
-      if (t < bestT) {
-        bestT = t;
-        hitMob = mob;
-        projectileHitPointScratch.copy(projectileClosestPointScratch);
-      }
-    }
-
-    if (!hitMob) continue;
-    projectile.position.copy(projectileHitPointScratch);
-    if (arrowFacing) {
-      placeArrowMeshAtFacing(
-        projectile.mesh,
-        projectile.position,
-        arrowFacing.anchorLocalPos
-      );
-    }
-    setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity);
-    if (serverAuthoritative) {
-      markMobHitFlash(hitMob);
-      scene.remove(projectile.mesh);
-      activeArrowProjectiles.splice(i, 1);
-      continue;
-    }
-    const attack = rollAttackDamage(projectile.damage);
-    const prevHp = hitMob.hp ?? 1;
-    const nextHp = prevHp - attack.damage;
-    hitMob.hp = nextHp;
-    markMobHitFlash(hitMob);
-    hitMob.lastHitBy = 'tower';
-    spawnFloatingDamageText(hitMob, attack.damage, 'tower', attack.isCrit);
-    if (prevHp > 0 && nextHp <= 0) {
-      projectile.sourceTower.killCount += 1;
-    }
-    scene.remove(projectile.mesh);
-    activeArrowProjectiles.splice(i, 1);
-  }
-};
-
-const spawnPlayerArrowProjectile = (
-  launchPos: THREE.Vector3,
-  launchVelocity: THREE.Vector3
-) => {
-  if (!arrowModelTemplate || !arrowFacing) return;
-  const mesh = arrowModelTemplate.clone(true);
-  orientArrowToVelocity(mesh, launchVelocity, arrowFacing!.forwardLocal);
-  placeArrowMeshAtFacing(mesh, launchPos, arrowFacing!.anchorLocalPos);
-  scene.add(mesh);
-  activePlayerArrowProjectiles.push({
-    mesh,
-    position: launchPos.clone(),
-    velocity: launchVelocity.clone(),
-    gravity: towerArrowGravity,
-    gravityDelay: BALLISTA_ARROW_GRAVITY_DELAY,
-    radius: BALLISTA_ARROW_RADIUS,
-    ttl: BALLISTA_ARROW_MAX_LIFETIME,
-    damage: SHOOT_DAMAGE,
-  });
-};
-
-const updatePlayerArrowProjectiles = (delta: number) => {
-  const serverAuthoritative = isServerAuthoritative();
-  for (let i = activePlayerArrowProjectiles.length - 1; i >= 0; i -= 1) {
-    const projectile = activePlayerArrowProjectiles[i]!;
-    projectile.ttl -= delta;
-    if (projectile.ttl <= 0) {
-      scene.remove(projectile.mesh);
-      activePlayerArrowProjectiles.splice(i, 1);
-      continue;
-    }
-
-    projectilePrevPosScratch.copy(projectile.position);
-    let gravityDt = delta;
-    if (projectile.gravityDelay > 0) {
-      const delayStep = Math.min(projectile.gravityDelay, delta);
-      projectile.gravityDelay -= delayStep;
-      gravityDt = delta - delayStep;
-    }
-    if (gravityDt > 0) {
-      projectile.velocity.addScaledVector(projectile.gravity, gravityDt);
-    }
-    projectile.position.addScaledVector(projectile.velocity, delta);
-    if (arrowFacing) {
-      orientArrowToVelocity(
-        projectile.mesh,
-        projectile.velocity,
-        arrowFacing.forwardLocal
-      );
-      placeArrowMeshAtFacing(
-        projectile.mesh,
-        projectile.position,
-        arrowFacing.anchorLocalPos
-      );
-    }
-
-    projectileStepScratch
-      .copy(projectile.position)
-      .sub(projectilePrevPosScratch);
-    const segmentLenSq = projectileStepScratch.lengthSq();
-    let hitMob: MobEntity | null = null;
-    let bestT = Number.POSITIVE_INFINITY;
-
-    const projectileCandidates = getProjectileMobCandidates(
-      projectilePrevPosScratch,
-      projectile.position,
-      projectile.radius,
-      projectileBroadphaseCandidatesScratch
-    );
-    for (const mob of projectileCandidates) {
-      if (mob.kind !== 'mob') continue;
-      if (mob.staged) continue;
-      if ((mob.hp ?? 0) <= 0) continue;
-      projectileMobCenterScratch.copy(mob.mesh.position).setY(mob.baseY + 0.3);
-      const combinedRadius = mob.radius + projectile.radius;
-      let t = 0;
-      if (segmentLenSq > 1e-8) {
-        projectileDeltaScratch
-          .copy(projectileMobCenterScratch)
-          .sub(projectilePrevPosScratch);
-        t = THREE.MathUtils.clamp(
-          projectileDeltaScratch.dot(projectileStepScratch) / segmentLenSq,
-          0,
-          1
-        );
-      }
-      projectileClosestPointScratch
-        .copy(projectilePrevPosScratch)
-        .addScaledVector(projectileStepScratch, t);
-      if (
-        projectileClosestPointScratch.distanceToSquared(
-          projectileMobCenterScratch
-        ) >
-        combinedRadius * combinedRadius
-      )
-        continue;
-      if (t < bestT) {
-        bestT = t;
-        hitMob = mob;
-        projectileHitPointScratch.copy(projectileClosestPointScratch);
-      }
-    }
-
-    if (!hitMob) continue;
-    projectile.position.copy(projectileHitPointScratch);
-    if (arrowFacing) {
-      placeArrowMeshAtFacing(
-        projectile.mesh,
-        projectile.position,
-        arrowFacing.anchorLocalPos
-      );
-    }
-    setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity);
-    if (serverAuthoritative) {
-      markMobHitFlash(hitMob);
-      scene.remove(projectile.mesh);
-      activePlayerArrowProjectiles.splice(i, 1);
-      continue;
-    }
-    const attack = rollAttackDamage(projectile.damage);
-    hitMob.hp = (hitMob.hp ?? 0) - attack.damage;
-    markMobHitFlash(hitMob);
-    hitMob.lastHitBy = 'player';
-    spawnFloatingDamageText(hitMob, attack.damage, 'player', attack.isCrit);
-    scene.remove(projectile.mesh);
-    activePlayerArrowProjectiles.splice(i, 1);
-  }
 };
 
 const updateMobInstanceRender = (now: number) => {

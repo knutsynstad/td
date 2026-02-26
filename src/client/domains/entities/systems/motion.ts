@@ -180,184 +180,185 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     }
   };
 
-  const updateEntityMotion = (entity: Entity, delta: number) => {
-    let dir = new THREE.Vector3();
-    if (entity.kind === 'mob' && entity.staged) {
-      entity.velocity.set(0, 0, 0);
-      const boundsPadding = context.constants.mobStagingBoundsPadding;
-      const minBound = -context.constants.worldBounds - boundsPadding;
-      const maxBound = context.constants.worldBounds + boundsPadding;
-      entity.mesh.position.x = clamp(
-        entity.mesh.position.x,
-        minBound,
-        maxBound
-      );
-      entity.mesh.position.z = clamp(
-        entity.mesh.position.z,
-        minBound,
-        maxBound
-      );
-      entity.mesh.position.y = entity.baseY;
-      return;
-    }
+  const updateStagedMobMotion = (entity: MobEntity) => {
+    entity.velocity.set(0, 0, 0);
+    const boundsPadding = context.constants.mobStagingBoundsPadding;
+    const minBound = -context.constants.worldBounds - boundsPadding;
+    const maxBound = context.constants.worldBounds + boundsPadding;
+    entity.mesh.position.x = clamp(
+      entity.mesh.position.x,
+      minBound,
+      maxBound
+    );
+    entity.mesh.position.z = clamp(
+      entity.mesh.position.z,
+      minBound,
+      maxBound
+    );
+    entity.mesh.position.y = entity.baseY;
+  };
 
-    if (
-      entity.kind === 'mob' &&
-      entity.waypoints &&
-      entity.waypointIndex !== undefined
-    ) {
-      updateMobBerserkState(entity, delta);
-
-      if (entity.berserkMode) {
-        const berserkDir = getMobBerserkDirection(entity);
-        if (berserkDir) {
-          dir.copy(berserkDir);
-        } else if (entity.laneBlocked) {
-          // If blocked and we cannot pick a smash target, keep pressure toward castle.
-          dir.set(-entity.mesh.position.x, 0, -entity.mesh.position.z);
-          if (dir.length() > 0.1) dir.normalize();
-        }
-      } else {
-        const waypoints = entity.waypoints;
-        let waypointIdx = entity.waypointIndex;
-
-        if (waypointIdx < waypoints.length) {
-          const targetWaypoint = waypoints[waypointIdx];
-          const distToWaypoint =
-            entity.mesh.position.distanceTo(targetWaypoint);
-          const nearbyForProgress = Math.max(
-            0,
-            context.spatialGrid.getNearbyInto(
-              entity.mesh.position,
-              entity.radius * 4,
-              progressScratch
-            ).length - 1
-          );
-          const crowdBonus = Math.min(0.35, nearbyForProgress * 0.03);
-          const waypointReachRadius = entity.radius + 0.55 + crowdBonus;
-          let progressT = 1;
-          let passedProgressGate = true;
-          if (waypointIdx > 0) {
-            const prevWaypoint = waypoints[waypointIdx - 1];
-            if (prevWaypoint) {
-              const segX = targetWaypoint.x - prevWaypoint.x;
-              const segZ = targetWaypoint.z - prevWaypoint.z;
-              const segLenSq = segX * segX + segZ * segZ;
-              if (segLenSq > 1e-6) {
-                const mobFromPrevX = entity.mesh.position.x - prevWaypoint.x;
-                const mobFromPrevZ = entity.mesh.position.z - prevWaypoint.z;
-                progressT =
-                  (mobFromPrevX * segX + mobFromPrevZ * segZ) / segLenSq;
-                passedProgressGate = progressT >= 0.85;
-              }
-            }
-          }
-          let turnDot: number | null = null;
-          let isTurnWaypoint = false;
-          if (waypointIdx > 0 && waypointIdx < waypoints.length - 1) {
-            const prevWp = waypoints[waypointIdx - 1];
-            const currWp = waypoints[waypointIdx];
-            const nextWp = waypoints[waypointIdx + 1];
-            if (prevWp && currWp && nextWp) {
-              const inX = currWp.x - prevWp.x;
-              const inZ = currWp.z - prevWp.z;
-              const outX = nextWp.x - currWp.x;
-              const outZ = nextWp.z - currWp.z;
-              const inLen = Math.hypot(inX, inZ);
-              const outLen = Math.hypot(outX, outZ);
-              if (inLen > 1e-6 && outLen > 1e-6) {
-                turnDot =
-                  (inX / inLen) * (outX / outLen) +
-                  (inZ / inLen) * (outZ / outLen);
-                isTurnWaypoint = Math.abs(turnDot) < 0.95;
-              }
-            }
-          }
-          const isFinalApproachWaypoint = waypointIdx >= waypoints.length - 3;
-          const applyStrictTurnGate =
-            isTurnWaypoint && !isFinalApproachWaypoint;
-          const requiredProgress = applyStrictTurnGate
-            ? 0.97
-            : isFinalApproachWaypoint
-              ? 0.9
-              : 0.85;
-          const strictTurnRadius = entity.radius + 0.45;
-          const effectiveReachRadius = applyStrictTurnGate
-            ? Math.min(waypointReachRadius, strictTurnRadius)
-            : waypointReachRadius;
-          const canAdvance =
-            distToWaypoint < effectiveReachRadius &&
-            progressT >= requiredProgress &&
-            passedProgressGate;
-          if (canAdvance) {
-            waypointIdx++;
-            entity.waypointIndex = waypointIdx;
-          }
-
-          if (waypointIdx < waypoints.length) {
-            dir = new THREE.Vector3(
-              waypoints[waypointIdx].x - entity.mesh.position.x,
-              0,
-              waypoints[waypointIdx].z - entity.mesh.position.z
-            );
-            if (dir.length() > 0.1) dir.normalize();
-          } else {
-            const lastWaypoint = waypoints[waypoints.length - 1];
-            if (lastWaypoint) {
-              dir = new THREE.Vector3(
-                lastWaypoint.x - entity.mesh.position.x,
-                0,
-                lastWaypoint.z - entity.mesh.position.z
-              );
-              if (dir.length() > 0.1) dir.normalize();
-            }
-          }
-        }
-
-        applyAvoidance(entity, dir, 0.12);
-      }
-    } else if (entity.kind === 'mob') {
-      updateMobBerserkState(entity, delta);
-
-      if (entity.berserkMode) {
-        const berserkDir = getMobBerserkDirection(entity);
-        if (berserkDir) {
-          dir.copy(berserkDir);
-        } else if (entity.laneBlocked) {
-          dir.set(-entity.mesh.position.x, 0, -entity.mesh.position.z);
-          if (dir.length() > 0.1) dir.normalize();
-        }
+  const updateWaypointMobMotion = (
+    entity: MobEntity,
+    delta: number,
+    dir: THREE.Vector3
+  ) => {
+    updateMobBerserkState(entity, delta);
+    if (entity.berserkMode) {
+      const berserkDir = getMobBerserkDirection(entity);
+      if (berserkDir) {
+        dir.copy(berserkDir);
+      } else if (entity.laneBlocked) {
+        dir.set(-entity.mesh.position.x, 0, -entity.mesh.position.z);
+        if (dir.length() > 0.1) dir.normalize();
       }
     } else {
-      if (hasReachedBlockedTarget(entity)) {
-        dir.set(0, 0, 0);
-      } else {
-        dir = new THREE.Vector3(
-          entity.target.x - entity.mesh.position.x,
+      const waypoints = entity.waypoints!;
+      let waypointIdx = entity.waypointIndex!;
+      if (waypointIdx < waypoints.length) {
+        const targetWaypoint = waypoints[waypointIdx]!;
+        const distToWaypoint =
+          entity.mesh.position.distanceTo(targetWaypoint);
+        const nearbyForProgress = Math.max(
           0,
-          entity.target.z - entity.mesh.position.z
+          context.spatialGrid.getNearbyInto(
+            entity.mesh.position,
+            entity.radius * 4,
+            progressScratch
+          ).length - 1
         );
-        if (dir.length() > 0.1) {
-          dir.normalize();
+        const crowdBonus = Math.min(0.35, nearbyForProgress * 0.03);
+        const waypointReachRadius = entity.radius + 0.55 + crowdBonus;
+        let progressT = 1;
+        let passedProgressGate = true;
+        if (waypointIdx > 0) {
+          const prevWaypoint = waypoints[waypointIdx - 1];
+          if (prevWaypoint) {
+            const segX = targetWaypoint.x - prevWaypoint.x;
+            const segZ = targetWaypoint.z - prevWaypoint.z;
+            const segLenSq = segX * segX + segZ * segZ;
+            if (segLenSq > 1e-6) {
+              const mobFromPrevX = entity.mesh.position.x - prevWaypoint.x;
+              const mobFromPrevZ = entity.mesh.position.z - prevWaypoint.z;
+              progressT =
+                (mobFromPrevX * segX + mobFromPrevZ * segZ) / segLenSq;
+              passedProgressGate = progressT >= 0.85;
+            }
+          }
+        }
+        let turnDot: number | null = null;
+        let isTurnWaypoint = false;
+        if (waypointIdx > 0 && waypointIdx < waypoints.length - 1) {
+          const prevWp = waypoints[waypointIdx - 1];
+          const currWp = waypoints[waypointIdx];
+          const nextWp = waypoints[waypointIdx + 1];
+          if (prevWp && currWp && nextWp) {
+            const inX = currWp.x - prevWp.x;
+            const inZ = currWp.z - prevWp.z;
+            const outX = nextWp.x - currWp.x;
+            const outZ = nextWp.z - currWp.z;
+            const inLen = Math.hypot(inX, inZ);
+            const outLen = Math.hypot(outX, outZ);
+            if (inLen > 1e-6 && outLen > 1e-6) {
+              turnDot =
+                (inX / inLen) * (outX / outLen) +
+                (inZ / inLen) * (outZ / outLen);
+              isTurnWaypoint = Math.abs(turnDot) < 0.95;
+            }
+          }
+        }
+        const isFinalApproachWaypoint = waypointIdx >= waypoints.length - 3;
+        const applyStrictTurnGate =
+          isTurnWaypoint && !isFinalApproachWaypoint;
+        const requiredProgress = applyStrictTurnGate
+          ? 0.97
+          : isFinalApproachWaypoint
+            ? 0.9
+            : 0.85;
+        const strictTurnRadius = entity.radius + 0.45;
+        const effectiveReachRadius = applyStrictTurnGate
+          ? Math.min(waypointReachRadius, strictTurnRadius)
+          : waypointReachRadius;
+        const canAdvance =
+          distToWaypoint < effectiveReachRadius &&
+          progressT >= requiredProgress &&
+          passedProgressGate;
+        if (canAdvance) {
+          waypointIdx++;
+          entity.waypointIndex = waypointIdx;
+        }
+        if (waypointIdx < waypoints.length) {
+          dir.set(
+            waypoints[waypointIdx].x - entity.mesh.position.x,
+            0,
+            waypoints[waypointIdx].z - entity.mesh.position.z
+          );
+          if (dir.length() > 0.1) dir.normalize();
         } else {
-          dir.set(0, 0, 0);
+          const lastWaypoint = waypoints[waypoints.length - 1];
+          if (lastWaypoint) {
+            dir.set(
+              lastWaypoint.x - entity.mesh.position.x,
+              0,
+              lastWaypoint.z - entity.mesh.position.z
+            );
+            if (dir.length() > 0.1) dir.normalize();
+          }
         }
       }
+      applyAvoidance(entity, dir, 0.12);
     }
+  };
 
+  const updateBerserkOnlyMobMotion = (
+    entity: MobEntity,
+    delta: number,
+    dir: THREE.Vector3
+  ) => {
+    updateMobBerserkState(entity, delta);
+    if (entity.berserkMode) {
+      const berserkDir = getMobBerserkDirection(entity);
+      if (berserkDir) {
+        dir.copy(berserkDir);
+      } else if (entity.laneBlocked) {
+        dir.set(-entity.mesh.position.x, 0, -entity.mesh.position.z);
+        if (dir.length() > 0.1) dir.normalize();
+      }
+    }
+  };
+
+  const updatePlayerNpcMotion = (entity: Entity, dir: THREE.Vector3) => {
+    if (hasReachedBlockedTarget(entity)) {
+      dir.set(0, 0, 0);
+    } else {
+      dir.set(
+        entity.target.x - entity.mesh.position.x,
+        0,
+        entity.target.z - entity.mesh.position.z
+      );
+      if (dir.length() > 0.1) {
+        dir.normalize();
+      } else {
+        dir.set(0, 0, 0);
+      }
+    }
+  };
+
+  const applyMotionTail = (
+    entity: Entity,
+    dir: THREE.Vector3,
+    delta: number
+  ) => {
     if (dir.length() > 0.1) {
       entity.velocity.copy(dir).multiplyScalar(entity.speed);
     } else {
       entity.velocity.set(0, 0, 0);
     }
-
     entity.mesh.position.x += entity.velocity.x * delta;
     entity.mesh.position.z += entity.velocity.z * delta;
-
     for (const collider of context.staticColliders) {
       resolveCircleAabb(entity.mesh.position, entity.radius, collider);
     }
-
     const boundsPadding =
       entity.kind === 'mob' &&
       (entity.staged ||
@@ -377,7 +378,6 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     entity.mesh.position.x = clamp(entity.mesh.position.x, minBound, maxBound);
     entity.mesh.position.z = clamp(entity.mesh.position.z, minBound, maxBound);
     entity.mesh.position.y = entity.baseY;
-
     if (entity.kind === 'player' || entity.kind === 'npc') {
       const vx = entity.velocity.x;
       const vz = entity.velocity.z;
@@ -386,6 +386,26 @@ export const createEntityMotionSystem = (context: MotionContext) => {
           Math.atan2(vx, vz) - context.playerFacingOffset.value + Math.PI;
       }
     }
+  };
+
+  const updateEntityMotion = (entity: Entity, delta: number) => {
+    const dir = new THREE.Vector3();
+    if (entity.kind === 'mob' && entity.staged) {
+      updateStagedMobMotion(entity);
+      return;
+    }
+    if (
+      entity.kind === 'mob' &&
+      entity.waypoints &&
+      entity.waypointIndex !== undefined
+    ) {
+      updateWaypointMobMotion(entity, delta, dir);
+    } else if (entity.kind === 'mob') {
+      updateBerserkOnlyMobMotion(entity, delta, dir);
+    } else {
+      updatePlayerNpcMotion(entity, dir);
+    }
+    applyMotionTail(entity, dir, delta);
   };
 
   const updateNpcTargets = () => {

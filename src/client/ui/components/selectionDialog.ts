@@ -3,7 +3,12 @@ import type {
   TowerTypeId,
   TowerUpgradeId,
 } from '../../domains/gameplay/towers/towerTypes';
-import { buildCoinCostMarkup, getCoinIconUrl } from './coinCost';
+import {
+  buildInfoListMarkup,
+  buildStatsMarkup,
+  buildBankActionsMarkup,
+  buildRepairMarkup,
+} from '../selectionDialogMarkup';
 
 type SelectionDialogState = {
   selectedCount: number;
@@ -188,14 +193,7 @@ export class SelectionDialog {
     const typeLabel = selectedTowerTypeId
       ? getTowerType(selectedTowerTypeId).label
       : selectedStructureLabel;
-    const upgradesById = new Map(
-      upgradeOptions.map((option) => [option.id, option])
-    );
     const upgradesDisabled = inRangeCount === 0;
-    const formatStatNumber = (value: number, maxDecimals = 2): string => {
-      const rounded = Number(value.toFixed(maxDecimals));
-      return String(rounded);
-    };
     const infoItems: Array<{ label: string; value: string }> = [];
     if (buildingCoords) {
       infoItems.push({
@@ -230,55 +228,10 @@ export class SelectionDialog {
         value: String(towerDetails.killCount),
       });
     }
-    const infoListMarkup =
-      infoItems.length > 0
-        ? `<ul class="selection-dialog__info-list">
-            ${infoItems
-              .map(
-                (item) =>
-                  `<li class="selection-dialog__info-item">${item.label}: ${item.value}</li>`
-              )
-              .join('')}
-          </ul>`
-        : '';
+    const infoListMarkup = buildInfoListMarkup(infoItems);
     const statsMarkup =
       !isBankSelected && towerDetails
-        ? (() => {
-            const renderStatCol = (
-              upgradeId: TowerUpgradeId,
-              label: string,
-              value: string
-            ) => {
-              const upgrade = upgradesById.get(upgradeId);
-              const disabled =
-                !upgrade || upgradesDisabled || !upgrade.canAfford;
-              const upgradeContent = upgrade
-                ? `<span class="selection-dialog__stat-upgrade-line">Upgrade</span><span class="selection-dialog__stat-upgrade-cost">${buildCoinCostMarkup(upgrade.cost, 'Coin cost')}</span>`
-                : '<span class="selection-dialog__stat-upgrade-line">Max</span>';
-              return `
-                <div class="selection-dialog__stat-col">
-                  <div class="selection-dialog__stat-col-body">
-                    <span class="selection-dialog__stat-value">${value}</span>
-                    <span class="selection-dialog__stat-label">${label}</span>
-                  </div>
-                  <button class="selection-dialog__stat-upgrade-btn" data-upgrade="${upgradeId}" ${disabled ? 'disabled' : ''}>${upgradeContent}</button>
-                </div>
-              `;
-            };
-            return `<div class="selection-dialog__stats-row">
-              ${renderStatCol(
-                'range',
-                'Range',
-                `${formatStatNumber(towerDetails.range, 2)}m`
-              )}
-              ${renderStatCol('damage', 'Damage', String(towerDetails.damage))}
-              ${renderStatCol(
-                'speed',
-                'Speed',
-                `${formatStatNumber(towerDetails.speed, 2)}/s`
-              )}
-            </div>`;
-          })()
+        ? buildStatsMarkup(towerDetails, upgradeOptions, upgradesDisabled)
         : '';
     const noUpgradesLeftMarkup =
       !isBankSelected && towerDetails && upgradeOptions.length === 0
@@ -287,14 +240,13 @@ export class SelectionDialog {
     const statusMarkup = noUpgradesLeftMarkup
       ? `<div class="selection-dialog__group selection-dialog__group--status">${noUpgradesLeftMarkup}</div>`
       : '';
-    const coinIcon = `<img class="coin-cost__icon selection-dialog__bank-coin-icon" src="${getCoinIconUrl()}" alt="" aria-hidden="true" />`;
     const bankActionsMarkup = isBankSelected
-      ? `<div class="selection-dialog__bank-adjust-grid">
-          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--withdraw" data-bank-remove-1 ${canBankRemove1 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Take</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>1</span></span></button>
-          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--deposit" data-bank-add-1 ${canBankAdd1 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Add</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>1</span></span></button>
-          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--withdraw" data-bank-remove-10 ${canBankRemove10 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Take</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>10</span></span></button>
-          <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--deposit" data-bank-add-10 ${canBankAdd10 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Add</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>10</span></span></button>
-        </div>`
+      ? buildBankActionsMarkup(
+          canBankAdd1,
+          canBankAdd10,
+          canBankRemove1,
+          canBankRemove10
+        )
       : '';
 
     const deleteBtnMarkup = !isBankSelected
@@ -313,11 +265,7 @@ export class SelectionDialog {
         isBankSelected
           ? bankActionsMarkup
           : showRepair
-            ? `<div class="selection-dialog__action-bar">
-                 <button class="selection-dialog__action" data-repair ${canRepair ? '' : 'disabled'}>
-                   ${canRepair && repairCost !== null ? `Repair ${buildCoinCostMarkup(repairCost, 'Coin cost')}` : 'Repair'}
-                 </button>
-               </div>`
+            ? buildRepairMarkup(canRepair, repairCost)
             : ''
       }
     `;

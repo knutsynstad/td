@@ -24,6 +24,7 @@ import {
   TOWER_UPGRADES,
 } from '../../domains/gameplay/towers/towerTypes';
 import { screenToWorldOnGround } from '../../domains/world/coords';
+import { prepareCoinModel } from '../../rendering/modelRegistry';
 import { SelectionDialog } from '../../ui/components/selectionDialog';
 import { clamp } from '../../domains/world/collision';
 import { createParticleSystem } from '../../rendering/effects/particles';
@@ -256,27 +257,6 @@ const prepareStatic = (source: THREE.Object3D): THREE.Object3D => {
     bounds.getCenter(center);
     model.position.set(-center.x, -bounds.min.y, -center.z);
   }
-  setShadows(model);
-  return model;
-};
-
-const prepareCoinModel = (source: THREE.Object3D): THREE.Object3D => {
-  const model = source.clone(true);
-  const initialBounds = new THREE.Box3().setFromObject(model);
-  if (initialBounds.isEmpty()) return model;
-  const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
-  initialBounds.getSize(size);
-  initialBounds.getCenter(center);
-  const largestAxis = Math.max(size.x, size.y, size.z, 0.001);
-  const targetAxis = 1.2;
-  const uniformScale = targetAxis / largestAxis;
-  model.scale.multiplyScalar(uniformScale);
-  model.position.set(
-    -center.x * uniformScale,
-    -center.y * uniformScale,
-    -center.z * uniformScale
-  );
   setShadows(model);
   return model;
 };
