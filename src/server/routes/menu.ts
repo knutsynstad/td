@@ -8,6 +8,39 @@ type MenuActionResponse = {
 
 export const menuRoutes = new Hono();
 
+menuRoutes.post('/create-sandbox-post', async (c) => {
+  try {
+    await c.req.json().catch(() => undefined);
+    const subredditName = context.subredditName;
+    if (!subredditName) {
+      return c.json<MenuActionResponse>(
+        { showToast: 'Unable to resolve subreddit for new post' },
+        400
+      );
+    }
+    await reddit.submitCustomPost({
+      subredditName,
+      title: 'Developer Sandbox',
+      entry: 'sandbox-splash',
+      splash: {
+        backgroundUri: 'transparent.png',
+        appDisplayName: 'Developer Sandbox',
+      },
+    });
+    return c.json<MenuActionResponse>({
+      showToast: 'Created a Sandbox post',
+    });
+  } catch (error) {
+    return c.json<MenuActionResponse>(
+      {
+        showToast:
+          error instanceof Error ? error.message : 'Failed to create post',
+      },
+      500
+    );
+  }
+});
+
 menuRoutes.post('/create-post', async (c) => {
   try {
     await c.req.json().catch(() => undefined);

@@ -139,6 +139,11 @@ import { updateHud } from './rendering/presenters/hudPresenter';
 import { renderVisibleMobInstances } from './rendering/presenters/renderCoordinator';
 import { buildCoinCostMarkup } from './ui/components/coinCost';
 import {
+  computeArrowFacingFromTemplate,
+  orientArrowToVelocity,
+  placeArrowMeshAtFacing,
+} from './rendering/presenters/arrowProjectile';
+import {
   createBallistaVisualRig,
   getBallistaArrowLaunchTransform,
   updateBallistaRigTracking,
@@ -2201,8 +2206,7 @@ let coinModelTemplate: THREE.Object3D | null = null;
 let wallModelTemplate: THREE.Object3D | null = null;
 let playerModelTemplate: THREE.Object3D | null = null;
 const playerFacingOffset = { value: 0 };
-const arrowFacingAnchorLocalPos = new THREE.Vector3();
-const arrowFacingForwardLocal = new THREE.Vector3(0, 1, 0);
+let arrowFacing: { anchorLocalPos: THREE.Vector3; forwardLocal: THREE.Vector3 } | null = null;
 const towerBallistaRigs = new Map<Tower, BallistaVisualRig>();
 type RockVisualTemplate = {
   sourceUrl: string;
@@ -2590,7 +2594,7 @@ loadModelWithProgress(
   arrowModelUrl,
   (gltf) => {
     arrowModelTemplate = prepareStaticModelPreserveScale(gltf.scene);
-    updateArrowFacingFromTemplate(arrowModelTemplate);
+    arrowFacing = computeArrowFacingFromTemplate(arrowModelTemplate);
   },
   (error) => {
     console.error('Failed to load arrow model:', error);
@@ -2878,68 +2882,6 @@ const computeFacingYawFromTemplate = (source: THREE.Object3D) => {
   if (mobFacingDirectionScratch.lengthSq() < 1e-9) return 0;
   mobFacingDirectionScratch.normalize();
   return Math.atan2(mobFacingDirectionScratch.x, mobFacingDirectionScratch.z);
-};
-
-const getObjectByNameCaseInsensitive = (
-  source: THREE.Object3D,
-  targetName: string
-) => {
-  const direct = source.getObjectByName(targetName);
-  if (direct) return direct;
-  const lowered = targetName.toLowerCase();
-  let match: THREE.Object3D | null = null;
-  source.traverse((child) => {
-    if (match) return;
-    if ((child.name || '').toLowerCase() !== lowered) return;
-    match = child;
-  });
-  return match;
-};
-
-const findFacingMarker = (source: THREE.Object3D) => {
-  const exact = getObjectByNameCaseInsensitive(source, 'Facing');
-  if (exact) return exact;
-  let prefixMatch: THREE.Object3D | null = null;
-  source.traverse((child) => {
-    if (prefixMatch) return;
-    const name = (child.name || '').toLowerCase();
-    if (!name.startsWith('facing')) return;
-    prefixMatch = child;
-  });
-  return prefixMatch;
-};
-
-const updateArrowFacingFromTemplate = (source: THREE.Object3D) => {
-  source.updateMatrixWorld(true);
-  const facing = findFacingMarker(source);
-  if (!facing) {
-    arrowFacingAnchorLocalPos.set(0, 0, 0);
-    arrowFacingForwardLocal.set(0, 1, 0);
-    return;
-  }
-  const sourceInverse = new THREE.Matrix4().copy(source.matrixWorld).invert();
-  const facingLocalMatrix = new THREE.Matrix4().multiplyMatrices(
-    sourceInverse,
-    facing.matrixWorld
-  );
-  const facingLocalQuaternion = new THREE.Quaternion();
-  const facingLocalScale = new THREE.Vector3();
-  facingLocalMatrix.decompose(
-    arrowFacingAnchorLocalPos,
-    facingLocalQuaternion,
-    facingLocalScale
-  );
-  const directionFromPosition = arrowFacingAnchorLocalPos.clone();
-  const directionFromRotation = new THREE.Vector3(0, 1, 0).applyQuaternion(
-    facingLocalQuaternion
-  );
-  if (directionFromPosition.lengthSq() > 1e-9) {
-    arrowFacingForwardLocal.copy(directionFromPosition).normalize();
-  } else if (directionFromRotation.lengthSq() > 1e-9) {
-    arrowFacingForwardLocal.copy(directionFromRotation).normalize();
-  } else {
-    arrowFacingForwardLocal.set(0, 1, 0);
-  }
 };
 
 const applyMobVisualTemplate = (source: THREE.Object3D) => {
@@ -5083,36 +5025,6 @@ let cachedSelectedMob: Entity | null = null;
 const cachedTowerTargets = new WeakMap<Tower, Entity | null>();
 const trackedDynamicEntities = new Set<Entity>();
 const MOB_HIT_FLASH_MS = 120;
-const arrowFacingDirectionScratch = new THREE.Vector3();
-const arrowOrientSourceAxisScratch = new THREE.Vector3();
-const arrowDesiredFacingQuaternionScratch = new THREE.Quaternion();
-const arrowOffsetWorldScratch = new THREE.Vector3();
-
-const orientArrowToVelocity = (
-  object: THREE.Object3D,
-  velocity: THREE.Vector3
-) => {
-  if (velocity.lengthSq() < 1e-8) return;
-  arrowFacingDirectionScratch.copy(velocity).normalize();
-  // Runtime logs show authored Facing +Y is opposite travel; invert basis once here.
-  arrowOrientSourceAxisScratch.copy(arrowFacingForwardLocal).multiplyScalar(-1);
-  arrowDesiredFacingQuaternionScratch.setFromUnitVectors(
-    arrowOrientSourceAxisScratch,
-    arrowFacingDirectionScratch
-  );
-  object.quaternion.copy(arrowDesiredFacingQuaternionScratch);
-};
-
-const placeArrowMeshAtFacing = (
-  object: THREE.Object3D,
-  facingPosition: THREE.Vector3
-) => {
-  arrowOffsetWorldScratch
-    .copy(arrowFacingAnchorLocalPos)
-    .applyQuaternion(object.quaternion);
-  object.position.copy(facingPosition).sub(arrowOffsetWorldScratch);
-};
-
 const setMobLastHitDirection = (
   mob: MobEntity,
   primaryDirection: THREE.Vector3,
@@ -6534,11 +6446,11 @@ const spawnTowerArrowProjectile = (
   launchQuaternion: THREE.Quaternion,
   launchVelocity: THREE.Vector3
 ) => {
-  if (!arrowModelTemplate) return;
+  if (!arrowModelTemplate || !arrowFacing) return;
   const mesh = arrowModelTemplate.clone(true);
   mesh.quaternion.copy(launchQuaternion);
-  orientArrowToVelocity(mesh, launchVelocity);
-  placeArrowMeshAtFacing(mesh, launchPos);
+  orientArrowToVelocity(mesh, launchVelocity, arrowFacing.forwardLocal);
+  placeArrowMeshAtFacing(mesh, launchPos, arrowFacing.anchorLocalPos);
   scene.add(mesh);
   activeArrowProjectiles.push({
     mesh,
@@ -6575,8 +6487,10 @@ const updateTowerArrowProjectiles = (delta: number) => {
       projectile.velocity.addScaledVector(projectile.gravity, gravityDt);
     }
     projectile.position.addScaledVector(projectile.velocity, delta);
-    orientArrowToVelocity(projectile.mesh, projectile.velocity);
-    placeArrowMeshAtFacing(projectile.mesh, projectile.position);
+    if (arrowFacing) {
+      orientArrowToVelocity(projectile.mesh, projectile.velocity, arrowFacing.forwardLocal);
+      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+    }
 
     projectileStepScratch
       .copy(projectile.position)
@@ -6627,7 +6541,9 @@ const updateTowerArrowProjectiles = (delta: number) => {
 
     if (!hitMob) continue;
     projectile.position.copy(projectileHitPointScratch);
-    placeArrowMeshAtFacing(projectile.mesh, projectile.position);
+    if (arrowFacing) {
+      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+    }
     setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity);
     if (serverAuthoritative) {
       markMobHitFlash(hitMob);
@@ -6654,10 +6570,10 @@ const spawnPlayerArrowProjectile = (
   launchPos: THREE.Vector3,
   launchVelocity: THREE.Vector3
 ) => {
-  if (!arrowModelTemplate) return;
+  if (!arrowModelTemplate || !arrowFacing) return;
   const mesh = arrowModelTemplate.clone(true);
-  orientArrowToVelocity(mesh, launchVelocity);
-  placeArrowMeshAtFacing(mesh, launchPos);
+  orientArrowToVelocity(mesh, launchVelocity, arrowFacing!.forwardLocal);
+  placeArrowMeshAtFacing(mesh, launchPos, arrowFacing!.anchorLocalPos);
   scene.add(mesh);
   activePlayerArrowProjectiles.push({
     mesh,
@@ -6693,8 +6609,10 @@ const updatePlayerArrowProjectiles = (delta: number) => {
       projectile.velocity.addScaledVector(projectile.gravity, gravityDt);
     }
     projectile.position.addScaledVector(projectile.velocity, delta);
-    orientArrowToVelocity(projectile.mesh, projectile.velocity);
-    placeArrowMeshAtFacing(projectile.mesh, projectile.position);
+    if (arrowFacing) {
+      orientArrowToVelocity(projectile.mesh, projectile.velocity, arrowFacing.forwardLocal);
+      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+    }
 
     projectileStepScratch
       .copy(projectile.position)
@@ -6745,7 +6663,9 @@ const updatePlayerArrowProjectiles = (delta: number) => {
 
     if (!hitMob) continue;
     projectile.position.copy(projectileHitPointScratch);
-    placeArrowMeshAtFacing(projectile.mesh, projectile.position);
+    if (arrowFacing) {
+      placeArrowMeshAtFacing(projectile.mesh, projectile.position, arrowFacing.anchorLocalPos);
+    }
     setMobLastHitDirection(hitMob, projectileStepScratch, projectile.velocity);
     if (serverAuthoritative) {
       markMobHitFlash(hitMob);

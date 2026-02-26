@@ -23,12 +23,6 @@ const setShadows = (object: THREE.Object3D) => {
   });
 };
 
-const getRequiredPart = (template: THREE.Object3D, name: string) => {
-  const part = template.getObjectByName(name);
-  if (!part) return null;
-  return part.clone(true);
-};
-
 const getObjectByNameCaseInsensitive = (
   template: THREE.Object3D,
   name: string
@@ -45,13 +39,18 @@ const getObjectByNameCaseInsensitive = (
   return match;
 };
 
+const getPartCaseInsensitive = (template: THREE.Object3D, name: string) => {
+  const part = getObjectByNameCaseInsensitive(template, name);
+  return part ? part.clone(true) : null;
+};
+
 export const createBallistaVisualRig = (
   template: THREE.Object3D
 ): BallistaVisualRig | null => {
-  const base = getRequiredPart(template, 'Base');
-  const harness = getRequiredPart(template, 'Harness');
-  const cradle = getRequiredPart(template, 'Cradle');
-  const arrow = getRequiredPart(template, 'Arrow');
+  const base = getPartCaseInsensitive(template, 'Base');
+  const harness = getPartCaseInsensitive(template, 'Harness');
+  const cradle = getPartCaseInsensitive(template, 'Cradle');
+  const arrow = getPartCaseInsensitive(template, 'Arrow');
   const facing = getObjectByNameCaseInsensitive(template, 'Facing');
   if (!base || !harness || !cradle || !arrow || !facing) return null;
 
@@ -167,6 +166,20 @@ export const updateBallistaRigTracking = (
         MAX_TRACK_PITCH_RAD
       );
     }
+  } else {
+    const idleYaw = 0;
+    const yawDelta =
+      THREE.MathUtils.euclideanModulo(
+        idleYaw - rig.yawGroup.rotation.y + Math.PI,
+        Math.PI * 2
+      ) - Math.PI;
+    const maxYawStep = YAW_TURN_SPEED_RAD_PER_SEC * dt;
+    const clampedYawStep = THREE.MathUtils.clamp(
+      yawDelta,
+      -maxYawStep,
+      maxYawStep
+    );
+    rig.yawGroup.rotation.y += clampedYawStep;
   }
 
   const pitchDelta = desiredPitch - rig.cradlePitchGroup.rotation.z;

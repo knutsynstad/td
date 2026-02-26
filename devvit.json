@@ -11,6 +11,15 @@
       "game": {
         "inline": false,
         "entry": "entrypoints/game/index.html"
+      },
+      "sandbox-splash": {
+        "inline": true,
+        "entry": "entrypoints/sandbox-splash/index.html",
+        "height": "regular"
+      },
+      "sandbox": {
+        "inline": false,
+        "entry": "entrypoints/sandbox/index.html"
       }
     }
   },
@@ -37,6 +46,13 @@
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/create-post"
+      },
+      {
+        "label": "Create Sandbox post",
+        "description": "Create a Model Showcase sandbox post",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/create-sandbox-post"
       },
       {
         "label": "Reset game",
