@@ -197,6 +197,7 @@ import {
   TOWER_TARGET_REFRESH_INTERVAL_FRAMES,
   CASTLE_ENTRY_GOAL_STRIP_HALF_WIDTH_CELLS,
   CASTLE_ROUTE_HALF_WIDTH_CELLS,
+  EVENT_BANNER_DURATION,
 } from './clientConstants';
 import { createSpawnerHelpers } from './rendering/spawnerHelpers';
 import {
@@ -211,25 +212,22 @@ import {
   type BallistaVisualRig,
 } from './rendering/presenters/ballistaRig';
 import { createArrowProjectileSystem } from './rendering/presenters/arrowProjectileSystem';
-import { syncAuthoritativeWaveSpawners } from './domains/gameplay/authoritativeWaveSync';
 import { connectAuthoritativeBridge } from './integrations/authoritativeBridge';
+import {
+  createAuthoritativeSync,
+  type AuthoritativeSync,
+} from './integrations/authoritativeSync';
+import {
+  createHudUpdaters,
+  type EnergyTrail,
+} from './ui/hudUpdaters';
+import { createDisposeScene } from './rendering/disposeScene';
 import {
   fetchCastleCoinsBalance,
   requestCastleCoinsDeposit,
   requestCastleCoinsWithdraw,
 } from './integrations/castleApi';
-import type {
-  EntityDelta,
-  StructureDelta,
-  WaveDelta,
-} from '../shared/game-protocol';
-import {
-  DEFAULT_PLAYER_SPAWN,
-  type MobState as SharedMobState,
-  type StructureState as SharedStructureState,
-  type WaveState as SharedWaveState,
-  type WorldState as SharedWorldState,
-} from '../shared/game-state';
+import { DEFAULT_PLAYER_SPAWN } from '../shared/game-state';
 import {
   assertEnergyInBounds,
   assertMobSpawnerReferences,
@@ -247,17 +245,6 @@ const HITBOX_LAYER = 1;
 const TOWER_BUILD_SIZE = getBuildSizeForMode('tower');
 const TREE_BUILD_SIZE = new THREE.Vector3(2, 2.4, 2);
 type TreeFootprint = 1 | 2 | 3 | 4;
-type RockPlacement = {
-  x: number;
-  z: number;
-  footprintX: number;
-  footprintZ: number;
-  yawQuarterTurns: 0 | 1 | 2 | 3;
-  modelIndex: 0 | 1;
-  mirrorX: boolean;
-  mirrorZ: boolean;
-  verticalScale: number;
-};
 const DEFAULT_TREE_FOOTPRINT: TreeFootprint = 2;
 const clampTreeFootprint = (value: number): TreeFootprint => {
   if (value <= 1) return 1;
@@ -269,11 +256,6 @@ const getTreeScaleForFootprint = (footprint: TreeFootprint) =>
   footprint / DEFAULT_TREE_FOOTPRINT;
 const getTreeBuildSizeForFootprint = (footprint: TreeFootprint) =>
   TREE_BUILD_SIZE.clone().multiplyScalar(getTreeScaleForFootprint(footprint));
-const COIN_PILE_CYLINDER_MIN = 3;
-const COIN_PILE_CYLINDER_MAX = 96;
-const COIN_PILE_MAX_RADIUS = 2.1;
-const COIN_PILE_CLUSTER_MAX_PER_CORNER = 5;
-
 const debugViewState: DebugViewState = {
   worldGrid: false,
   flowField: false,
@@ -1163,15 +1145,6 @@ const applyStructureDamageVisuals = () => {
   }
 };
 
-const syncHudCoinModel = () => {
-  coinHudRoot.clear();
-  if (!coinModelTemplate) return;
-  const hudCoin = coinModelTemplate.clone(true);
-  hudCoin.scale.multiplyScalar(0.85);
-  hudCoin.rotation.y = Math.PI / 7;
-  coinHudRoot.add(hudCoin);
-};
-
 loadModelWithProgress(
   groundModelUrl,
   (gltf) => {
@@ -1314,7 +1287,7 @@ loadModelWithProgress(
   coinModelUrl,
   (gltf) => {
     coinModelTemplate = prepareCoinModel(gltf.scene);
-    syncHudCoinModel();
+    hudUpdaters.syncHudCoinModel();
     setCoinParticleTemplate(coinModelTemplate);
   },
   (error) => {
@@ -1386,7 +1359,7 @@ loadModelWithProgress(
     });
     replaceCastleContent(model);
     updateCastleColliderFromObject(model);
-    updateCastleBankPilesVisual();
+    hudUpdaters.updateCastleBankPilesVisual();
     refreshAllSpawnerPathlines();
   },
   (error) => {
@@ -1403,7 +1376,7 @@ loadModelWithProgress(
     fallback.receiveShadow = true;
     replaceCastleContent(fallback);
     updateCastleColliderFromObject(fallback);
-    updateCastleBankPilesVisual();
+    hudUpdaters.updateCastleBankPilesVisual();
     refreshAllSpawnerPathlines();
   }
 );
@@ -1890,11 +1863,12 @@ const makeNpc = (pos: THREE.Vector3, _color: number, username: string) => {
   return npc;
 };
 
-let authoritativeBridge: Awaited<
-  ReturnType<typeof connectAuthoritativeBridge>
-> | null = null;
+const authoritativeBridgeRef: {
+  current: Awaited<ReturnType<typeof connectAuthoritativeBridge>> | null;
+} = { current: null };
 let authoritativeInitialDataReady = false;
 let authoritativeSelfPlayerId = '';
+const authoritativeSelfPlayerIdRef = { current: '' as string | null };
 let lastNetworkHeartbeatAt = 0;
 let lastMoveIntentSentAt = 0;
 const MOVE_INTENT_MIN_INTERVAL_MS = 100;
@@ -1922,15 +1896,11 @@ const serverMobSampleById = new Map<
     receivedAtPerfMs: number;
   }
 >();
-const serverMobSeenIdsScratch = new Set<string>();
-const serverMobRemovalScratch: string[] = [];
-const serverMobDeltaPosScratch = new THREE.Vector3();
-const serverMobDeltaVelScratch = new THREE.Vector3();
-let pendingFullMobSnapshotId: number | null = null;
-const pendingFullMobSnapshotSeenIds = new Set<string>();
-let serverWaveActive = false;
-let serverLastAckSeq = 0;
-const isServerAuthoritative = () => authoritativeBridge !== null;
+const serverMobMaxHpCache = new Map<string, number>();
+const serverWaveActiveRef = { current: false };
+const serverLastAckSeqRef = { current: 0 };
+const serverStructureResyncInFlightRef = { current: false };
+const isServerAuthoritative = () => authoritativeBridgeRef.current !== null;
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
 const SERVER_MOB_DEAD_STALE_REMOVE_MS = 1000;
@@ -1940,709 +1910,86 @@ const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
 const SERVER_HEARTBEAT_INTERVAL_MS = 200;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS = 45_000;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS = 7_500;
-let serverClockSkewMs = 0;
-let serverClockSkewInitialized = false;
 let nextServerStructureResyncAtMs =
   performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
-let serverStructureResyncInFlight = false;
-const syncServerClockSkew = (serverEpochMs: number) => {
-  const sample = serverEpochMs - Date.now();
-  if (!serverClockSkewInitialized) {
-    serverClockSkewMs = sample;
-    serverClockSkewInitialized = true;
-    return;
-  }
-  serverClockSkewMs = serverClockSkewMs * 0.9 + sample * 0.1;
-};
-const toPerfTime = (serverEpochMs: number) =>
-  performance.now() + (serverEpochMs - (Date.now() + serverClockSkewMs));
-
-const upsertRemoteNpc = (
-  playerId: string,
-  username: string,
-  position: { x: number; z: number }
-) => {
-  if (playerId === authoritativeSelfPlayerId) return;
-  const existing = remotePlayersById.get(playerId);
-  if (existing) {
-    existing.username = username;
-    existing.target.set(position.x, 0, position.z);
-    return;
-  }
-  const npc = makeNpc(
-    new THREE.Vector3(position.x, 0, position.z),
-    0xffc857,
-    username
-  );
-  remotePlayersById.set(playerId, npc);
-};
-
-const removeRemoteNpc = (playerId: string) => {
-  const npc = remotePlayersById.get(playerId);
-  if (!npc) return;
-  scene.remove(npc.mesh);
-  const index = npcs.indexOf(npc);
-  if (index >= 0) {
-    npcs.splice(index, 1);
-  }
-  remotePlayersById.delete(playerId);
-};
-
-const syncServerWaveSpawners = (
-  wave: SharedWaveState,
-  routesIncluded = true
-) => {
-  syncAuthoritativeWaveSpawners({
-    wave,
-    routesIncluded,
-    worldBounds: WORLD_BOUNDS,
-    castleRouteHalfWidthCells: CASTLE_ROUTE_HALF_WIDTH_CELLS,
-    staticColliders,
-    activeWaveSpawners,
-    spawnerById,
-    spawnerPathlineCache,
-    pathTilePositions,
-    clearWaveOverlays,
-    rebuildPathTileLayer,
-    toCastleDisplayPoints,
-    getStagingIslandCenter,
-    getSpawnerGatePoint,
-    getSpawnerBridgeExitPoint,
-    getSpawnerEntryPoint,
-    getSpawnContainerCorners,
-    getSpawnerAnchorId,
-    getSpawnerOutwardNormal,
-    upsertSpawnerRouteOverlay: (spawnerId, points, routeState) => {
-      spawnerRouteOverlay.upsert(spawnerId, points, routeState);
-    },
-    upsertSpawnContainerOverlay: (spawnerId, corners) => {
-      spawnContainerOverlay.upsert(spawnerId, corners);
-    },
-    upsertStagingIslandsOverlay: (
-      anchorId,
-      center,
-      outwardNormal,
-      gateOpen,
-      hasMobs
-    ) => {
-      stagingIslandsOverlay.upsert(
-        anchorId,
-        center,
-        outwardNormal,
-        gateOpen,
-        hasMobs
-      );
-    },
-  });
-};
-
-const syncServerMeta = (
-  wave: SharedWaveState,
-  world: SharedWorldState['meta']
-) => {
-  gameState.wave = wave.wave;
-  gameState.lives = world.lives;
-  gameState.energy = Math.max(0, Math.min(ENERGY_CAP, world.energy));
-  serverWaveActive = wave.active;
-  gameState.nextWaveAt =
-    wave.nextWaveAtMs > 0 ? toPerfTime(wave.nextWaveAtMs) : 0;
-  syncServerWaveSpawners(wave);
-};
-
-const removeServerStructure = (structureId: string) => {
-  const collider = serverStructureById.get(structureId);
-  if (!collider) return;
-  selectedStructures.delete(collider);
-  structureStore.removeStructureCollider(collider);
-  serverStructureById.delete(structureId);
-};
-
-const upsertServerStructure = (entry: SharedStructureState) => {
-  const existingCollider = serverStructureById.get(entry.structureId);
-  const targetCenter = new THREE.Vector3(entry.center.x, 0, entry.center.z);
-  if (existingCollider) {
-    const state = structureStore.structureStates.get(existingCollider);
-    if (state) {
-      state.hp = entry.hp;
-      state.maxHp = entry.maxHp;
-      state.mesh.position.set(
-        targetCenter.x,
-        state.mesh.position.y,
-        targetCenter.z
-      );
-      existingCollider.center.set(
-        targetCenter.x,
-        existingCollider.center.y,
-        targetCenter.z
-      );
-    }
-    return;
-  }
-
-  if (entry.type === 'wall') {
-    const size = getBuildSizeForMode('wall');
-    const half = size.clone().multiplyScalar(0.5);
-    const center = snapCenterToBuildGrid(targetCenter, size);
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(size.x, size.y, size.z),
-      new THREE.MeshStandardMaterial({ color: 0x8b8b8b })
-    );
-    mesh.position.copy(center);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    scene.add(mesh);
-    if (wallModelTemplate) {
-      applyWallVisualToMesh(mesh);
-    }
-    const collider = structureStore.addWallCollider(
-      center,
-      half,
-      mesh,
-      entry.maxHp,
-      {
-        playerBuilt: true,
-        createdAtMs: entry.createdAtMs,
-        lastDecayTickMs: entry.createdAtMs,
-      }
-    );
-    const state = structureStore.structureStates.get(collider);
-    if (state) {
-      state.hp = entry.hp;
-      state.maxHp = entry.maxHp;
-    }
-    serverStructureById.set(entry.structureId, collider);
-    return;
-  }
-
-  if (entry.type === 'tower') {
-    const size = getBuildSizeForMode('tower');
-    const half = size.clone().multiplyScalar(0.5);
-    const center = snapCenterToBuildGrid(targetCenter, size);
-    const tower = createTowerAt(center, 'base', entry.ownerId || 'Server');
-    const collider = structureStore.addTowerCollider(
-      center,
-      half,
-      tower.mesh,
-      tower,
-      entry.maxHp,
-      {
-        playerBuilt: true,
-        createdAtMs: entry.createdAtMs,
-        lastDecayTickMs: entry.createdAtMs,
-      }
-    );
-    const state = structureStore.structureStates.get(collider);
-    if (state) {
-      state.hp = entry.hp;
-      state.maxHp = entry.maxHp;
-    }
-    serverStructureById.set(entry.structureId, collider);
-    return;
-  }
-
-  if (entry.type === 'tree') {
-    const treeFootprint = clampTreeFootprint(
-      entry.metadata?.treeFootprint ?? 2
-    );
-    const size = getTreeBuildSizeForFootprint(treeFootprint);
-    const half = size.clone().multiplyScalar(0.5);
-    const center = snapCenterToBuildGrid(targetCenter, size);
-    const hitboxMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4f8f46,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-    });
-    hitboxMaterial.colorWrite = false;
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(size.x, size.y, size.z),
-      hitboxMaterial
-    );
-    mesh.position.copy(center);
-    mesh.userData.treeFootprint = treeFootprint;
-    mesh.layers.set(HITBOX_LAYER);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    if (treeModelTemplate) {
-      applyTreeVisualToMesh(mesh);
-    }
-    scene.add(mesh);
-    const collider = structureStore.addTreeCollider(
-      center,
-      half,
-      mesh,
-      entry.maxHp,
-      {
-        playerBuilt: entry.ownerId !== 'Map',
-        createdAtMs: entry.createdAtMs,
-        lastDecayTickMs: entry.createdAtMs,
-      }
-    );
-    const state = structureStore.structureStates.get(collider);
-    if (state) {
-      state.hp = entry.hp;
-      state.maxHp = entry.maxHp;
-    }
-    serverStructureById.set(entry.structureId, collider);
-    return;
-  }
-
-  if (entry.type === 'rock') {
-    const rockMeta = entry.metadata?.rock;
-    const placement: RockPlacement = {
-      x: targetCenter.x,
-      z: targetCenter.z,
-      footprintX: Math.max(1, rockMeta?.footprintX ?? 1),
-      footprintZ: Math.max(1, rockMeta?.footprintZ ?? 1),
-      yawQuarterTurns: rockMeta?.yawQuarterTurns ?? 0,
-      modelIndex: rockMeta?.modelIndex ?? 0,
-      mirrorX: rockMeta?.mirrorX ?? false,
-      mirrorZ: rockMeta?.mirrorZ ?? false,
-      verticalScale: rockMeta?.verticalScale ?? 1,
-    };
-    const size = new THREE.Vector3(
-      Math.max(1, placement.footprintX),
-      ROCK_BASE_HEIGHT,
-      Math.max(1, placement.footprintZ)
-    );
-    const half = size.clone().multiplyScalar(0.5);
-    const snapped = snapCenterToBuildGrid(targetCenter, size);
-    const colliderCenter = snapped.clone().setY(half.y);
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(size.x, size.y, size.z),
-      new THREE.MeshStandardMaterial({ color: 0x646d79 })
-    );
-    mesh.position.copy(colliderCenter);
-    mesh.userData.rockModelIndex = placement.modelIndex;
-    mesh.userData.rockYawQuarterTurns = placement.yawQuarterTurns;
-    mesh.userData.rockFootprintX = placement.footprintX;
-    mesh.userData.rockFootprintZ = placement.footprintZ;
-    mesh.userData.rockMirrorX = placement.mirrorX;
-    mesh.userData.rockMirrorZ = placement.mirrorZ;
-    mesh.userData.rockVerticalScale = placement.verticalScale;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    applyRockVisualToMesh(mesh);
-    scene.add(mesh);
-    const collider = structureStore.addRockCollider(
-      colliderCenter,
-      half,
-      mesh,
-      entry.maxHp,
-      {
-        playerBuilt: entry.ownerId !== 'Map',
-        createdAtMs: entry.createdAtMs,
-        lastDecayTickMs: entry.createdAtMs,
-      }
-    );
-    const state = structureStore.structureStates.get(collider);
-    if (state) {
-      state.hp = entry.hp;
-      state.maxHp = entry.maxHp;
-    }
-    serverStructureById.set(entry.structureId, collider);
-    return;
-  }
-};
-
-const applyServerStructureDelta = (delta: StructureDelta) => {
-  for (const structureId of delta.removes) {
-    removeServerStructure(structureId);
-  }
-  for (const structure of delta.upserts) {
-    upsertServerStructure(structure);
-  }
-  if (delta.requiresPathRefresh && !isServerAuthoritative()) {
-    refreshAllSpawnerPathlines();
-  }
-};
-
-const removeServerMobById = (mobId: string) => {
-  const mob = serverMobsById.get(mobId);
-  const index = mob
-    ? mobs.indexOf(mob)
-    : mobs.findIndex((entry) => entry.mobId === mobId);
-  if (index >= 0) {
-    mobs.splice(index, 1);
-  }
-  serverMobsById.delete(mobId);
-  serverMobInterpolationById.delete(mobId);
-  serverMobSampleById.delete(mobId);
-  serverMobMaxHpCache.delete(mobId);
-};
-
-const upsertServerMobFromSnapshot = (mobState: SharedMobState) => {
-  const existing = serverMobsById.get(mobState.mobId);
-  if (existing) {
-    existing.mesh.position.set(
-      mobState.position.x,
-      existing.baseY,
-      mobState.position.z
-    );
-    existing.target.set(mobState.position.x, 0, mobState.position.z);
-    existing.velocity.set(mobState.velocity.x, 0, mobState.velocity.z);
-    existing.hp = mobState.hp;
-    existing.maxHp = mobState.maxHp;
-    return;
-  }
-  const mesh = new THREE.Mesh(mobLogicGeometry, mobLogicMaterial);
-  mesh.position.set(mobState.position.x, MOB_HEIGHT * 0.5, mobState.position.z);
-  const mob: MobEntity = {
-    mesh,
-    radius: MOB_WIDTH * 0.5,
-    speed: MOB_SPEED,
-    velocity: new THREE.Vector3(mobState.velocity.x, 0, mobState.velocity.z),
-    target: new THREE.Vector3(mobState.position.x, 0, mobState.position.z),
-    kind: 'mob',
-    mobId: mobState.mobId,
-    hp: mobState.hp,
-    maxHp: mobState.maxHp,
-    baseY: MOB_HEIGHT * 0.5,
-    staged: false,
-    siegeAttackCooldown: 0,
-    unreachableTime: 0,
-    berserkMode: false,
-    berserkTarget: null,
-    laneBlocked: false,
-  };
-  mobs.push(mob);
-  serverMobsById.set(mobState.mobId, mob);
-};
-
-const DQ = 1 / 100;
-const dequantize = (v: number): number => v * DQ;
-
-const DEFAULT_MOB_MAX_HP = 100;
-const serverMobMaxHpCache = new Map<string, number>();
-
-const applyServerMobUpdateValues = (
-  mobId: string,
-  posX: number,
-  posZ: number,
-  velX: number,
-  velZ: number,
-  hp: number,
-  maxHp: number | undefined,
-  delta: EntityDelta
-) => {
-  const resolvedMaxHp =
-    maxHp ?? serverMobMaxHpCache.get(mobId) ?? DEFAULT_MOB_MAX_HP;
-  if (maxHp !== undefined) {
-    serverMobMaxHpCache.set(mobId, maxHp);
-  }
-
-  const existing = serverMobsById.get(mobId);
-  if (!existing) {
-    upsertServerMobFromSnapshot({
-      mobId,
-      position: { x: posX, z: posZ },
-      velocity: { x: velX, z: velZ },
-      hp,
-      maxHp: resolvedMaxHp,
-      spawnerId: '',
-      routeIndex: 0,
-    });
-    serverMobSampleById.set(mobId, {
-      serverTimeMs: delta.serverTimeMs,
-      position: new THREE.Vector3(posX, MOB_HEIGHT * 0.5, posZ),
-      velocity: new THREE.Vector3(velX, 0, velZ),
-      receivedAtPerfMs: performance.now(),
-    });
-    return;
-  }
-
-  existing.hp = hp;
-  existing.maxHp = resolvedMaxHp;
-  const prev = serverMobSampleById.get(mobId);
-  const currentPos = serverMobDeltaPosScratch.set(posX, existing.baseY, posZ);
-  const currentVel = serverMobDeltaVelScratch.set(velX, 0, velZ);
-  const hasPrev =
-    !!prev &&
-    Number.isFinite(prev.serverTimeMs) &&
-    delta.serverTimeMs > prev.serverTimeMs;
-  const fromServerMs = hasPrev
-    ? prev.serverTimeMs
-    : delta.serverTimeMs - Math.max(1, delta.tickMs);
-  const toServerMs = delta.serverTimeMs;
-
-  const interpolation = serverMobInterpolationById.get(mobId);
-  if (interpolation) {
-    if (hasPrev && prev) {
-      interpolation.from.copy(prev.position);
-    } else {
-      interpolation.from
-        .copy(currentPos)
-        .addScaledVector(currentVel, -delta.tickMs / 1000);
-    }
-    interpolation.to.copy(currentPos);
-    interpolation.velocity.copy(currentVel);
-    interpolation.t0 = toPerfTime(fromServerMs);
-    interpolation.t1 = toPerfTime(toServerMs);
-  } else {
-    serverMobInterpolationById.set(mobId, {
-      from:
-        hasPrev && prev
-          ? prev.position.clone()
-          : currentPos
-              .clone()
-              .addScaledVector(currentVel, -delta.tickMs / 1000),
-      to: currentPos.clone(),
-      velocity: currentVel.clone(),
-      t0: toPerfTime(fromServerMs),
-      t1: toPerfTime(toServerMs),
-    });
-  }
-
-  const sample = serverMobSampleById.get(mobId);
-  if (sample) {
-    sample.serverTimeMs = delta.serverTimeMs;
-    sample.position.copy(currentPos);
-    sample.velocity.copy(currentVel);
-    sample.receivedAtPerfMs = performance.now();
-  } else {
-    serverMobSampleById.set(mobId, {
-      serverTimeMs: delta.serverTimeMs,
-      position: currentPos.clone(),
-      velocity: currentVel.clone(),
-      receivedAtPerfMs: performance.now(),
-    });
-  }
-};
-
-const applyMobPoolEntries = (
-  pool: NonNullable<EntityDelta['mobPool']>,
-  indices: number[] | undefined,
-  delta: EntityDelta,
-  hasMaxHp: boolean
-) => {
-  const poolLen = Math.min(
-    pool.ids.length,
-    pool.px.length,
-    pool.pz.length,
-    pool.vx.length,
-    pool.vz.length,
-    pool.hp.length
-  );
-  const iter = indices ?? Array.from({ length: poolLen }, (_, i) => i);
-  for (const idx of iter) {
-    if (idx < 0 || idx >= poolLen) continue;
-    const mobId = String(pool.ids[idx]!);
-    if (serverMobSeenIdsScratch.has(mobId)) continue;
-    serverMobSeenIdsScratch.add(mobId);
-    applyServerMobUpdateValues(
-      mobId,
-      dequantize(pool.px[idx]!),
-      dequantize(pool.pz[idx]!),
-      dequantize(pool.vx[idx]!),
-      dequantize(pool.vz[idx]!),
-      pool.hp[idx]!,
-      hasMaxHp && pool.maxHp ? pool.maxHp[idx] : undefined,
-      delta
-    );
-  }
-};
-
-const applyServerMobDelta = (delta: EntityDelta) => {
-  syncServerClockSkew(delta.serverTimeMs);
-  serverMobSeenIdsScratch.clear();
-
-  const pool = delta.mobPool;
-  if (pool) {
-    const isFullSnapshot = !!delta.fullMobList;
-    if (isFullSnapshot) {
-      applyMobPoolEntries(pool, undefined, delta, true);
-    } else {
-      const slices = delta.mobSlices;
-      if (slices) {
-        applyMobPoolEntries(pool, slices.base, delta, false);
-        applyMobPoolEntries(pool, slices.nearPlayers, delta, false);
-        applyMobPoolEntries(pool, slices.castleThreats, delta, false);
-        applyMobPoolEntries(pool, slices.recentlyDamaged, delta, false);
-      } else {
-        applyMobPoolEntries(pool, undefined, delta, false);
-      }
-    }
-  }
-
-  if (delta.fullMobList) {
-    const chunkCount = Math.max(1, delta.fullMobSnapshotChunkCount ?? 1);
-    const chunkIndex = Math.max(0, delta.fullMobSnapshotChunkIndex ?? 0);
-    const snapshotId = delta.fullMobSnapshotId ?? delta.tickSeq;
-    if (chunkCount > 1) {
-      const startsNewSnapshot =
-        pendingFullMobSnapshotId !== snapshotId || chunkIndex === 0;
-      if (startsNewSnapshot) {
-        pendingFullMobSnapshotId = snapshotId;
-        pendingFullMobSnapshotSeenIds.clear();
-      }
-      for (const mobId of serverMobSeenIdsScratch) {
-        pendingFullMobSnapshotSeenIds.add(mobId);
-      }
-      const isFinalChunk = chunkIndex >= chunkCount - 1;
-      if (isFinalChunk) {
-        serverMobRemovalScratch.length = 0;
-        for (const mobId of serverMobsById.keys()) {
-          if (pendingFullMobSnapshotSeenIds.has(mobId)) continue;
-          serverMobRemovalScratch.push(mobId);
-        }
-        for (const mobId of serverMobRemovalScratch) {
-          removeServerMobById(mobId);
-        }
-        pendingFullMobSnapshotId = null;
-        pendingFullMobSnapshotSeenIds.clear();
-      }
-    } else {
-      serverMobRemovalScratch.length = 0;
-      for (const mobId of serverMobsById.keys()) {
-        if (serverMobSeenIdsScratch.has(mobId)) continue;
-        serverMobRemovalScratch.push(mobId);
-      }
-      for (const mobId of serverMobRemovalScratch) {
-        removeServerMobById(mobId);
-      }
-      pendingFullMobSnapshotId = null;
-      pendingFullMobSnapshotSeenIds.clear();
-    }
-  } else if (pendingFullMobSnapshotId === null) {
-    pendingFullMobSnapshotSeenIds.clear();
-  }
-  for (const numId of delta.despawnedMobIds) {
-    const mobId = String(numId);
-    const mob = serverMobsById.get(mobId);
-    if (mob) {
-      spawnMobDeathVisual(mob);
-    }
-    removeServerMobById(mobId);
-    serverMobMaxHpCache.delete(mobId);
-  }
-};
-
-const applyServerWaveDelta = (delta: WaveDelta) => {
-  gameState.wave = delta.wave.wave;
-  serverWaveActive = delta.wave.active;
-  gameState.nextWaveAt =
-    delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0;
-  syncServerWaveSpawners(delta.wave, delta.routesIncluded ?? true);
-};
-
-const applyServerSnapshot = (snapshot: SharedWorldState) => {
-  syncServerMeta(snapshot.wave, snapshot.meta);
-
-  const snapshotStructureIds = new Set(Object.keys(snapshot.structures));
-  for (const structureId of Array.from(serverStructureById.keys())) {
-    if (!snapshotStructureIds.has(structureId)) {
-      removeServerStructure(structureId);
-    }
-  }
-  for (const structure of Object.values(snapshot.structures)) {
-    upsertServerStructure(structure);
-  }
-
-  const snapshotMobIds = new Set(Object.keys(snapshot.mobs));
-  for (let i = mobs.length - 1; i >= 0; i -= 1) {
-    const mob = mobs[i]!;
-    const mobId = mob.mobId;
-    if (mobId && snapshotMobIds.has(mobId)) continue;
-    mobs.splice(i, 1);
-  }
-  serverMobsById.clear();
-  serverMobInterpolationById.clear();
-  serverMobSampleById.clear();
-  for (const mob of Object.values(snapshot.mobs)) {
-    upsertServerMobFromSnapshot(mob);
-    serverMobSampleById.set(mob.mobId, {
-      serverTimeMs: snapshot.meta.lastTickMs,
-      position: new THREE.Vector3(
-        mob.position.x,
-        MOB_HEIGHT * 0.5,
-        mob.position.z
-      ),
-      velocity: new THREE.Vector3(mob.velocity.x, 0, mob.velocity.z),
-      receivedAtPerfMs: performance.now(),
-    });
-  }
-};
-
-const updateServerMobInterpolation = (now: number) => {
-  const staleMobIds: string[] = [];
-  for (const [mobId, sample] of serverMobSampleById.entries()) {
-    const mob = serverMobsById.get(mobId);
-    if (!mob) {
-      staleMobIds.push(mobId);
-      continue;
-    }
-    const staleMs = now - sample.receivedAtPerfMs;
-    const sampleIsFinite =
-      Number.isFinite(sample.position.x) &&
-      Number.isFinite(sample.position.z) &&
-      Number.isFinite(sample.velocity.x) &&
-      Number.isFinite(sample.velocity.z);
-    if (!sampleIsFinite) {
-      staleMobIds.push(mobId);
-      continue;
-    }
-    if (staleMs > SERVER_MOB_HARD_STALE_REMOVE_MS) {
-      staleMobIds.push(mobId);
-      continue;
-    }
-    if ((mob.hp ?? 1) <= 0 && staleMs > SERVER_MOB_DEAD_STALE_REMOVE_MS) {
-      staleMobIds.push(mobId);
-      continue;
-    }
-    if (serverWaveActive && staleMs > SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS) {
-      staleMobIds.push(mobId);
-      continue;
-    }
-    if (!serverWaveActive && staleMs > SERVER_MOB_POST_WAVE_STALE_REMOVE_MS) {
-      staleMobIds.push(mobId);
-    }
-  }
-  for (const mobId of staleMobIds) {
-    removeServerMobById(mobId);
-  }
-
-  const renderNow = now - SERVER_MOB_INTERPOLATION_BACKTIME_MS;
-  for (const [mobId, entry] of serverMobInterpolationById.entries()) {
-    const mob = serverMobsById.get(mobId);
-    if (!mob) continue;
-    const duration = Math.max(1, entry.t1 - entry.t0);
-    const t = THREE.MathUtils.clamp((renderNow - entry.t0) / duration, 0, 1);
-    mob.mesh.position.lerpVectors(entry.from, entry.to, t);
-    if (renderNow > entry.t1) {
-      const extrapolationMs = Math.min(
-        SERVER_MOB_EXTRAPOLATION_MAX_MS,
-        renderNow - entry.t1
-      );
-      if (extrapolationMs > 0) {
-        mob.mesh.position.x += entry.velocity.x * (extrapolationMs / 1000);
-        mob.mesh.position.z += entry.velocity.z * (extrapolationMs / 1000);
-      }
-    }
-    mob.target.set(entry.to.x, 0, entry.to.z);
-    const vx = (entry.to.x - entry.from.x) / (duration / 1000);
-    const vz = (entry.to.z - entry.from.z) / (duration / 1000);
-    mob.velocity.set(
-      Number.isFinite(vx) ? vx : 0,
-      0,
-      Number.isFinite(vz) ? vz : 0
-    );
-  }
-};
+let authoritativeSync: AuthoritativeSync;
 
 const setupAuthoritativeBridge = async () => {
-  if (authoritativeBridge) {
+  if (authoritativeBridgeRef.current) {
     return;
   }
   try {
-    authoritativeBridge = await connectAuthoritativeBridge({
+    if (!authoritativeSync) {
+      authoritativeSync = createAuthoritativeSync({
+        mobs,
+        npcs,
+        selectedStructures,
+        gameState,
+        serverStructureById,
+        serverMobsById,
+        serverMobInterpolationById,
+        serverMobSampleById,
+        serverMobMaxHpCache,
+        remotePlayersById,
+        activeWaveSpawners,
+        spawnerById,
+        serverWaveActiveRef,
+        serverLastAckSeqRef,
+        structureStore,
+        scene,
+        staticColliders,
+        authoritativeSelfPlayerIdRef,
+        mobLogicGeometry,
+        mobLogicMaterial,
+        MOB_HEIGHT,
+        MOB_WIDTH,
+        MOB_SPEED,
+        createTowerAt,
+        applyWallVisualToMesh,
+        applyTreeVisualToMesh,
+        applyRockVisualToMesh,
+        getBuildSizeForMode,
+        snapCenterToBuildGrid,
+        getTreeBuildSizeForFootprint,
+        clampTreeFootprint,
+        HITBOX_LAYER,
+        ROCK_BASE_HEIGHT,
+        clearWaveOverlays,
+        rebuildPathTileLayer,
+        refreshAllSpawnerPathlines,
+        toCastleDisplayPoints,
+        spawnerHelpers,
+        spawnerRouteOverlay,
+        spawnContainerOverlay,
+        stagingIslandsOverlay,
+        pathTilePositions,
+        spawnerPathlineCache,
+        makeNpc,
+        spawnMobDeathVisual,
+        isServerAuthoritative,
+        getWallModelTemplate: () => wallModelTemplate,
+        getTreeModelTemplate: () => treeModelTemplate,
+        WORLD_BOUNDS,
+        CASTLE_ROUTE_HALF_WIDTH_CELLS,
+        ENERGY_CAP,
+        SERVER_MOB_INTERPOLATION_BACKTIME_MS,
+        SERVER_MOB_EXTRAPOLATION_MAX_MS,
+        SERVER_MOB_DEAD_STALE_REMOVE_MS,
+        SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS,
+        SERVER_MOB_POST_WAVE_STALE_REMOVE_MS,
+        SERVER_MOB_HARD_STALE_REMOVE_MS,
+      });
+    }
+    authoritativeBridgeRef.current = await connectAuthoritativeBridge({
       onSnapshot: (snapshot) => {
-        syncServerClockSkew(snapshot.meta.lastTickMs);
-        applyServerSnapshot(snapshot);
+        authoritativeSync.syncServerClockSkew(snapshot.meta.lastTickMs);
+        authoritativeSync.applyServerSnapshot(snapshot);
         authoritativeInitialDataReady = true;
         startGameWhenReady?.();
       },
       onSelfReady: (playerId, username, position) => {
         authoritativeSelfPlayerId = playerId;
+        authoritativeSelfPlayerIdRef.current = playerId;
         player.username = username;
         player.mesh.position.set(position.x, player.baseY, position.z);
         player.target.set(position.x, 0, position.z);
@@ -2650,42 +1997,45 @@ const setupAuthoritativeBridge = async () => {
         lastMoveIntentTarget.z = position.z;
       },
       onRemoteJoin: (playerId, username, position) => {
-        upsertRemoteNpc(playerId, username, position);
+        authoritativeSync.upsertRemoteNpc(playerId, username, position);
       },
       onRemoteLeave: (playerId) => {
-        removeRemoteNpc(playerId);
+        authoritativeSync.removeRemoteNpc(playerId);
       },
       onPlayerMove: (playerId, username, next) => {
         if (playerId === authoritativeSelfPlayerId) {
           return;
         }
-        upsertRemoteNpc(playerId, username, next);
+        authoritativeSync.upsertRemoteNpc(playerId, username, next);
       },
       onMobDelta: (delta) => {
-        applyServerMobDelta(delta);
+        authoritativeSync.applyServerMobDelta(delta);
       },
       onStructureDelta: (delta) => {
-        applyServerStructureDelta(delta);
+        authoritativeSync.applyServerStructureDelta(delta);
       },
       onWaveDelta: (delta) => {
-        applyServerWaveDelta(delta);
+        authoritativeSync.applyServerWaveDelta(delta);
       },
       onAck: (_tickSeq, _worldVersion, ackSeq) => {
-        serverLastAckSeq = Math.max(serverLastAckSeq, ackSeq);
+        serverLastAckSeqRef.current = Math.max(
+          serverLastAckSeqRef.current,
+          ackSeq
+        );
       },
       onCoinBalance: (coins) => {
         gameState.energy = Math.max(0, Math.min(ENERGY_CAP, coins));
       },
       onResyncRequired: () => {
-        if (!authoritativeBridge) return;
-        void authoritativeBridge.resync().catch((error) => {
+        if (!authoritativeBridgeRef.current) return;
+        void authoritativeBridgeRef.current.resync().catch((error) => {
           console.error('Failed to resync authoritative snapshot', error);
         });
       },
     });
     nextServerStructureResyncAtMs =
       performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
-    serverStructureResyncInFlight = false;
+    serverStructureResyncInFlightRef.current = false;
     void syncCastleCoinsFromServer();
   } catch (error) {
     console.error('Failed to connect authoritative bridge', error);
@@ -2805,30 +2155,6 @@ const keyboardForward = new THREE.Vector3();
 const keyboardRight = new THREE.Vector3();
 const keyboardMoveDir = new THREE.Vector3();
 let wasKeyboardMoving = false;
-const EVENT_BANNER_DURATION = 2.4;
-
-type EnergyTrail = {
-  mesh: THREE.Object3D;
-  materials: THREE.Material[];
-  startX: number;
-  startY: number;
-  control1X: number;
-  control1Y: number;
-  control2X: number;
-  control2Y: number;
-  endX: number;
-  endY: number;
-  elapsed: number;
-  duration: number;
-  reward: number;
-  spinStartDeg: number;
-  spinTotalDeg: number;
-  pitchStartDeg: number;
-  pitchTotalDeg: number;
-  rollStartDeg: number;
-  rollTotalDeg: number;
-  baseScale: number;
-};
 
 type FloatingDamageText = {
   el: HTMLDivElement;
@@ -2915,156 +2241,14 @@ damageTextContainer.style.zIndex = '1200';
 app.appendChild(damageTextContainer);
 
 const activeEnergyTrails: EnergyTrail[] = [];
+const isMinimapExpandedRef = { current: false };
+const minimapEmbellishAlphaRef = { current: 0 };
 const activeDamageTexts: FloatingDamageText[] = [];
 const mobDeathVisuals = createMobDeathVisualSystem(scene);
 const clearMobDeathVisuals = mobDeathVisuals.clear;
 const spawnMobDeathVisual = (mob: MobEntity) =>
   mobDeathVisuals.spawn(mob, mobDeathVisualTemplate, mobInstanceGroundOffsetY, mobInstanceHeadingOffset);
 const updateMobDeathVisuals = mobDeathVisuals.update;
-
-const updateCoinHudView = (delta: number) => {
-  const rect = coinHudCanvasEl.getBoundingClientRect();
-  const width = Math.max(1, Math.round(rect.width));
-  const height = Math.max(1, Math.round(rect.height));
-  coinHudRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  coinHudRenderer.setSize(width, height, false);
-  coinHudCamera.aspect = width / height;
-  coinHudCamera.updateProjectionMatrix();
-  if (coinHudRoot.children.length > 0) {
-    const spinSpeed = 1.75;
-    coinHudRoot.rotation.y += delta * spinSpeed;
-  }
-  coinHudRenderer.render(coinHudScene, coinHudCamera);
-};
-
-const syncCoinTrailViewport = () => {
-  coinTrailRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  coinTrailRenderer.setSize(window.innerWidth, window.innerHeight, false);
-  coinTrailCamera.left = 0;
-  coinTrailCamera.right = window.innerWidth;
-  coinTrailCamera.top = window.innerHeight;
-  coinTrailCamera.bottom = 0;
-  coinTrailCamera.updateProjectionMatrix();
-};
-
-const syncMinimapCanvasSize = () => {
-  const rect = minimapCanvasEl.getBoundingClientRect();
-  const pixelRatioCap =
-    isMinimapExpanded || minimapEmbellishAlpha > 0.02 ? 3.5 : 2;
-  const pixelRatio = Math.max(
-    1,
-    Math.min(window.devicePixelRatio, pixelRatioCap)
-  );
-  const width = Math.max(1, Math.round(rect.width * pixelRatio));
-  const height = Math.max(1, Math.round(rect.height * pixelRatio));
-  if (minimapCanvasEl.width !== width || minimapCanvasEl.height !== height) {
-    minimapCanvasEl.width = width;
-    minimapCanvasEl.height = height;
-  }
-};
-
-const drawMinimap = () => {
-  if (!minimapCtx) return;
-  const width = minimapCanvasEl.width;
-  const height = minimapCanvasEl.height;
-  if (width <= 0 || height <= 0) return;
-  const minDimension = Math.min(width, height);
-  const baseMarkerScale = Math.max(1, minDimension / 84);
-  // Scale down markers on large maps; smooth as canvas resizes during expand/collapse
-  const markerScale = baseMarkerScale * Math.min(1, 200 / minDimension);
-
-  minimapCtx.clearRect(0, 0, width, height);
-  // No fill - paper effect (wrap bg + ::before) shows through
-
-  // Keep minimap orientation aligned with the camera view.
-  const forward3 = camera.getWorldDirection(new THREE.Vector3());
-  const forward2 = new THREE.Vector2(forward3.x, forward3.z);
-  if (forward2.lengthSq() <= 1e-5) {
-    forward2.set(0, -1);
-  } else {
-    forward2.normalize();
-  }
-  const right2 = new THREE.Vector2(-forward2.y, forward2.x);
-  const axisExtent = WORLD_BOUNDS * Math.SQRT2;
-
-  const worldToMap = (x: number, z: number) => {
-    const rx = (x * right2.x + z * right2.y) / axisExtent;
-    const ry = (x * forward2.x + z * forward2.y) / axisExtent;
-    return {
-      x: clamp((rx + 1) * 0.5, 0, 1) * width,
-      y: clamp(1 - (ry + 1) * 0.5, 0, 1) * height,
-    };
-  };
-
-  const center = worldToMap(0, 0);
-  const castleIconSize = Math.max(10, 10 * markerScale);
-  if (minimapCastleIcon.complete && minimapCastleIcon.naturalWidth > 0) {
-    minimapCtx.drawImage(
-      minimapCastleIcon,
-      center.x - castleIconSize * 0.5,
-      center.y - castleIconSize * 0.5,
-      castleIconSize,
-      castleIconSize
-    );
-  } else {
-    // Fallback marker before the icon asset has loaded.
-    minimapCtx.fillStyle = '#f0d066';
-    minimapCtx.fillRect(
-      center.x - castleIconSize * 0.35,
-      center.y - castleIconSize * 0.35,
-      castleIconSize * 0.7,
-      castleIconSize * 0.7
-    );
-  }
-
-  const playerPoint = worldToMap(
-    player.mesh.position.x,
-    player.mesh.position.z
-  );
-  minimapCtx.fillStyle = '#62ff9a';
-  minimapCtx.beginPath();
-  minimapCtx.arc(
-    playerPoint.x,
-    playerPoint.y,
-    Math.max(2.6, 2.6 * markerScale),
-    0,
-    Math.PI * 2
-  );
-  minimapCtx.fill();
-
-  minimapCtx.fillStyle = '#ff6a6a';
-  for (const mob of mobs) {
-    const point = worldToMap(mob.mesh.position.x, mob.mesh.position.z);
-    minimapCtx.beginPath();
-    minimapCtx.arc(
-      point.x,
-      point.y,
-      Math.max(1.8, 1.8 * markerScale),
-      0,
-      Math.PI * 2
-    );
-    minimapCtx.fill();
-  }
-
-  for (const [collider, state] of structureStore.structureStates.entries()) {
-    if (collider.type !== 'wall' && collider.type !== 'tower') continue;
-    if (state.playerBuilt !== true) continue;
-    const hpRatio = state.maxHp <= 0 ? 1 : state.hp / state.maxHp;
-    if (hpRatio >= REPAIR_WARNING_HP_RATIO) continue;
-    const point = worldToMap(collider.center.x, collider.center.z);
-    minimapCtx.fillStyle =
-      hpRatio <= REPAIR_CRITICAL_HP_RATIO ? '#ff6a6a' : '#ffcf73';
-    minimapCtx.beginPath();
-    minimapCtx.arc(
-      point.x,
-      point.y,
-      Math.max(1.4, 1.4 * markerScale),
-      0,
-      Math.PI * 2
-    );
-    minimapCtx.fill();
-  }
-};
 
 const worldToScreen = (
   worldPos: THREE.Vector3
@@ -3084,6 +2268,37 @@ const addEnergy = (amount: number, withPop = false) => {
   }
 };
 
+const hudUpdaters = createHudUpdaters({
+  coinHudCanvasEl,
+  coinHudRenderer,
+  coinHudCamera,
+  coinHudRoot,
+  coinHudScene,
+  coinModelTemplate,
+  minimapCanvasEl,
+  minimapCtx,
+  minimapCastleIcon,
+  coinTrailRenderer,
+  coinTrailCamera,
+  coinTrailScene,
+  eventBannerEl,
+  castleBankPiles,
+  castleCollider,
+  camera,
+  player,
+  mobs,
+  structureStore,
+  gameState,
+  activeEnergyTrails,
+  WORLD_BOUNDS,
+  isMinimapExpandedRef,
+  minimapEmbellishAlphaRef,
+  EVENT_BANNER_DURATION,
+  REPAIR_WARNING_HP_RATIO,
+  REPAIR_CRITICAL_HP_RATIO,
+  addEnergy,
+});
+
 const spendEnergy = (amount: number) => {
   if (isServerAuthoritative()) return false;
   if (gameState.energy < amount) return false;
@@ -3098,134 +2313,11 @@ const getSelectedBankInRange = () => {
   return collider;
 };
 
-const disposeObjectMeshes = (object: THREE.Object3D) => {
-  object.traverse((node) => {
-    if (!(node instanceof THREE.Mesh)) return;
-    node.geometry.dispose();
-    if (Array.isArray(node.material)) {
-      for (const material of node.material) material.dispose();
-      return;
-    }
-    node.material.dispose();
-  });
-};
-
-const getCoinPileCylinderCount = (bankEnergy: number) => {
-  const safeBank = Math.max(0, bankEnergy);
-  const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));
-  return Math.min(COIN_PILE_CYLINDER_MAX, COIN_PILE_CYLINDER_MIN + growthLevel);
-};
-
-const getCoinPileClusterCountPerCorner = (bankEnergy: number) => {
-  const safeBank = Math.max(0, bankEnergy);
-  const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));
-  return Math.min(
-    COIN_PILE_CLUSTER_MAX_PER_CORNER,
-    1 + Math.floor(growthLevel / 4)
-  );
-};
-
-const getCoinPileHeightScale = (bankEnergy: number) => {
-  const safeBank = Math.max(1, bankEnergy);
-  return Math.min(2.6, 1 + Math.log10(safeBank) * 0.28);
-};
-
-const buildCoinPileVisual = (
-  bankEnergy: number,
-  densityScale = 1,
-  spreadScale = 1,
-  phaseOffset = 0,
-  heightScale = 1
-) => {
-  const group = new THREE.Group();
-  const safeBank = Math.max(0, bankEnergy);
-  const baseCount = getCoinPileCylinderCount(safeBank);
-  const cylinderCount = Math.max(1, Math.floor(baseCount * densityScale));
-  const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));
-  for (let i = 0; i < cylinderCount; i += 1) {
-    const t = (i + 0.5) / cylinderCount;
-    const radiusFromCenter = Math.sqrt(t) * COIN_PILE_MAX_RADIUS * spreadScale;
-    const angle = (i + phaseOffset) * 2.399963229728653;
-    const height = Math.min(
-      5.5,
-      (0.35 + growthLevel * 0.06 + (i % 5) * 0.08) * heightScale
-    );
-    const topRadius = 0.12 + ((i * 17) % 5) * 0.012;
-    const bottomRadius = topRadius + 0.05;
-    const cylinder = new THREE.Mesh(
-      new THREE.CylinderGeometry(topRadius, bottomRadius, height, 10),
-      new THREE.MeshStandardMaterial({
-        color: i % 3 === 0 ? 0xf4d35e : i % 3 === 1 ? 0xe8c547 : 0xffda66,
-        metalness: 0.3,
-        roughness: 0.35,
-      })
-    );
-    cylinder.position.set(
-      Math.cos(angle) * radiusFromCenter,
-      height * 0.5,
-      Math.sin(angle) * radiusFromCenter
-    );
-    cylinder.castShadow = true;
-    cylinder.receiveShadow = true;
-    group.add(cylinder);
-  }
-  return group;
-};
-
-const updateCastleBankPilesVisual = () => {
-  for (const child of Array.from(castleBankPiles.children)) {
-    castleBankPiles.remove(child);
-    disposeObjectMeshes(child);
-  }
-  if (gameState.bankEnergy <= 0) return;
-  const cx = castleCollider.center.x;
-  const cz = castleCollider.center.z;
-  const offsetX = castleCollider.halfSize.x + 0.28;
-  const offsetZ = castleCollider.halfSize.z + 0.28;
-  const corners = [
-    new THREE.Vector3(cx + offsetX, 0, cz + offsetZ),
-    new THREE.Vector3(cx + offsetX, 0, cz - offsetZ),
-    new THREE.Vector3(cx - offsetX, 0, cz + offsetZ),
-    new THREE.Vector3(cx - offsetX, 0, cz - offsetZ),
-  ];
-  const safeBank = Math.max(0, gameState.bankEnergy);
-  const clustersPerCorner = getCoinPileClusterCountPerCorner(safeBank);
-  const totalClusters = Math.max(1, corners.length * clustersPerCorner);
-  const perClusterEnergy = safeBank / totalClusters;
-  const heightScale = getCoinPileHeightScale(safeBank);
-  for (let i = 0; i < corners.length; i += 1) {
-    const corner = corners[i]!;
-    for (let clusterIdx = 0; clusterIdx < clustersPerCorner; clusterIdx += 1) {
-      const pile = buildCoinPileVisual(
-        perClusterEnergy,
-        0.78,
-        0.34,
-        i * 29 + clusterIdx * 7,
-        heightScale
-      );
-      if (clusterIdx === 0) {
-        pile.position.copy(corner);
-      } else {
-        const ringLayer = Math.floor((clusterIdx - 1) / 6);
-        const ringIndex = (clusterIdx - 1) % 6;
-        const ringRadius = 0.22 + ringLayer * 0.16;
-        const angle = (Math.PI * 2 * ringIndex) / 6 + i * 0.31;
-        pile.position.set(
-          corner.x + Math.cos(angle) * ringRadius,
-          0,
-          corner.z + Math.sin(angle) * ringRadius
-        );
-      }
-      castleBankPiles.add(pile);
-    }
-  }
-};
-
 const syncCastleCoinsFromServer = async () => {
   const castleCoins = await fetchCastleCoinsBalance();
   if (castleCoins === null) return;
   gameState.bankEnergy = castleCoins;
-  updateCastleBankPilesVisual();
+  hudUpdaters.updateCastleBankPilesVisual();
 };
 
 const depositToCastle = async (requestedAmount: number) => {
@@ -3242,36 +2334,36 @@ const depositToCastle = async (requestedAmount: number) => {
     const previousEnergy = gameState.energy;
     gameState.bankEnergy += transfer;
     gameState.energy = Math.max(0, gameState.energy - transfer);
-    updateCastleBankPilesVisual();
+    hudUpdaters.updateCastleBankPilesVisual();
     const response = await requestCastleCoinsDeposit(transfer);
     if (response === null) {
       gameState.bankEnergy = previousBank;
       gameState.energy = previousEnergy;
-      updateCastleBankPilesVisual();
-      triggerEventBanner('Deposit failed');
+      hudUpdaters.updateCastleBankPilesVisual();
+      hudUpdaters.triggerEventBanner('Deposit failed');
       return false;
     }
     gameState.bankEnergy = Number.isFinite(response.castleCoins)
       ? Math.max(0, Math.floor(response.castleCoins))
       : gameState.bankEnergy;
-    updateCastleBankPilesVisual();
-    triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`);
+    hudUpdaters.updateCastleBankPilesVisual();
+    hudUpdaters.triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`);
     return true;
   }
   const response = await requestCastleCoinsDeposit(transfer);
   if (response === null) {
-    triggerEventBanner('Deposit failed');
+    hudUpdaters.triggerEventBanner('Deposit failed');
     return false;
   }
   gameState.bankEnergy = Number.isFinite(response.castleCoins)
     ? Math.max(0, Math.floor(response.castleCoins))
     : gameState.bankEnergy;
-  updateCastleBankPilesVisual();
-  void authoritativeBridge?.heartbeat({
+  hudUpdaters.updateCastleBankPilesVisual();
+  void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
-  triggerEventBanner(`Deposited ${Math.floor(response.deposited)} coins`);
+  hudUpdaters.triggerEventBanner(`Deposited ${Math.floor(response.deposited)} coins`);
   return true;
 };
 
@@ -3289,81 +2381,37 @@ const withdrawFromCastle = async (requestedAmount: number) => {
     const previousEnergy = gameState.energy;
     gameState.bankEnergy = Math.max(0, gameState.bankEnergy - transfer);
     addEnergy(transfer, true);
-    updateCastleBankPilesVisual();
+    hudUpdaters.updateCastleBankPilesVisual();
     const response = await requestCastleCoinsWithdraw(transfer);
     if (response === null) {
       gameState.bankEnergy = previousBank;
       gameState.energy = previousEnergy;
-      updateCastleBankPilesVisual();
-      triggerEventBanner('Withdraw failed');
+      hudUpdaters.updateCastleBankPilesVisual();
+      hudUpdaters.triggerEventBanner('Withdraw failed');
       return false;
     }
     gameState.bankEnergy = Number.isFinite(response.castleCoins)
       ? Math.max(0, Math.floor(response.castleCoins))
       : gameState.bankEnergy;
-    updateCastleBankPilesVisual();
-    triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
+    hudUpdaters.updateCastleBankPilesVisual();
+    hudUpdaters.triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
     return true;
   }
   const response = await requestCastleCoinsWithdraw(transfer);
   if (response === null) {
-    triggerEventBanner('Withdraw failed');
+    hudUpdaters.triggerEventBanner('Withdraw failed');
     return false;
   }
   gameState.bankEnergy = Number.isFinite(response.castleCoins)
     ? Math.max(0, Math.floor(response.castleCoins))
     : gameState.bankEnergy;
-  updateCastleBankPilesVisual();
-  void authoritativeBridge?.heartbeat({
+  hudUpdaters.updateCastleBankPilesVisual();
+  void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
-  triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
+  hudUpdaters.triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
   return true;
-};
-
-const updateEnergyTrails = (delta: number) => {
-  for (let i = activeEnergyTrails.length - 1; i >= 0; i -= 1) {
-    const trail = activeEnergyTrails[i]!;
-    trail.elapsed += delta;
-    const t = Math.min(1, trail.elapsed / trail.duration);
-    const easeT = 1 - Math.pow(1 - t, 2);
-    const u = 1 - easeT;
-    const x =
-      u * u * u * trail.startX +
-      3 * u * u * easeT * trail.control1X +
-      3 * u * easeT * easeT * trail.control2X +
-      easeT * easeT * easeT * trail.endX;
-    const y =
-      u * u * u * trail.startY +
-      3 * u * u * easeT * trail.control1Y +
-      3 * u * easeT * easeT * trail.control2Y +
-      easeT * easeT * easeT * trail.endY;
-    const rotation = trail.spinStartDeg + trail.spinTotalDeg * easeT;
-    const pitch = trail.pitchStartDeg + trail.pitchTotalDeg * easeT;
-    const roll = trail.rollStartDeg + trail.rollTotalDeg * easeT;
-    const scale = trail.baseScale * (1 - t * 0.05);
-    trail.mesh.position.set(x, window.innerHeight - y, 0);
-    trail.mesh.rotation.set(
-      THREE.MathUtils.degToRad(pitch),
-      THREE.MathUtils.degToRad(rotation),
-      THREE.MathUtils.degToRad(roll)
-    );
-    trail.mesh.scale.setScalar(scale);
-    for (const material of trail.materials) {
-      if ('opacity' in material) {
-        (material as THREE.Material & { opacity: number }).opacity = 1;
-      }
-    }
-    if (t >= 1) {
-      coinTrailScene.remove(trail.mesh);
-      for (const material of trail.materials) {
-        material.dispose();
-      }
-      activeEnergyTrails.splice(i, 1);
-      addEnergy(trail.reward, true);
-    }
-  }
 };
 
 const towerArrowGravity = new THREE.Vector3(0, -BALLISTA_ARROW_GRAVITY, 0);
@@ -3625,7 +2673,7 @@ const HEMI_SKY_BUILD = 0x5a80c0;
 
 const setBuildMode = (mode: BuildMode) => {
   if (mode !== 'off' && !canAffordBuildMode(mode)) {
-    triggerEventBanner('Not enough coins');
+    hudUpdaters.triggerEventBanner('Not enough coins');
     return;
   }
   if (gameState.buildMode === mode) {
@@ -3673,14 +2721,12 @@ const setBuildMode = (mode: BuildMode) => {
   wallDragValidPositions = [];
 };
 
-let isMinimapExpanded = false;
-let minimapEmbellishAlpha = 0;
 let minimapEmbellishTargetAlpha = 0;
 const MINIMAP_EMBELLISH_FADE_SPEED = 11;
 
 const setMinimapExpanded = (expanded: boolean) => {
-  if (isMinimapExpanded === expanded) return;
-  isMinimapExpanded = expanded;
+  if (isMinimapExpandedRef.current === expanded) return;
+  isMinimapExpandedRef.current = expanded;
   minimapEmbellishTargetAlpha = expanded ? 1 : 0;
   minimapWrapEl.classList.toggle('is-expanded', expanded);
   if (expanded) minimapWrapEl.classList.remove('is-hover');
@@ -3694,23 +2740,23 @@ const setMinimapExpanded = (expanded: boolean) => {
   );
   // Wait for the CSS size transition frame so the canvas can resize to the new bounds.
   window.requestAnimationFrame(() => {
-    syncMinimapCanvasSize();
+    hudUpdaters.syncMinimapCanvasSize();
   });
   window.setTimeout(() => {
-    syncMinimapCanvasSize();
+    hudUpdaters.syncMinimapCanvasSize();
   }, 260);
 };
 
 const updateMinimapEmbellishAlpha = (delta: number) => {
   const blend = Math.min(1, delta * MINIMAP_EMBELLISH_FADE_SPEED);
-  minimapEmbellishAlpha +=
-    (minimapEmbellishTargetAlpha - minimapEmbellishAlpha) * blend;
-  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlpha) <= 0.002) {
-    minimapEmbellishAlpha = minimapEmbellishTargetAlpha;
+  minimapEmbellishAlphaRef.current +=
+    (minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) * blend;
+  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) <= 0.002) {
+    minimapEmbellishAlphaRef.current = minimapEmbellishTargetAlpha;
   }
   minimapWrapEl.style.setProperty(
     '--hud-minimap-embellish-alpha',
-    minimapEmbellishAlpha.toFixed(3)
+    minimapEmbellishAlphaRef.current.toFixed(3)
   );
 };
 
@@ -3767,11 +2813,11 @@ const selectionDialog = new SelectionDialog(
       const colliders = getSelectedInRange();
       if (colliders.length === 0) return;
       if (colliders.some((collider) => collider.type === 'bank')) return;
-      if (authoritativeBridge) {
+      if (authoritativeBridgeRef.current) {
         for (const collider of colliders) {
           const structureId = getStructureIdFromCollider(collider);
           if (structureId) {
-            void authoritativeBridge.sendRemoveStructure(structureId);
+            void authoritativeBridgeRef.current.sendRemoveStructure(structureId);
           }
         }
       } else {
@@ -3789,7 +2835,7 @@ const selectionDialog = new SelectionDialog(
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return;
       const upgradeCost = getUpgradeEnergyCost(upgradeId);
       if (!spendEnergy(upgradeCost)) {
-        triggerEventBanner(`Need ${upgradeCost} coins`);
+        hudUpdaters.triggerEventBanner(`Need ${upgradeCost} coins`);
         return;
       }
       applyTowerUpgrade(tower, upgradeId);
@@ -3799,7 +2845,7 @@ const selectionDialog = new SelectionDialog(
           Math.max(0, state.cumulativeBuildCost ?? ENERGY_COST_TOWER) +
           upgradeCost;
       }
-      triggerEventBanner('Upgraded');
+      hudUpdaters.triggerEventBanner('Upgraded');
     },
     onRepair: () => {
       const [collider] = selectedStructures.values();
@@ -3816,13 +2862,13 @@ const selectionDialog = new SelectionDialog(
       if (state.hp >= state.maxHp) return;
       const repairCost = getRepairCost(state);
       if (!spendEnergy(repairCost)) {
-        triggerEventBanner(`Need ${repairCost} coins`);
+        hudUpdaters.triggerEventBanner(`Need ${repairCost} coins`);
         return;
       }
       state.hp = state.maxHp;
       state.lastDecayTickMs = Date.now();
       state.graceUntilMs = Date.now() + DECAY_GRACE_MS;
-      triggerEventBanner('Repaired');
+      hudUpdaters.triggerEventBanner('Repaired');
     },
     onBankAdd1: () => {
       if (!getSelectedBankInRange()) return;
@@ -3949,10 +2995,10 @@ debugResetGameButton?.addEventListener('click', () => {
   void requestResetGameFromDebugMenu()
     .then((toast) => {
       if (toast) {
-        triggerEventBanner(toast, 3.6);
+        hudUpdaters.triggerEventBanner(toast, 3.6);
         return;
       }
-      triggerEventBanner('Failed to reset game');
+      hudUpdaters.triggerEventBanner('Failed to reset game');
     })
     .finally(() => {
       debugResetGameButton.disabled = false;
@@ -3974,7 +3020,7 @@ const setSelectionDialogHudMode = (dialogVisible: boolean) => {
 };
 
 const updateHudEnergyVisibility = () => {
-  if (isMinimapExpanded) {
+  if (isMinimapExpandedRef.current) {
     hudEnergyEl.style.display = 'none';
     return;
   }
@@ -3994,7 +3040,7 @@ const updateSelectionDialog = () => {
   if (selectedCount === 0) {
     setSelectionDialogHudMode(false);
     updateHudEnergyVisibility();
-    hudActionsEl.style.display = isMinimapExpanded ? 'none' : '';
+    hudActionsEl.style.display = isMinimapExpandedRef.current ? 'none' : '';
     selectionDialog.update({
       selectedCount: 0,
       inRangeCount: 0,
@@ -4021,7 +3067,7 @@ const updateSelectionDialog = () => {
   const inRange = getSelectedInRange();
   setSelectionDialogHudMode(inRange.length > 0);
   updateHudEnergyVisibility();
-  hudActionsEl.style.display = isMinimapExpanded
+  hudActionsEl.style.display = isMinimapExpandedRef.current
     ? 'none'
     : selectedCount > 0 && inRange.length > 0
       ? 'none'
@@ -4156,22 +3202,22 @@ buildWallBtn.addEventListener('click', () => setBuildMode('wall'));
 buildTowerBtn.addEventListener('click', () => setBuildMode('tower'));
 buildModeCancelBtn.addEventListener('click', () => setBuildMode('off'));
 minimapToggleBtn.addEventListener('click', () => {
-  if (isMinimapExpanded) return;
+  if (isMinimapExpandedRef.current) return;
   clearSelection();
   setMinimapExpanded(true);
 });
 minimapWrapEl.addEventListener('pointerenter', () => {
-  if (!isMinimapExpanded) minimapWrapEl.classList.add('is-hover');
+  if (!isMinimapExpandedRef.current) minimapWrapEl.classList.add('is-hover');
 });
 minimapWrapEl.addEventListener('pointerleave', () => {
   minimapWrapEl.classList.remove('is-hover');
 });
 minimapWrapEl.addEventListener('transitionend', (event) => {
   if (event.propertyName !== 'width' && event.propertyName !== 'height') return;
-  syncMinimapCanvasSize();
+  hudUpdaters.syncMinimapCanvasSize();
 });
 window.addEventListener('pointerdown', () => {
-  if (!isMinimapExpanded) return;
+  if (!isMinimapExpandedRef.current) return;
   setMinimapExpanded(false);
 });
 
@@ -4285,8 +3331,8 @@ const canPlace = (
 };
 
 const placeBuilding = (center: THREE.Vector3) => {
-  if (authoritativeBridge && gameState.buildMode !== 'off') {
-    void authoritativeBridge.sendBuildStructure({
+  if (authoritativeBridgeRef.current && gameState.buildMode !== 'off') {
+    void authoritativeBridgeRef.current.sendBuildStructure({
       structureId: `${gameState.buildMode}-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
       type: gameState.buildMode === 'tower' ? 'tower' : 'wall',
       center: { x: center.x, z: center.z },
@@ -4327,7 +3373,7 @@ const getWallLinePlacement = (
 };
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
-  if (authoritativeBridge) {
+  if (authoritativeBridgeRef.current) {
     const { validPositions } = getWallLinePlacement(
       start,
       end,
@@ -4335,7 +3381,7 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     );
     if (validPositions.length === 0) return false;
     const now = Date.now();
-    void authoritativeBridge.sendBuildStructures(
+    void authoritativeBridgeRef.current.sendBuildStructures(
       validPositions.map((center, i) => ({
         structureId: `wall-line-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
         type: 'wall',
@@ -4360,9 +3406,9 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
 };
 
 const placeWallSegments = (positions: THREE.Vector3[]) => {
-  if (authoritativeBridge && positions.length > 0) {
+  if (authoritativeBridgeRef.current && positions.length > 0) {
     const now = Date.now();
-    void authoritativeBridge.sendBuildStructures(
+    void authoritativeBridgeRef.current.sendBuildStructures(
       positions.map((center, i) => ({
         structureId: `wall-segments-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
         type: 'wall',
@@ -4440,7 +3486,7 @@ const setMoveTarget = (pos: THREE.Vector3) => {
     clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS)
   );
   player.target.copy(clamped);
-  if (authoritativeBridge) {
+  if (authoritativeBridgeRef.current) {
     const nowMs = performance.now();
     const dx = clamped.x - lastMoveIntentTarget.x;
     const dz = clamped.z - lastMoveIntentTarget.z;
@@ -4452,7 +3498,7 @@ const setMoveTarget = (pos: THREE.Vector3) => {
       lastMoveIntentSentAt = nowMs;
       lastMoveIntentTarget.x = clamped.x;
       lastMoveIntentTarget.z = clamped.z;
-      void authoritativeBridge.sendMoveIntent(
+      void authoritativeBridgeRef.current.sendMoveIntent(
         { x: player.mesh.position.x, z: player.mesh.position.z },
         { x: clamped.x, z: clamped.z }
       );
@@ -4503,7 +3549,7 @@ const motionSystem = createEntityMotionSystem({
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if ((event.target as HTMLElement).closest('#hud, .selection-dialog')) return;
-  if (isMinimapExpanded) return;
+  if (isMinimapExpandedRef.current) return;
   activePointerId = event.pointerId;
   renderer.domElement.setPointerCapture(event.pointerId);
   if (gameState.buildMode !== 'off') {
@@ -4633,8 +3679,8 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
-  syncCoinTrailViewport();
-  syncMinimapCanvasSize();
+  hudUpdaters.syncCoinTrailViewport();
+  hudUpdaters.syncMinimapCanvasSize();
 });
 
 const updateEntityMotion = (entity: Entity, delta: number) => {
@@ -4643,21 +3689,6 @@ const updateEntityMotion = (entity: Entity, delta: number) => {
 
 const updateNpcTargets = () => {
   motionSystem.updateNpcTargets();
-};
-
-const triggerEventBanner = (text: string, duration = EVENT_BANNER_DURATION) => {
-  eventBannerEl.textContent = '';
-  const line = document.createElement('div');
-  line.className = 'event-banner__single';
-  line.textContent = text;
-  eventBannerEl.appendChild(line);
-  eventBannerEl.classList.remove('stack');
-  eventBannerEl.classList.add('single');
-  eventBannerEl.style.setProperty('--banner-duration', `${duration}s`);
-  eventBannerEl.classList.remove('show');
-  void eventBannerEl.offsetWidth;
-  eventBannerEl.classList.add('show');
-  gameState.eventBannerTimer = duration;
 };
 
 const clearWaveOverlays = () => {
@@ -4781,8 +3812,8 @@ const tick = (now: number, delta: number) => {
   waterMaterial.uniforms.uTime.value = waterTime;
 
   updateMinimapEmbellishAlpha(delta);
-  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlpha) > 0.001) {
-    syncMinimapCanvasSize();
+  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) > 0.001) {
+    hudUpdaters.syncMinimapCanvasSize();
   }
   if (!serverAuthoritative) {
     gameState.energy = Math.min(
@@ -4830,24 +3861,24 @@ const tick = (now: number, delta: number) => {
   updateNpcTargets();
   updateEntityMotion(player, delta);
   if (
-    authoritativeBridge &&
+    authoritativeBridgeRef.current &&
     now - lastNetworkHeartbeatAt >= SERVER_HEARTBEAT_INTERVAL_MS
   ) {
     lastNetworkHeartbeatAt = now;
-    void authoritativeBridge.heartbeat({
+    void authoritativeBridgeRef.current.heartbeat({
       x: player.mesh.position.x,
       z: player.mesh.position.z,
     });
   }
   if (
-    authoritativeBridge &&
-    !serverStructureResyncInFlight &&
+    authoritativeBridgeRef.current &&
+    !serverStructureResyncInFlightRef.current &&
     now >= nextServerStructureResyncAtMs
   ) {
-    serverStructureResyncInFlight = true;
+    serverStructureResyncInFlightRef.current = true;
     nextServerStructureResyncAtMs =
       now + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
-    void authoritativeBridge
+    void authoritativeBridgeRef.current
       .resync()
       .catch((error) => {
         console.error('Failed periodic authoritative snapshot resync', error);
@@ -4855,7 +3886,7 @@ const tick = (now: number, delta: number) => {
           performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS;
       })
       .finally(() => {
-        serverStructureResyncInFlight = false;
+        serverStructureResyncInFlightRef.current = false;
       });
   }
   for (const npc of npcs) {
@@ -4863,7 +3894,7 @@ const tick = (now: number, delta: number) => {
   }
 
   if (serverAuthoritative) {
-    updateServerMobInterpolation(now);
+    authoritativeSync.updateServerMobInterpolation(now);
   }
 
   const spatialStartedAtMs = performance.now();
@@ -4896,7 +3927,7 @@ const tick = (now: number, delta: number) => {
   updateParticles(delta);
   smokePoofEffect.updateSmokePoofs(delta);
   updateMobDeathVisuals(delta);
-  updateEnergyTrails(delta);
+  hudUpdaters.updateEnergyTrails(delta);
   updateFloatingDamageTexts(delta);
 
   const targetingStartedAtMs = performance.now();
@@ -4997,7 +4028,7 @@ const tick = (now: number, delta: number) => {
   }
 
   const waveComplete =
-    gameState.wave > 0 && !serverWaveActive && mobs.length === 0;
+    gameState.wave > 0 && !serverWaveActiveRef.current && mobs.length === 0;
 
   if (tickFrameCounter % 2 === 0) {
     cachedSelectedMob = pickSelectedMob();
@@ -5191,7 +4222,7 @@ const tick = (now: number, delta: number) => {
   );
 
   if (gameState.prevMobsCount > 0 && waveComplete) {
-    triggerEventBanner('Wave cleared');
+    hudUpdaters.triggerEventBanner('Wave cleared');
   }
 
   if (gameState.eventBannerTimer > 0) {
@@ -5219,8 +4250,8 @@ const tick = (now: number, delta: number) => {
   }
 
   applyStructureDamageVisuals();
-  drawMinimap();
-  updateCoinHudView(delta);
+  hudUpdaters.drawMinimap();
+  hudUpdaters.updateCoinHudView(delta);
   composer.render();
   coinTrailRenderer.render(coinTrailScene, coinTrailCamera);
   if (ENABLE_CLIENT_FRAME_PROFILING) {
@@ -5276,103 +4307,55 @@ startGameWhenReady = () => {
   completeLoadingAndRevealScene();
   gameLoop.start();
 };
-let disposed = false;
-const disposeApp = () => {
-  if (disposed) return;
-  disposed = true;
-  if (authoritativeBridge) {
-    void authoritativeBridge.disconnect();
-    authoritativeBridge = null;
-  }
-  serverStructureResyncInFlight = false;
+const disposeGameScene = createDisposeScene({
+  authoritativeBridgeRef,
+  serverStructureResyncInFlightRef,
+  particleSystem,
+  spawnContainerOverlay,
+  stagingIslandsOverlay,
+  spawnerRouteOverlay,
+  pathCenterTileLayer,
+  pathEdgeTileLayer,
+  pathInnerCornerTileLayer,
+  pathOuterCornerTileLayer,
+  flowFieldDebugOverlay,
+  worldGrid,
+  worldBorder,
+  shaftGeometry,
+  shaftMaterial,
+  headGeometry,
+  headMaterial,
+  scene,
+  buildPreview,
+  mobInstanceMesh,
+  mobHitFlashMesh,
+  clearMobDeathVisuals,
+  mobLogicGeometry,
+  mobLogicMaterial,
+  activeArrowProjectiles,
+  activePlayerArrowProjectiles,
+  playerShootRangeRing,
+  towerRangeMaterial,
+  ground,
+  groundMaterial,
+  waterMesh,
+  waterMaterial,
+  waterDistanceField,
+  groundTileLayer,
+  castle,
+  coinHudRoot,
+  coinHudRenderer,
+  activeEnergyTrails,
+  coinTrailScene,
+  coinTrailRenderer,
+  composer,
+  renderer,
+});
 
-  particleSystem.dispose();
-  spawnContainerOverlay.dispose();
-  stagingIslandsOverlay.setTilesChangedListener(null);
-  stagingIslandsOverlay.dispose();
-  spawnerRouteOverlay.clear();
-  pathCenterTileLayer.dispose();
-  pathEdgeTileLayer.dispose();
-  pathInnerCornerTileLayer.dispose();
-  pathOuterCornerTileLayer.dispose();
-  flowFieldDebugOverlay.clear();
-  worldGrid.dispose();
-  worldBorder.dispose();
-
-  shaftGeometry.dispose();
-  shaftMaterial.dispose();
-  headGeometry.dispose();
-  headMaterial.dispose();
-
-  scene.remove(buildPreview);
-  buildPreview.geometry.dispose();
-  (buildPreview.material as THREE.Material).dispose();
-
-  scene.remove(mobInstanceMesh);
-  scene.remove(mobHitFlashMesh);
-  mobInstanceMesh.geometry.dispose();
-  if (Array.isArray(mobInstanceMesh.material)) {
-    for (const material of mobInstanceMesh.material) material.dispose();
-  } else {
-    mobInstanceMesh.material.dispose();
-  }
-  if (Array.isArray(mobHitFlashMesh.material)) {
-    for (const material of mobHitFlashMesh.material) material.dispose();
-  } else {
-    mobHitFlashMesh.material.dispose();
-  }
-  clearMobDeathVisuals();
-  mobLogicGeometry.dispose();
-  mobLogicMaterial.dispose();
-  for (const projectile of activeArrowProjectiles) {
-    scene.remove(projectile.mesh);
-  }
-  activeArrowProjectiles.length = 0;
-  for (const projectile of activePlayerArrowProjectiles) {
-    scene.remove(projectile.mesh);
-  }
-  activePlayerArrowProjectiles.length = 0;
-  scene.remove(playerShootRangeRing);
-  playerShootRangeRing.geometry.dispose();
-  towerRangeMaterial.dispose();
-
-  scene.remove(ground);
-  ground.geometry.dispose();
-  groundMaterial.dispose();
-  scene.remove(waterMesh);
-  waterMesh.geometry.dispose();
-  waterMaterial.dispose();
-  waterDistanceField.texture.dispose();
-  groundTileLayer.dispose();
-  scene.remove(castle);
-  castle.traverse((node) => {
-    if (!(node instanceof THREE.Mesh)) return;
-    node.geometry.dispose();
-    if (Array.isArray(node.material)) {
-      for (const material of node.material) {
-        material.dispose();
-      }
-      return;
-    }
-    node.material.dispose();
-  });
-
-  coinHudRoot.clear();
-  coinHudRenderer.dispose();
-  for (const trail of activeEnergyTrails) {
-    coinTrailScene.remove(trail.mesh);
-    for (const material of trail.materials) {
-      material.dispose();
-    }
-  }
-  activeEnergyTrails.length = 0;
-  coinTrailRenderer.dispose();
-  composer.dispose();
-  renderer.dispose();
-};
+const disposeApp = () => disposeGameScene();
 
 window.addEventListener('beforeunload', disposeApp);
-syncCoinTrailViewport();
-syncMinimapCanvasSize();
+hudUpdaters.syncCoinTrailViewport();
+hudUpdaters.syncMinimapCanvasSize();
 void setupAuthoritativeBridge();
 startGameWhenReady();
