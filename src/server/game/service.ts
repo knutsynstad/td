@@ -13,10 +13,9 @@ import {
   type PlayerState,
   type StructureState,
 } from '../../shared/game-state';
+import { getStructureEnergyCost } from '../../shared/content';
 import {
   ENABLE_SERVER_TICK_PROFILING,
-  ENERGY_COST_TOWER,
-  ENERGY_COST_WALL,
   LEADER_BROADCAST_WINDOW_MS,
   LEADER_LOCK_TTL_SECONDS,
   LEADER_STALE_PLAYER_INTERVAL,
@@ -421,8 +420,6 @@ export const applyCommand = async (
   const nowMs = Date.now();
   const playerId = envelope.command.playerId;
   let spentBuildCoins = 0;
-  const getStructureEnergyCost = (type: string): number =>
-    type === 'tower' ? ENERGY_COST_TOWER : ENERGY_COST_WALL;
   const hasToken = await consumeRateLimitToken(playerId, nowMs);
   if (!hasToken) {
     const world = await loadWorldState();

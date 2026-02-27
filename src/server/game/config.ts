@@ -1,15 +1,10 @@
 export const PLAYER_TIMEOUT_MS = 10_000;
-export const PLAYER_SPEED_UNITS_PER_SECOND = 8;
 export const MAX_PLAYERS = 500;
 export const MAX_STRUCTURES = 8_000;
 export const MAX_QUEUE_COMMANDS = 20_000;
 export const MAX_COMMANDS_PER_BATCH = 512;
 export const MAX_RATE_TOKENS = 30;
 export const RATE_REFILL_PER_SECOND = 20;
-export const ENERGY_CAP = 100;
-export const ENERGY_REGEN_PER_SECOND = 0.25;
-export const ENERGY_COST_WALL = 2;
-export const ENERGY_COST_TOWER = 20;
 export const ENABLE_SERVER_TICK_PROFILING = true;
 export const SERVER_TICK_PROFILE_LOG_EVERY_TICKS = 30;
 export const SERVER_TICK_P95_TARGET_MS = 50;

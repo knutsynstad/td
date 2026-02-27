@@ -44,12 +44,17 @@ export const MOB_SIEGE_DAMAGE = 2;
 export const MOB_SIEGE_ATTACK_COOLDOWN = 0.8;
 export const MOB_SIEGE_RANGE_BUFFER = 0.35;
 export const MOB_SIEGE_UNREACHABLE_GRACE = 1.2;
-export const ENERGY_CAP = 100;
+import {
+  ENERGY_CAP,
+  ENERGY_REGEN_PER_SECOND,
+  getStructureEnergyCost,
+} from '../../../shared/content';
+export { ENERGY_CAP, ENERGY_REGEN_PER_SECOND, getStructureEnergyCost };
+export const ENERGY_REGEN_RATE = ENERGY_REGEN_PER_SECOND;
+export const ENERGY_COST_WALL = getStructureEnergyCost('wall');
+export const ENERGY_COST_TOWER = getStructureEnergyCost('tower');
 export const ENERGY_SYMBOL = '🪙';
-export const ENERGY_REGEN_RATE = 0.25;
 export const ENERGY_PER_PLAYER_KILL = 6;
-export const ENERGY_COST_WALL = 2;
-export const ENERGY_COST_TOWER = 20;
 export const ENERGY_COST_UPGRADE_RANGE = 20;
 export const ENERGY_COST_UPGRADE_DAMAGE = 20;
 export const ENERGY_COST_UPGRADE_SPEED = 20;

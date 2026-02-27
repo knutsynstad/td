@@ -14,11 +14,13 @@ import {
 import {
   ENERGY_CAP,
   ENERGY_REGEN_PER_SECOND,
+  PLAYER_SPEED,
+} from '../../shared/content';
+import {
   MAX_COMMANDS_PER_BATCH,
   MAX_QUEUE_COMMANDS,
   MAX_RATE_TOKENS,
   MAX_STRUCTURES,
-  PLAYER_SPEED_UNITS_PER_SECOND,
   RATE_REFILL_PER_SECOND,
 } from './config';
 import { isRecord } from '../../shared/utils';
@@ -81,7 +83,7 @@ const parsePlayerState = (value: unknown): PlayerState => {
       username: 'anonymous',
       position: { x: 0, z: 0 },
       velocity: { x: 0, z: 0 },
-      speed: PLAYER_SPEED_UNITS_PER_SECOND,
+      speed: PLAYER_SPEED,
       lastSeenMs: 0,
     };
   }
@@ -90,7 +92,7 @@ const parsePlayerState = (value: unknown): PlayerState => {
     username: String(value.username ?? 'anonymous'),
     position: parseVec2(value.position),
     velocity: parseVec2(value.velocity),
-    speed: Number(value.speed ?? PLAYER_SPEED_UNITS_PER_SECOND),
+    speed: Number(value.speed ?? PLAYER_SPEED),
     lastSeenMs: Number(value.lastSeenMs ?? 0),
   };
 };
@@ -900,7 +902,7 @@ export const createDefaultPlayer = (
   username,
   position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
   velocity: { x: 0, z: 0 },
-  speed: PLAYER_SPEED_UNITS_PER_SECOND,
+  speed: PLAYER_SPEED,
   lastSeenMs: nowMs,
 });
 
