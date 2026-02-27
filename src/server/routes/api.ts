@@ -186,6 +186,7 @@ api.post('/castle/coins/deposit', async (c) => {
     type: 'castleCoinsDeposit',
     deposited: result.deposited,
     castleCoins: result.castleCoins,
+    coins: result.coins,
   });
 });
 
@@ -205,5 +206,6 @@ api.post('/castle/coins/withdraw', async (c) => {
     type: 'castleCoinsWithdraw',
     withdrawn: result.withdrawn,
     castleCoins: result.castleCoins,
+    coins: result.coins,
   });
 });

@@ -51,6 +51,7 @@ type AuthoritativeBridge = {
   sendRemoveStructure: (structureId: string) => Promise<void>;
   resync: () => Promise<void>;
   heartbeat: (position: Vec2) => Promise<void>;
+  refreshCoinBalance: () => Promise<void>;
   disconnect: () => Promise<void>;
 };
 
@@ -75,6 +76,11 @@ const getJson = async (url: string): Promise<unknown> => {
   }
   return response.json();
 };
+
+const isCoinBalanceResponse = (value: unknown): value is CoinBalanceResponse =>
+  isRecord(value) &&
+  value.type === 'coinBalance' &&
+  typeof value.coins === 'number';
 
 const isVec2 = (value: unknown): value is Vec2 =>
   isRecord(value) && typeof value.x === 'number' && typeof value.z === 'number';
@@ -106,11 +112,6 @@ const isHeartbeatResponse = (value: unknown): value is HeartbeatResponse =>
   value.type === 'heartbeatAck' &&
   typeof value.tickSeq === 'number' &&
   typeof value.worldVersion === 'number';
-
-const isCoinBalanceResponse = (value: unknown): value is CoinBalanceResponse =>
-  isRecord(value) &&
-  value.type === 'coinBalance' &&
-  typeof value.coins === 'number';
 
 const isResyncResponse = (value: unknown): value is ResyncResponse =>
   isRecord(value) && value.type === 'snapshot' && isRecord(value.snapshot);
@@ -213,11 +214,12 @@ export const connectAuthoritativeBridge = async (
     if (!isHeartbeatResponse(payload)) {
       throw new Error('invalid heartbeat response');
     }
-    const coinPayload = await getJson('/api/game/coins');
-    if (!isCoinBalanceResponse(coinPayload)) {
-      throw new Error('invalid coin response');
-    }
-    callbacks.onCoinBalance(coinPayload.coins);
+  };
+
+  const refreshCoinBalance = async (): Promise<void> => {
+    const payload = await getJson('/api/game/coins');
+    if (!isCoinBalanceResponse(payload)) return;
+    callbacks.onCoinBalance(payload.coins);
   };
 
   const resync = async (): Promise<void> => {
@@ -275,6 +277,7 @@ export const connectAuthoritativeBridge = async (
     },
     resync,
     heartbeat,
+    refreshCoinBalance,
     disconnect: async () => {
       await connection.disconnect();
     },

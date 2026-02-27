@@ -1907,11 +1907,14 @@ const SERVER_MOB_DEAD_STALE_REMOVE_MS = 1000;
 const SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS = 8000;
 const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
 const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
-const SERVER_HEARTBEAT_INTERVAL_MS = 200;
+const SERVER_HEARTBEAT_INTERVAL_MS = 500;
+const SERVER_COINS_REFRESH_INTERVAL_MS = 3_000;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS = 45_000;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS = 7_500;
 let nextServerStructureResyncAtMs =
   performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+let nextCoinsRefreshAtMs =
+  performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
 let authoritativeSync: AuthoritativeSync;
 
 const setupAuthoritativeBridge = async () => {
@@ -2035,6 +2038,8 @@ const setupAuthoritativeBridge = async () => {
     });
     nextServerStructureResyncAtMs =
       performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+    nextCoinsRefreshAtMs =
+      performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
     serverStructureResyncInFlightRef.current = false;
     void syncCastleCoinsFromServer();
   } catch (error) {
@@ -2358,6 +2363,9 @@ const depositToCastle = async (requestedAmount: number) => {
   gameState.bankEnergy = Number.isFinite(response.castleCoins)
     ? Math.max(0, Math.floor(response.castleCoins))
     : gameState.bankEnergy;
+  if (Number.isFinite(response.coins)) {
+    gameState.energy = Math.max(0, Math.min(ENERGY_CAP, response.coins));
+  }
   hudUpdaters.updateCastleBankPilesVisual();
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
@@ -2405,6 +2413,9 @@ const withdrawFromCastle = async (requestedAmount: number) => {
   gameState.bankEnergy = Number.isFinite(response.castleCoins)
     ? Math.max(0, Math.floor(response.castleCoins))
     : gameState.bankEnergy;
+  if (Number.isFinite(response.coins)) {
+    gameState.energy = Math.max(0, Math.min(ENERGY_CAP, response.coins));
+  }
   hudUpdaters.updateCastleBankPilesVisual();
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
@@ -3869,6 +3880,13 @@ const tick = (now: number, delta: number) => {
       x: player.mesh.position.x,
       z: player.mesh.position.z,
     });
+  }
+  if (
+    authoritativeBridgeRef.current &&
+    now >= nextCoinsRefreshAtMs
+  ) {
+    nextCoinsRefreshAtMs = now + SERVER_COINS_REFRESH_INTERVAL_MS;
+    void authoritativeBridgeRef.current.refreshCoinBalance();
   }
   if (
     authoritativeBridgeRef.current &&

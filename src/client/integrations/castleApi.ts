@@ -18,7 +18,8 @@ const isCastleCoinsDepositResponse = (
   isRecord(value) &&
   value.type === 'castleCoinsDeposit' &&
   typeof value.deposited === 'number' &&
-  typeof value.castleCoins === 'number';
+  typeof value.castleCoins === 'number' &&
+  typeof value.coins === 'number';
 
 const isCastleCoinsWithdrawResponse = (
   value: unknown
@@ -26,7 +27,8 @@ const isCastleCoinsWithdrawResponse = (
   isRecord(value) &&
   value.type === 'castleCoinsWithdraw' &&
   typeof value.withdrawn === 'number' &&
-  typeof value.castleCoins === 'number';
+  typeof value.castleCoins === 'number' &&
+  typeof value.coins === 'number';
 
 export const fetchCastleCoinsBalance = async (): Promise<number | null> => {
   try {

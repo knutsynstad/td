@@ -7,12 +7,14 @@ export type CastleCoinsDepositResponse = {
   type: 'castleCoinsDeposit';
   deposited: number;
   castleCoins: number;
+  coins: number;
 };
 
 export type CastleCoinsWithdrawResponse = {
   type: 'castleCoinsWithdraw';
   withdrawn: number;
   castleCoins: number;
+  coins: number;
 };
 
 export type GamePreviewResponse = {
