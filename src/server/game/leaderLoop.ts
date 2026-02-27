@@ -8,8 +8,10 @@ import {
   LEADER_BROADCAST_WINDOW_MS,
   LEADER_LOCK_TTL_SECONDS,
   LEADER_STALE_PLAYER_INTERVAL,
+  LOCK_REFRESH_INTERVAL_TICKS,
   MAX_BATCH_BYTES,
   MAX_BATCH_EVENTS,
+  PERSIST_INTERVAL_TICKS,
   PLAYER_TIMEOUT_MS,
   SERVER_TICK_P95_TARGET_MS,
   SERVER_TICK_PROFILE_LOG_EVERY_TICKS,
@@ -37,9 +39,23 @@ import {
   releaseLeaderLock,
   verifyLeaderLock,
 } from './lock';
-import { removeOldPlayersByLastSeen } from './players';
 import { popPendingCommands, trimCommandQueue } from './queue';
-import { loadWorldState, persistWorldState } from './world';
+import {
+  cleanupStalePlayersSeen,
+  findAndRemoveStalePlayersInMemory,
+  loadWorldState,
+  mergePlayersFromRedis,
+  persistDirtyState,
+} from './world';
+import {
+  createDirtyTracker,
+  markDirtyFromDeltas,
+  markIntentRemoved,
+  markPlayerRemoved,
+  markStructureRemoved,
+  markStructureUpserted,
+  markWaveDirty,
+} from './dirtyTracker';
 
 const BATCH_ENVELOPE_OVERHEAD = 80;
 
@@ -74,9 +90,8 @@ const createOwnerToken = (): string =>
   `leader:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
 type TickProfile = {
-  loadWorldMs: number;
+  maintenanceMs: number;
   simulationMs: number;
-  persistMs: number;
   broadcastMs: number;
   totalMs: number;
 };
@@ -128,6 +143,9 @@ export const runLeaderLoop = async (
 
   console.info('Leader loop started', { ownerToken, channel });
 
+  const world = await loadWorldState();
+  const tracker = createDirtyTracker();
+
   try {
     while (Date.now() < endAt) {
       const now = Date.now();
@@ -135,59 +153,80 @@ export const runLeaderLoop = async (
         await sleep(nextTick - now);
       }
 
-      const stillOwner = await verifyLeaderLock(ownerToken);
-      if (!stillOwner) {
-        console.warn('Leader lock stolen, exiting loop', { ownerToken });
-        break;
-      }
-
-      const stillRefreshed = await refreshLeaderLock(
-        ownerToken,
-        LEADER_LOCK_TTL_SECONDS
-      );
-      if (!stillRefreshed) {
-        console.warn('Leader lock lost during refresh', { ownerToken });
-        break;
-      }
-
       const tickStartMs = Date.now();
       const nowMs = tickStartMs;
-      let stageLoadWorldMs = 0;
+      let stageMaintenanceMs = 0;
       let stageSimulationMs = 0;
-      let stagePersistMs = 0;
       let stageBroadcastMs = 0;
 
-      if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
-        await trimCommandQueue();
-        const stalePlayers = await removeOldPlayersByLastSeen(
-          nowMs - PLAYER_TIMEOUT_MS,
-          500
-        );
-        if (stalePlayers.length > 0) {
-          const world = await loadWorldState();
-          const staleDeltas = stalePlayers.map((playerId) =>
-            buildPresenceLeaveDelta(
-              world.meta.tickSeq,
-              world.meta.worldVersion,
-              playerId
-            )
+      const isMaintenanceTick =
+        ticksProcessed > 0 &&
+        ticksProcessed % PERSIST_INTERVAL_TICKS === 0;
+
+      if (isMaintenanceTick) {
+        const maintenanceStartMs = Date.now();
+
+        if (ticksProcessed % LOCK_REFRESH_INTERVAL_TICKS === 0) {
+          const stillOwner = await verifyLeaderLock(ownerToken);
+          if (!stillOwner) {
+            console.warn('Leader lock stolen, exiting loop', { ownerToken });
+            break;
+          }
+          const stillRefreshed = await refreshLeaderLock(
+            ownerToken,
+            LEADER_LOCK_TTL_SECONDS
           );
-          const staleBroadcastStartedAtMs = Date.now();
-          await broadcast(
-            world.meta.worldVersion,
-            world.meta.tickSeq,
-            staleDeltas
-          );
-          stageBroadcastMs += Date.now() - staleBroadcastStartedAtMs;
+          if (!stillRefreshed) {
+            console.warn('Leader lock lost during refresh', { ownerToken });
+            break;
+          }
         }
+
+        await persistDirtyState(world, tracker);
+        await mergePlayersFromRedis(world);
+
+        if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
+          await trimCommandQueue();
+          const stalePlayers = findAndRemoveStalePlayersInMemory(
+            world,
+            nowMs - PLAYER_TIMEOUT_MS,
+            500
+          );
+          if (stalePlayers.length > 0) {
+            for (const id of stalePlayers) {
+              markPlayerRemoved(tracker, id);
+              markIntentRemoved(tracker, id);
+            }
+            await cleanupStalePlayersSeen(stalePlayers);
+            const staleDeltas = stalePlayers.map((playerId) =>
+              buildPresenceLeaveDelta(
+                world.meta.tickSeq,
+                world.meta.worldVersion,
+                playerId
+              )
+            );
+            const staleBroadcastStartMs = Date.now();
+            await broadcast(
+              world.meta.worldVersion,
+              world.meta.tickSeq,
+              staleDeltas
+            );
+            stageBroadcastMs += Date.now() - staleBroadcastStartMs;
+          }
+        }
+
+        stageMaintenanceMs = Date.now() - maintenanceStartMs;
       }
 
-      const loadStartedAtMs = Date.now();
-      const world = await loadWorldState();
-      stageLoadWorldMs += Date.now() - loadStartedAtMs;
       const staticSync = ensureStaticMap(world);
-
       if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
+        for (const s of staticSync.upserts) {
+          markStructureUpserted(tracker, s.structureId);
+        }
+        for (const id of staticSync.removes) {
+          markStructureRemoved(tracker, id);
+        }
+        markWaveDirty(tracker);
         const bootstrapDelta: GameDelta = {
           type: 'structureDelta',
           tickSeq: world.meta.tickSeq,
@@ -196,11 +235,11 @@ export const runLeaderLoop = async (
           removes: staticSync.removes,
           requiresPathRefresh: true,
         };
-        const bootstrapBroadcastStartedAtMs = Date.now();
+        const bootstrapBroadcastStartMs = Date.now();
         await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
           bootstrapDelta,
         ]);
-        stageBroadcastMs += Date.now() - bootstrapBroadcastStartedAtMs;
+        stageBroadcastMs += Date.now() - bootstrapBroadcastStartMs;
       }
 
       const commands = await popPendingCommands(nowMs);
@@ -208,28 +247,25 @@ export const runLeaderLoop = async (
       const result = runSimulation(world, nowMs, commands, 1);
       stageSimulationMs += Date.now() - simulationStartedAtMs;
 
-      const persistStartedAtMs = Date.now();
-      await persistWorldState(result.world);
-      stagePersistMs += Date.now() - persistStartedAtMs;
+      markDirtyFromDeltas(tracker, result.deltas);
 
       if (result.deltas.length > 0) {
-        const deltaBroadcastStartedAtMs = Date.now();
+        const deltaBroadcastStartMs = Date.now();
         await markTickPublish(result.world.meta.tickSeq);
         await broadcast(
           result.world.meta.worldVersion,
           result.world.meta.tickSeq,
           result.deltas
         );
-        stageBroadcastMs += Date.now() - deltaBroadcastStartedAtMs;
+        stageBroadcastMs += Date.now() - deltaBroadcastStartMs;
       }
 
       ticksProcessed += 1;
 
       const tickDurationMs = Date.now() - tickStartMs;
       tickProfiles.push({
-        loadWorldMs: stageLoadWorldMs,
+        maintenanceMs: stageMaintenanceMs,
         simulationMs: stageSimulationMs,
-        persistMs: stagePersistMs,
         broadcastMs: stageBroadcastMs,
         totalMs: tickDurationMs,
       });
@@ -242,9 +278,8 @@ export const runLeaderLoop = async (
           deltaCount: result.deltas.length,
           simPerf: result.perf,
           stageBreakdownMs: {
-            loadWorld: stageLoadWorldMs,
+            maintenance: stageMaintenanceMs,
             simulation: stageSimulationMs,
-            persist: stagePersistMs,
             broadcast: stageBroadcastMs,
           },
         });
@@ -258,14 +293,11 @@ export const runLeaderLoop = async (
         const avgTotal =
           totals.reduce((sum, value) => sum + value, 0) /
           Math.max(1, totals.length);
-        const avgLoadWorld =
-          tickProfiles.reduce((sum, value) => sum + value.loadWorldMs, 0) /
+        const avgMaintenance =
+          tickProfiles.reduce((sum, value) => sum + value.maintenanceMs, 0) /
           Math.max(1, tickProfiles.length);
         const avgSimulation =
           tickProfiles.reduce((sum, value) => sum + value.simulationMs, 0) /
-          Math.max(1, tickProfiles.length);
-        const avgPersist =
-          tickProfiles.reduce((sum, value) => sum + value.persistMs, 0) /
           Math.max(1, tickProfiles.length);
         const avgBroadcast =
           tickProfiles.reduce((sum, value) => sum + value.broadcastMs, 0) /
@@ -275,9 +307,8 @@ export const runLeaderLoop = async (
           avgTotalMs: Number(avgTotal.toFixed(2)),
           p95TotalMs: Number(p95.toFixed(2)),
           targetP95Ms: SERVER_TICK_P95_TARGET_MS,
-          avgLoadWorldMs: Number(avgLoadWorld.toFixed(2)),
+          avgMaintenanceMs: Number(avgMaintenance.toFixed(2)),
           avgSimulationMs: Number(avgSimulation.toFixed(2)),
-          avgPersistMs: Number(avgPersist.toFixed(2)),
           avgBroadcastMs: Number(avgBroadcast.toFixed(2)),
         });
       }
@@ -292,6 +323,7 @@ export const runLeaderLoop = async (
   } catch (error) {
     console.error('Leader loop error', { ownerToken, error });
   } finally {
+    await persistDirtyState(world, tracker);
     await releaseLeaderLock(ownerToken);
   }
 
