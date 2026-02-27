@@ -8,8 +8,9 @@ import {
   resetGame,
   resyncGame,
   runLeaderLoop,
-} from './service';
-import { loadWorldState, persistWorldState } from './store';
+  loadWorldState,
+  persistWorldState,
+} from '.';
 
 const test = createDevvitTest();
 

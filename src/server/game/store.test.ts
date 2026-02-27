@@ -5,7 +5,7 @@ import {
   markTickPublish,
   releaseLeaderLock,
   verifyLeaderLock,
-} from './store';
+} from '.';
 
 const test = createDevvitTest();
 

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { runLeaderLoop, runMaintenance } from '../game/service';
+import { runLeaderLoop, runMaintenance } from '../game';
 
 export const schedulerRoutes = new Hono();
 

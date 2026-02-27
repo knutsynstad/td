@@ -13,11 +13,6 @@ export type GameRedisKeys = {
   lastPublishTickSeq: string;
 };
 
-export type EconomyRedisKeys = {
-  coins: string;
-  castle: string;
-};
-
 const sanitizeChannelId = (value: string): string =>
   value.replace(/[^A-Za-z0-9_]/g, '_');
 
@@ -43,8 +38,3 @@ export const getGameRedisKeys = (): GameRedisKeys => {
     lastPublishTickSeq: `${prefix}:lpt`,
   };
 };
-
-export const getEconomyRedisKeys = (): EconomyRedisKeys => ({
-  coins: 'g:c',
-  castle: 'g:cs',
-});

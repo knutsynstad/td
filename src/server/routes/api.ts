@@ -26,12 +26,12 @@ import {
   joinGame,
   resetGame,
   resyncGame,
-} from '../game/service';
+} from '../game';
 import {
   depositCastleCoins,
   getCastleCoins,
   withdrawCastleCoins,
-} from '../game/store';
+} from '../economy';
 
 type ErrorResponse = {
   status: 'error';

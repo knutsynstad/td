@@ -1,6 +1,6 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import { runLeaderLoop } from '../game/service';
+import { runLeaderLoop } from '../game';
 
 const test = createDevvitTest();
 
