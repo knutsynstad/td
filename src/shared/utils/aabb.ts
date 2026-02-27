@@ -5,8 +5,11 @@ export type Aabb2d = {
   maxZ: number;
 };
 
-export const intersectsAabb = (a: Aabb2d, b: Aabb2d): boolean =>
-  a.minX <= b.maxX &&
-  a.maxX >= b.minX &&
-  a.minZ <= b.maxZ &&
-  a.maxZ >= b.minZ;
+export function intersectsAabb(a: Aabb2d, b: Aabb2d): boolean {
+  return (
+    a.minX <= b.maxX &&
+    a.maxX >= b.minX &&
+    a.minZ <= b.maxZ &&
+    a.maxZ >= b.minZ
+  );
+}

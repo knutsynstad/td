@@ -1,8 +1,8 @@
-export const weightedSplit = (
+export function weightedSplit(
   total: number,
   count: number,
   random: () => number = Math.random,
-): number[] => {
+): number[] {
   if (count <= 0) return [];
   const weights = Array.from({ length: count }, () => 0.75 + random());
   const sum = weights.reduce((a, v) => a + v, 0);
@@ -23,9 +23,9 @@ export const weightedSplit = (
     remainder -= 1;
   }
   return base;
-};
+}
 
-export const percentile = (values: number[], p: number): number => {
+export function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const idx = Math.max(
@@ -33,4 +33,4 @@ export const percentile = (values: number[], p: number): number => {
     Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p)),
   );
   return sorted[idx] ?? 0;
-};
+}
