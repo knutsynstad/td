@@ -25,7 +25,7 @@ import {
 } from './config';
 import { isRecord } from '../../shared/utils';
 import { getEconomyRedisKeys, getGameRedisKeys } from './keys';
-import { buildStaticMapStructures } from './staticStructures';
+import { buildStaticMapStructures } from '../../shared/world/staticStructures';
 
 type RateLimitState = {
   tokens: number;

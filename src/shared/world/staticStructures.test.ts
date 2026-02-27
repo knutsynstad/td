@@ -1,42 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { intersectsAabb } from '../../shared/utils';
+import { intersectsAabb } from '../utils';
 import {
   buildStaticMapStructures,
+  CASTLE_TREE_CLEARANCE_ZONE,
+  getSpawnerClearanceZones,
   sanitizeStaticMapStructures,
 } from './staticStructures';
-
-const WORLD_BOUNDS = 64;
-const SPAWNER_ENTRY_INSET_CELLS = 3;
-const SPAWNER_CLEARANCE_LENGTH_CELLS = 18;
-const SPAWNER_CLEARANCE_HALF_WIDTH_CELLS = 4;
-const CASTLE_HALF_EXTENT = 4;
-const CASTLE_TREE_CLEARANCE_HALF_EXTENT = CASTLE_HALF_EXTENT + 6;
-
-type Aabb = {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-};
-
-const getSpawnerClearanceZones = (): Aabb[] => {
-  const entryCoord = WORLD_BOUNDS - SPAWNER_ENTRY_INSET_CELLS;
-  const w = SPAWNER_CLEARANCE_HALF_WIDTH_CELLS;
-  const len = SPAWNER_CLEARANCE_LENGTH_CELLS;
-  return [
-    { minX: -w, maxX: w, minZ: -entryCoord, maxZ: -entryCoord + len },
-    { minX: -w, maxX: w, minZ: entryCoord - len, maxZ: entryCoord },
-    { minX: entryCoord - len, maxX: entryCoord, minZ: -w, maxZ: w },
-    { minX: -entryCoord, maxX: -entryCoord + len, minZ: -w, maxZ: w },
-  ];
-};
-
-const CASTLE_TREE_CLEARANCE_ZONE: Aabb = {
-  minX: -CASTLE_TREE_CLEARANCE_HALF_EXTENT,
-  maxX: CASTLE_TREE_CLEARANCE_HALF_EXTENT,
-  minZ: -CASTLE_TREE_CLEARANCE_HALF_EXTENT,
-  maxZ: CASTLE_TREE_CLEARANCE_HALF_EXTENT,
-};
 
 describe('buildStaticMapStructures', () => {
   it('keeps spawner entry corridors free of trees and rocks', () => {
@@ -53,7 +22,7 @@ describe('buildStaticMapStructures', () => {
         structure.type === 'tree'
           ? (structure.metadata?.treeFootprint ?? 2) * 0.5
           : (structure.metadata?.rock?.footprintZ ?? 2) * 0.5;
-      const obstacle: Aabb = {
+      const obstacle = {
         minX: structure.center.x - halfX,
         maxX: structure.center.x + halfX,
         minZ: structure.center.z - halfZ,
@@ -70,7 +39,7 @@ describe('buildStaticMapStructures', () => {
     for (const structure of structures) {
       if (structure.ownerId !== 'Map' || structure.type !== 'tree') continue;
       const half = (structure.metadata?.treeFootprint ?? 2) * 0.5;
-      const obstacle: Aabb = {
+      const obstacle = {
         minX: structure.center.x - half,
         maxX: structure.center.x + half,
         minZ: structure.center.z - half,
@@ -117,7 +86,7 @@ describe('buildStaticMapStructures', () => {
       expect.arrayContaining([
         'map-tree-castle-camper',
         'map-rock-spawn-camper',
-      ])
+      ]),
     );
     expect(structures['map-tree-castle-camper']).toBeUndefined();
     expect(structures['map-rock-spawn-camper']).toBeUndefined();

@@ -1,10 +1,10 @@
-import type { StructureState } from '../../shared/game-state';
-import { intersectsAabb } from '../../shared/utils';
+import type { StructureState } from '../game-state';
+import { aabbFromCenter, intersectsAabb, type Aabb2d } from '../utils';
 import {
   generateSeededWorldFeatures,
   type RockPlacement,
-} from '../../shared/world/seededWorld';
-import { hashSeed } from '../../shared/world/rng';
+} from './seededWorld';
+import { hashSeed } from './rng';
 
 const WORLD_BOUNDS = 64;
 const WORLD_SEED_INPUT: string | number = 'alpha valley 01';
@@ -15,96 +15,55 @@ const SPAWNER_CLEARANCE_LENGTH_CELLS = 18;
 const SPAWNER_CLEARANCE_HALF_WIDTH_CELLS = 4;
 const CASTLE_TREE_CLEARANCE_HALF_EXTENT = CASTLE_HALF_EXTENT + 6;
 
-const toStructureId = (prefix: string, x: number, z: number) =>
-  `${prefix}-${Math.round(x)}-${Math.round(z)}`;
+function toStructureId(prefix: string, x: number, z: number): string {
+  return `${prefix}-${Math.round(x)}-${Math.round(z)}`;
+}
 
-type Aabb = {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-};
-
-const toObstacleAabb = (
-  x: number,
-  z: number,
-  halfX: number,
-  halfZ: number
-): Aabb => ({
-  minX: x - halfX,
-  maxX: x + halfX,
-  minZ: z - halfZ,
-  maxZ: z + halfZ,
-});
-
-const getSpawnerClearanceZones = (): Aabb[] => {
+export function getSpawnerClearanceZones(): Aabb2d[] {
   const entryCoord = WORLD_BOUNDS - SPAWNER_ENTRY_INSET_CELLS;
   const w = SPAWNER_CLEARANCE_HALF_WIDTH_CELLS;
   const len = SPAWNER_CLEARANCE_LENGTH_CELLS;
   return [
-    // North lane: toward center from z = -entryCoord.
-    {
-      minX: -w,
-      maxX: w,
-      minZ: -entryCoord,
-      maxZ: -entryCoord + len,
-    },
-    // South lane.
-    {
-      minX: -w,
-      maxX: w,
-      minZ: entryCoord - len,
-      maxZ: entryCoord,
-    },
-    // East lane.
-    {
-      minX: entryCoord - len,
-      maxX: entryCoord,
-      minZ: -w,
-      maxZ: w,
-    },
-    // West lane.
-    {
-      minX: -entryCoord,
-      maxX: -entryCoord + len,
-      minZ: -w,
-      maxZ: w,
-    },
+    { minX: -w, maxX: w, minZ: -entryCoord, maxZ: -entryCoord + len },
+    { minX: -w, maxX: w, minZ: entryCoord - len, maxZ: entryCoord },
+    { minX: entryCoord - len, maxX: entryCoord, minZ: -w, maxZ: w },
+    { minX: -entryCoord, maxX: -entryCoord + len, minZ: -w, maxZ: w },
   ];
-};
+}
 
-const CASTLE_TREE_CLEARANCE_ZONE: Aabb = {
+export const CASTLE_TREE_CLEARANCE_ZONE: Aabb2d = {
   minX: -CASTLE_TREE_CLEARANCE_HALF_EXTENT,
   maxX: CASTLE_TREE_CLEARANCE_HALF_EXTENT,
   minZ: -CASTLE_TREE_CLEARANCE_HALF_EXTENT,
   maxZ: CASTLE_TREE_CLEARANCE_HALF_EXTENT,
 };
 
-const intersectsSpawnerClearance = (
+function intersectsSpawnerClearance(
   x: number,
   z: number,
   halfX: number,
-  halfZ: number
-): boolean => {
-  const obstacleAabb = toObstacleAabb(x, z, halfX, halfZ);
+  halfZ: number,
+): boolean {
+  const obstacleAabb = aabbFromCenter(x, z, halfX, halfZ);
   for (const clearance of getSpawnerClearanceZones()) {
     if (intersectsAabb(obstacleAabb, clearance)) return true;
   }
   return false;
-};
+}
 
-const intersectsCastleTreeClearance = (
+function intersectsCastleTreeClearance(
   x: number,
   z: number,
   halfX: number,
-  halfZ: number
-): boolean =>
-  intersectsAabb(
-    toObstacleAabb(x, z, halfX, halfZ),
-    CASTLE_TREE_CLEARANCE_ZONE
+  halfZ: number,
+): boolean {
+  return intersectsAabb(
+    aabbFromCenter(x, z, halfX, halfZ),
+    CASTLE_TREE_CLEARANCE_ZONE,
   );
+}
 
-const isDisallowedStaticStructure = (structure: StructureState): boolean => {
+function isDisallowedStaticStructure(structure: StructureState): boolean {
   if (structure.ownerId !== 'Map') return false;
   if (structure.type === 'tree') {
     const half = (structure.metadata?.treeFootprint ?? 2) * 0.5;
@@ -113,13 +72,13 @@ const isDisallowedStaticStructure = (structure: StructureState): boolean => {
         structure.center.x,
         structure.center.z,
         half,
-        half
+        half,
       ) ||
       intersectsCastleTreeClearance(
         structure.center.x,
         structure.center.z,
         half,
-        half
+        half,
       )
     );
   }
@@ -130,15 +89,15 @@ const isDisallowedStaticStructure = (structure: StructureState): boolean => {
       structure.center.x,
       structure.center.z,
       halfX,
-      halfZ
+      halfZ,
     );
   }
   return false;
-};
+}
 
-export const sanitizeStaticMapStructures = (
-  structures: Record<string, StructureState>
-): string[] => {
+export function sanitizeStaticMapStructures(
+  structures: Record<string, StructureState>,
+): string[] {
   const removed: string[] = [];
   for (const [structureId, structure] of Object.entries(structures)) {
     if (!isDisallowedStaticStructure(structure)) continue;
@@ -146,9 +105,9 @@ export const sanitizeStaticMapStructures = (
     removed.push(structureId);
   }
   return removed;
-};
+}
 
-const createMapTowerStructures = (createdAtMs: number): StructureState[] => {
+function createMapTowerStructures(createdAtMs: number): StructureState[] {
   const centerX = 0;
   const centerZ = 0;
   const outwardOffset = 6;
@@ -167,58 +126,62 @@ const createMapTowerStructures = (createdAtMs: number): StructureState[] => {
   ];
   return positions.map((position) => ({
     structureId: toStructureId('map-tower', position.x, position.z),
-    ownerId: 'Map',
-    type: 'tower',
+    ownerId: 'Map' as const,
+    type: 'tower' as const,
     center: position,
     hp: 100,
     maxHp: 100,
     createdAtMs,
   }));
-};
+}
 
-const createMapTreeStructure = (
+function createMapTreeStructure(
   tree: { x: number; z: number; footprint: 1 | 2 | 3 | 4 },
-  createdAtMs: number
-): StructureState => ({
-  structureId: toStructureId('map-tree', tree.x, tree.z),
-  ownerId: 'Map',
-  type: 'tree',
-  center: { x: tree.x, z: tree.z },
-  hp: 100,
-  maxHp: 100,
-  createdAtMs,
-  metadata: {
-    treeFootprint: tree.footprint,
-  },
-});
-
-const createMapRockStructure = (
-  rock: RockPlacement,
-  createdAtMs: number
-): StructureState => ({
-  structureId: toStructureId('map-rock', rock.x, rock.z),
-  ownerId: 'Map',
-  type: 'rock',
-  center: { x: rock.x, z: rock.z },
-  hp: 100,
-  maxHp: 100,
-  createdAtMs,
-  metadata: {
-    rock: {
-      footprintX: rock.footprintX,
-      footprintZ: rock.footprintZ,
-      yawQuarterTurns: rock.yawQuarterTurns,
-      modelIndex: rock.modelIndex,
-      mirrorX: rock.mirrorX,
-      mirrorZ: rock.mirrorZ,
-      verticalScale: rock.verticalScale,
+  createdAtMs: number,
+): StructureState {
+  return {
+    structureId: toStructureId('map-tree', tree.x, tree.z),
+    ownerId: 'Map',
+    type: 'tree',
+    center: { x: tree.x, z: tree.z },
+    hp: 100,
+    maxHp: 100,
+    createdAtMs,
+    metadata: {
+      treeFootprint: tree.footprint,
     },
-  },
-});
+  };
+}
 
-export const buildStaticMapStructures = (
-  createdAtMs: number
-): Record<string, StructureState> => {
+function createMapRockStructure(
+  rock: RockPlacement,
+  createdAtMs: number,
+): StructureState {
+  return {
+    structureId: toStructureId('map-rock', rock.x, rock.z),
+    ownerId: 'Map',
+    type: 'rock',
+    center: { x: rock.x, z: rock.z },
+    hp: 100,
+    maxHp: 100,
+    createdAtMs,
+    metadata: {
+      rock: {
+        footprintX: rock.footprintX,
+        footprintZ: rock.footprintZ,
+        yawQuarterTurns: rock.yawQuarterTurns,
+        modelIndex: rock.modelIndex,
+        mirrorX: rock.mirrorX,
+        mirrorZ: rock.mirrorZ,
+        verticalScale: rock.verticalScale,
+      },
+    },
+  };
+}
+
+export function buildStaticMapStructures(
+  createdAtMs: number,
+): Record<string, StructureState> {
   const structures: Record<string, StructureState> = {};
   for (const tower of createMapTowerStructures(createdAtMs)) {
     structures[tower.structureId] = tower;
@@ -243,13 +206,13 @@ export const buildStaticMapStructures = (
     structures[structure.structureId] = structure;
   }
   return structures;
-};
+}
 
-export const hasStaticMapStructures = (
-  structures: Record<string, StructureState>
-): boolean => {
+export function hasStaticMapStructures(
+  structures: Record<string, StructureState>,
+): boolean {
   for (const structure of Object.values(structures)) {
     if (structure.ownerId === 'Map') return true;
   }
   return false;
-};
+}

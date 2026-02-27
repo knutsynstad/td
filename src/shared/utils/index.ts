@@ -1,5 +1,5 @@
 export type { Aabb2d } from './aabb';
-export { intersectsAabb } from './aabb';
+export { aabbFromCenter, intersectsAabb } from './aabb';
 export { pickUniqueRandom, shuffle } from './array';
 export {
   clamp,

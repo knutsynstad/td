@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { intersectsAabb } from './aabb';
+import { aabbFromCenter, intersectsAabb } from './aabb';
+
+describe('aabbFromCenter', () => {
+  it('creates AABB from center and half-extents', () => {
+    const aabb = aabbFromCenter(5, 10, 2, 3);
+    expect(aabb).toEqual({
+      minX: 3,
+      maxX: 7,
+      minZ: 7,
+      maxZ: 13,
+    });
+  });
+});
 
 describe('intersectsAabb', () => {
   it('returns true for overlapping boxes', () => {

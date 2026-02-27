@@ -39,7 +39,7 @@ import {
   buildStaticMapStructures,
   hasStaticMapStructures,
   sanitizeStaticMapStructures,
-} from './staticStructures';
+} from '../../shared/world/staticStructures';
 import {
   acquireLeaderLock,
   addCoins,
