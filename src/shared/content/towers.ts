@@ -23,36 +23,28 @@ export type TowerUpgradeId = 'range' | 'damage' | 'speed';
 export type TowerUpgradeDef = {
   id: TowerUpgradeId;
   label: string;
-  requiredWorkers: number;
-  upgradeDurationSec: number;
   maxLevel: number;
-  energyCost: number;
+  upgradeCost: number;
 };
 
 export const TOWER_UPGRADE_DEFS: Record<TowerUpgradeId, TowerUpgradeDef> = {
   range: {
     id: 'range',
     label: 'Range',
-    requiredWorkers: 1,
-    upgradeDurationSec: 8,
     maxLevel: 5,
-    energyCost: 20,
+    upgradeCost: 20,
   },
   damage: {
     id: 'damage',
     label: 'Damage',
-    requiredWorkers: 1,
-    upgradeDurationSec: 8,
     maxLevel: 5,
-    energyCost: 20,
+    upgradeCost: 20,
   },
   speed: {
     id: 'speed',
     label: 'Speed',
-    requiredWorkers: 2,
-    upgradeDurationSec: 10,
     maxLevel: 5,
-    energyCost: 20,
+    upgradeCost: 20,
   },
 };
 

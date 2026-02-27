@@ -6,34 +6,42 @@ import type {
   MobSlices,
   StructureDelta,
   WaveDelta,
-} from '../../shared/game-protocol';
+} from './game-protocol';
 import type {
   MobState,
   StructureState,
   WorldMeta,
   WorldState,
-} from '../../shared/game-state';
+} from './game-state';
+import { getStructureFootprint, STRUCTURE_DEFS } from './content/structures';
+import { getTowerDef, getTowerDps } from './content/towers';
+import { MOB_DEFS, DEFAULT_MOB_TYPE } from './content/mobs';
 import {
-  AUTO_WAVE_INITIAL_DELAY_MS,
-  AUTO_WAVE_INTERMISSION_MS,
-  DELTA_CASTLE_THREAT_MOBS_BUDGET,
-  DELTA_NEAR_MOBS_BUDGET,
-  DELTA_RECENTLY_DAMAGED_MOBS_BUDGET,
-  ENABLE_FULL_MOB_DELTAS,
-  FULL_MOB_DELTA_INTERVAL_MS,
-  FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS,
-  FULL_MOB_SNAPSHOT_CHUNK_SIZE,
-  ENABLE_INTEREST_MANAGED_MOB_DELTAS,
-  ENABLE_SERVER_TOWER_SPATIAL_DAMAGE,
-  MAX_DELTA_MOBS,
-  MAX_DELTA_PLAYERS,
-  MAX_MOBS,
-  MAX_STRUCTURE_DELTA_REMOVES,
-  MAX_STRUCTURE_DELTA_UPSERTS,
-  MOB_SPEED_UNITS_PER_SECOND,
-  SIM_TICK_MS,
-  WAVE_SPAWN_BASE,
-} from './config';
+  getWaveMobCount,
+  getWaveSpawnRate,
+  WAVE_MIN_SPAWNERS,
+  WAVE_MAX_SPAWNERS,
+} from './content/waves';
+import { WORLD_BOUNDS, GRID_SIZE, CASTLE_HALF_EXTENT } from './content/world';
+
+// Simulation constants
+export const SIM_TICK_MS = 100;
+export const MAX_MOBS = 10_000;
+export const MAX_DELTA_PLAYERS = 200;
+export const MAX_DELTA_MOBS = 200;
+export const MAX_STRUCTURE_DELTA_UPSERTS = 100;
+export const MAX_STRUCTURE_DELTA_REMOVES = 100;
+export const ENABLE_FULL_MOB_DELTAS = true;
+export const FULL_MOB_DELTA_INTERVAL_MS = 5_000;
+export const FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS = 1_000;
+export const FULL_MOB_SNAPSHOT_CHUNK_SIZE = 600;
+export const DELTA_NEAR_MOBS_BUDGET = 220;
+export const DELTA_CASTLE_THREAT_MOBS_BUDGET = 160;
+export const DELTA_RECENTLY_DAMAGED_MOBS_BUDGET = 120;
+export const ENABLE_INTEREST_MANAGED_MOB_DELTAS = true;
+export const ENABLE_SERVER_TOWER_SPATIAL_DAMAGE = true;
+export const AUTO_WAVE_INITIAL_DELAY_MS = 5_000;
+export const AUTO_WAVE_INTERMISSION_MS = 10_000;
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
@@ -55,20 +63,22 @@ const hashString01 = (value: string): number => {
   return (hash >>> 0) / 4294967296;
 };
 
-const WORLD_BOUNDS = 64;
-const GRID_SIZE = 1;
 const SPAWNER_ENTRY_INSET_CELLS = 3;
 const STAGING_ISLAND_DISTANCE = 14;
 const CASTLE_CAPTURE_RADIUS = 2;
 const CASTLE_ROUTE_HALF_WIDTH_CELLS = 1;
-const CASTLE_HALF_EXTENT = 4;
 const MOB_ROUTE_REACH_RADIUS = 0.65;
 const MOB_ROUTE_LATERAL_SPREAD = 0.9;
 const MOB_STUCK_TIMEOUT_MS = 2 * 60 * 1000;
 const MOB_STUCK_PROGRESS_EPSILON = 0.1;
-const SERVER_TOWER_RANGE = 8;
-const SERVER_TOWER_DPS = 16;
-const SERVER_SPATIAL_CELL_SIZE = SERVER_TOWER_RANGE;
+
+const baseTower = getTowerDef('base');
+const TOWER_RANGE = baseTower.range;
+const TOWER_DPS = getTowerDps(baseTower);
+const TOWER_SPATIAL_CELL_SIZE = TOWER_RANGE;
+
+const baseMob = MOB_DEFS[DEFAULT_MOB_TYPE];
+const MOB_SPEED_UNITS_PER_SECOND = baseMob.speed;
 const FULL_MOB_DELTA_INTERVAL_TICKS = Math.max(
   1,
   Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
@@ -273,13 +283,15 @@ const splitByWeights = (total: number, count: number): number[] => {
 };
 
 const pickSpawnerSidesForWave = (wave: number): SideDef[] => {
-  const minSpawners = 1;
-  const maxSpawners = 3;
-  const waveCap = Math.min(maxSpawners, minSpawners + Math.floor(wave / 3));
+  const waveCap = Math.min(
+    WAVE_MAX_SPAWNERS,
+    WAVE_MIN_SPAWNERS + Math.floor(wave / 3)
+  );
   const count = clamp(
-    minSpawners + Math.floor(Math.random() * (waveCap - minSpawners + 1)),
-    minSpawners,
-    maxSpawners
+    WAVE_MIN_SPAWNERS +
+      Math.floor(Math.random() * (waveCap - WAVE_MIN_SPAWNERS + 1)),
+    WAVE_MIN_SPAWNERS,
+    WAVE_MAX_SPAWNERS
   );
   return shuffle(SIDE_DEFS).slice(0, count);
 };
@@ -356,39 +368,13 @@ const buildFlowField = (
   markBlockedAabb(0, 0, CASTLE_HALF_EXTENT, CASTLE_HALF_EXTENT);
 
   for (const structure of Object.values(structures)) {
-    const treeFootprint = structure.metadata?.treeFootprint ?? 2;
-    const rockHalfX = (structure.metadata?.rock?.footprintX ?? 2) * 0.5;
-    const rockHalfZ = (structure.metadata?.rock?.footprintZ ?? 2) * 0.5;
-    const halfX =
-      structure.type === 'wall'
-        ? 0.6
-        : structure.type === 'tower'
-          ? 1
-          : structure.type === 'bank'
-            ? 1.4
-            : structure.type === 'tree'
-              ? treeFootprint * 0.5
-              : structure.type === 'rock'
-                ? rockHalfX
-                : 1.1;
-    const halfZ =
-      structure.type === 'wall'
-        ? 0.6
-        : structure.type === 'tower'
-          ? 1
-          : structure.type === 'bank'
-            ? 1.4
-            : structure.type === 'tree'
-              ? treeFootprint * 0.5
-              : structure.type === 'rock'
-                ? rockHalfZ
-                : 1.1;
-    const inflate = structure.type === 'wall' ? 0.25 : 0.4;
+    const def = STRUCTURE_DEFS[structure.type];
+    const foot = getStructureFootprint(structure);
     markBlockedAabb(
       structure.center.x,
       structure.center.z,
-      halfX + inflate,
-      halfZ + inflate
+      foot.halfX + def.pathInflate,
+      foot.halfZ + def.pathInflate
     );
   }
 
@@ -607,8 +593,8 @@ const makeMob = (meta: WorldMeta, spawnerId: string): MobState => {
     mobId: String(seq),
     position: spawn,
     velocity: { x: 0, z: 0 },
-    hp: 100,
-    maxHp: 100,
+    hp: baseMob.hp,
+    maxHp: baseMob.maxHp,
     spawnerId,
     routeIndex: 0,
     stuckMs: 0,
@@ -650,7 +636,7 @@ const collectAutoUnblockCandidates = (
   structures: Record<string, StructureState>
 ): StructureState[] =>
   Object.values(structures)
-    .filter((structure) => structure.type !== 'bank')
+    .filter((structure) => STRUCTURE_DEFS[structure.type].blocksPath)
     .sort((a, b) => {
       const ownerPriorityA = a.ownerId === 'Map' ? 1 : 0;
       const ownerPriorityB = b.ownerId === 'Map' ? 1 : 0;
@@ -680,7 +666,7 @@ const prepareNextWaveSpawners = (
   world: WorldState
 ): WorldState['wave']['spawners'] => {
   const nextWave = world.wave.wave + 1;
-  const totalMobCount = (5 + nextWave * 2) * 8;
+  const totalMobCount = getWaveMobCount(nextWave);
   const sides = pickSpawnerSidesForWave(nextWave);
   const split = splitByWeights(totalMobCount, sides.length);
   return split.map((count, index) => {
@@ -691,7 +677,7 @@ const prepareNextWaveSpawners = (
       spawnedCount: 0,
       aliveCount: 0,
       spawnRatePerSecond:
-        (WAVE_SPAWN_BASE + nextWave * 0.2) * (0.9 + Math.random() * 0.4),
+        getWaveSpawnRate(nextWave) * (0.9 + Math.random() * 0.4),
       spawnAccumulator: 0,
       gateOpen: false,
       routeState: 'blocked',
@@ -752,7 +738,7 @@ const updateMobs = (
   );
   perf.towersSimulated += towerList.length;
   const towerSpatialIndex = createSpatialIndex<StructureState>(
-    SERVER_SPATIAL_CELL_SIZE
+    TOWER_SPATIAL_CELL_SIZE
   );
   if (ENABLE_SERVER_TOWER_SPATIAL_DAMAGE) {
     for (const tower of towerList) {
@@ -833,7 +819,7 @@ const updateMobs = (
         towerSpatialIndex,
         mob.position.x,
         mob.position.z,
-        SERVER_TOWER_RANGE,
+        TOWER_RANGE,
         towerCandidateScratch
       );
       for (const tower of nearbyTowers) {
@@ -844,9 +830,9 @@ const updateMobs = (
             tower.center.z,
             mob.position.x,
             mob.position.z
-          ) <= SERVER_TOWER_RANGE
+          ) <= TOWER_RANGE
         ) {
-          mob.hp -= SERVER_TOWER_DPS * deltaSeconds;
+          mob.hp -= TOWER_DPS * deltaSeconds;
         }
       }
     } else {
@@ -858,9 +844,9 @@ const updateMobs = (
             tower.center.z,
             mob.position.x,
             mob.position.z
-          ) <= SERVER_TOWER_RANGE
+          ) <= TOWER_RANGE
         ) {
-          mob.hp -= SERVER_TOWER_DPS * deltaSeconds;
+          mob.hp -= TOWER_DPS * deltaSeconds;
         }
       }
     }
@@ -999,13 +985,14 @@ const applyCommands = (
       continue;
     }
     if (command.type === 'buildStructure') {
+      const def = STRUCTURE_DEFS[command.structure.type];
       const structure: StructureState = {
         structureId: command.structure.structureId,
         ownerId: command.playerId,
         type: command.structure.type,
         center: command.structure.center,
-        hp: 100,
-        maxHp: 100,
+        hp: def.hp,
+        maxHp: def.maxHp,
         createdAtMs: world.meta.lastTickMs,
       };
       world.structures[structure.structureId] = structure;
@@ -1014,13 +1001,14 @@ const applyCommands = (
     }
     if (command.type === 'buildStructures') {
       for (const requested of command.structures) {
+        const def = STRUCTURE_DEFS[requested.type];
         const structure: StructureState = {
           structureId: requested.structureId,
           ownerId: command.playerId,
           type: requested.type,
           center: requested.center,
-          hp: 100,
-          maxHp: 100,
+          hp: def.hp,
+          maxHp: def.maxHp,
           createdAtMs: world.meta.lastTickMs,
         };
         world.structures[structure.structureId] = structure;

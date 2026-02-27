@@ -23,15 +23,18 @@ import {
   MAX_BATCH_BYTES,
   MAX_BATCH_EVENTS,
   MAX_PLAYERS,
-  MAX_STRUCTURE_DELTA_UPSERTS,
   PLAYER_TIMEOUT_MS,
   SERVER_TICK_P95_TARGET_MS,
   SERVER_TICK_PROFILE_LOG_EVERY_TICKS,
-  SIM_TICK_MS,
   SLOW_TICK_LOG_THRESHOLD_MS,
 } from './config';
 import { getGameChannelName } from './keys';
-import { buildPresenceLeaveDelta, runSimulation } from './simulation';
+import {
+  buildPresenceLeaveDelta,
+  runSimulation,
+  SIM_TICK_MS,
+  MAX_STRUCTURE_DELTA_UPSERTS,
+} from '../../shared/simulation';
 import {
   buildStaticMapStructures,
   hasStaticMapStructures,

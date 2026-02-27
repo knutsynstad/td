@@ -1,6 +1,6 @@
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import type { WorldState } from '../../shared/game-state';
-import { runSimulation } from './simulation';
+import { runSimulation } from '../../shared/simulation';
 
 type HarnessResult = {
   players: number;

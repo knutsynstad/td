@@ -6,9 +6,9 @@ import {
   FULL_MOB_DELTA_INTERVAL_MS,
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
   MAX_DELTA_MOBS,
+  runSimulation,
   SIM_TICK_MS,
-} from './config';
-import { runSimulation } from './simulation';
+} from '../../shared/simulation';
 
 const world = (nowMs: number): WorldState => ({
   meta: {
