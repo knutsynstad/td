@@ -1017,7 +1017,7 @@ updateLoadingProgress();
 let towerModelTemplate: THREE.Object3D | null = null;
 let arrowModelTemplate: THREE.Object3D | null = null;
 let treeModelTemplate: THREE.Object3D | null = null;
-let coinModelTemplate: THREE.Object3D | null = null;
+const coinModelTemplateRef = { current: null as THREE.Object3D | null };
 let wallModelTemplate: THREE.Object3D | null = null;
 let playerModelTemplate: THREE.Object3D | null = null;
 const playerFacingOffset = { value: 0 };
@@ -1286,9 +1286,9 @@ loadModelWithProgress(
 loadModelWithProgress(
   coinModelUrl,
   (gltf) => {
-    coinModelTemplate = prepareCoinModel(gltf.scene);
+    coinModelTemplateRef.current = prepareCoinModel(gltf.scene);
     hudUpdaters.syncHudCoinModel();
-    setCoinParticleTemplate(coinModelTemplate);
+    setCoinParticleTemplate(coinModelTemplateRef.current);
   },
   (error) => {
     console.error('Failed to load coin model:', error);
@@ -2274,7 +2274,7 @@ const hudUpdaters = createHudUpdaters({
   coinHudCamera,
   coinHudRoot,
   coinHudScene,
-  coinModelTemplate,
+  coinModelTemplateRef,
   minimapCanvasEl,
   minimapCtx,
   minimapCastleIcon,

@@ -7,6 +7,7 @@ type SmokePoofInstance = {
   maxAge: number;
   baseScale: number;
   velocity: THREE.Vector3;
+  velocityDecay: number;
 };
 
 const POP_DURATION = 0.12;
@@ -53,6 +54,8 @@ export type SmokePoofOptions = {
   scaleMultiplier?: number;
   count?: number;
   spreadMultiplier?: number;
+  velocity?: THREE.Vector3;
+  velocityDecay?: number;
 };
 
 export type SmokePoofEffect = {
@@ -95,11 +98,13 @@ export const createSmokePoofEffect = (scene: THREE.Scene): SmokePoofEffect => {
       const up =
         (SPRAY_UP_MIN + Math.random() * (SPRAY_UP_MAX - SPRAY_UP_MIN)) *
         spreadMult;
-      const velocity = new THREE.Vector3(
-        Math.cos(angle) * speed,
-        up,
-        Math.sin(angle) * speed
-      );
+      const velocity = options?.velocity
+        ? options.velocity.clone()
+        : new THREE.Vector3(
+            Math.cos(angle) * speed,
+            up,
+            Math.sin(angle) * speed
+          );
       const materials = collectMaterials(root);
       scene.add(root);
 
@@ -110,6 +115,7 @@ export const createSmokePoofEffect = (scene: THREE.Scene): SmokePoofEffect => {
         maxAge: TOTAL_DURATION,
         baseScale,
         velocity,
+        velocityDecay: options?.velocityDecay ?? 0,
       });
     }
   };
@@ -124,6 +130,10 @@ export const createSmokePoofEffect = (scene: THREE.Scene): SmokePoofEffect => {
       inst.age += delta;
 
       inst.root.position.add(inst.velocity.clone().multiplyScalar(delta));
+      if (inst.velocityDecay > 0) {
+        const decayFactor = Math.max(0, 1 - inst.velocityDecay * delta);
+        inst.velocity.multiplyScalar(decayFactor);
+      }
 
       const popT = Math.min(1, inst.age / POP_DURATION);
       const popEase = 1 - (1 - popT) * (1 - popT);

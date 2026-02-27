@@ -39,7 +39,7 @@ export type HudUpdatersContext = {
   coinHudCamera: THREE.PerspectiveCamera;
   coinHudRoot: THREE.Group;
   coinHudScene: THREE.Scene;
-  coinModelTemplate: THREE.Object3D | null;
+  coinModelTemplateRef: { current: THREE.Object3D | null };
   minimapCanvasEl: HTMLCanvasElement;
   minimapCtx: CanvasRenderingContext2D | null;
   minimapCastleIcon: HTMLImageElement;
@@ -95,8 +95,8 @@ export const createHudUpdaters = (
 
   const syncHudCoinModel = () => {
     ctx.coinHudRoot.clear();
-    if (!ctx.coinModelTemplate) return;
-    const hudCoin = ctx.coinModelTemplate.clone(true);
+    if (!ctx.coinModelTemplateRef.current) return;
+    const hudCoin = ctx.coinModelTemplateRef.current.clone(true);
     hudCoin.scale.multiplyScalar(0.85);
     hudCoin.rotation.y = Math.PI / 7;
     ctx.coinHudRoot.add(hudCoin);

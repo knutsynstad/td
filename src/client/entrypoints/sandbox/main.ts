@@ -1368,6 +1368,16 @@ Promise.all([
             const cannonLaunchVel =
               cannonLaunchDir.multiplyScalar(CANNONBALL_SPEED);
             spawnCannonball(cannonLaunchPosScratch, cannonLaunchVel);
+            const muzzleDir = cannonLaunchVel.clone().normalize();
+            const muzzleTipPos = cannonLaunchPosScratch
+              .clone()
+              .addScaledVector(muzzleDir, 0.5);
+            smokePoofEffect.spawnSmokePoof(muzzleTipPos, {
+              count: 1,
+              scaleMultiplier: 2.5,
+              velocity: muzzleDir.multiplyScalar(CANNONBALL_SPEED),
+              velocityDecay: 18,
+            });
             cannonShootCooldown = sandboxCannon.shootCadence;
           }
         } else if (cannonRig) {
