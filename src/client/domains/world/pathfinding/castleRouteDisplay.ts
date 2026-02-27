@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { snapToGrid } from '../../../../shared/utils';
 import { simplifyCollinear } from './pathSimplification';
 
 type CastleRouteDisplayOptions = {
@@ -7,9 +8,6 @@ type CastleRouteDisplayOptions = {
   gridSize: number;
   castleFrontDirection: THREE.Vector2;
 };
-
-const snapToGrid = (value: number, gridSize: number) =>
-  Math.round(value / gridSize) * gridSize;
 
 const isPointInsideCastle = (
   point: THREE.Vector3,

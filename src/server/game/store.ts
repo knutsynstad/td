@@ -21,6 +21,7 @@ import {
   PLAYER_SPEED_UNITS_PER_SECOND,
   RATE_REFILL_PER_SECOND,
 } from './config';
+import { isRecord } from '../../shared/utils';
 import { getEconomyRedisKeys, getGameRedisKeys } from './keys';
 import { buildStaticMapStructures } from './staticStructures';
 
@@ -49,9 +50,6 @@ const parseJson = (value: string | undefined): unknown => {
     return undefined;
   }
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 const clampCoins = (coins: number): number =>
   Math.max(0, Math.min(ENERGY_CAP, coins));

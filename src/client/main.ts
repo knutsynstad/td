@@ -110,6 +110,7 @@ import {
   type BuildMode,
 } from './domains/gameplay/buildingPlacement';
 import { getNatureLabel } from '../shared/natureLabels';
+import { snapToGrid } from '../shared/utils';
 import {
   clearSelectionState,
   createSelectionState,
@@ -1410,9 +1411,8 @@ const markPersistentMapFeature = (mesh: THREE.Mesh) => {
 // Initialize spatial grid and lane path caches
 const spatialGrid = new SpatialGrid(SPATIAL_GRID_CELL_SIZE);
 const getCastleEntryGoals = () => {
-  const snapToGrid = (v: number) => Math.round(v / GRID_SIZE) * GRID_SIZE;
-  const x = snapToGrid(castleCollider.center.x);
-  const z = snapToGrid(castleCollider.center.z);
+  const x = snapToGrid(castleCollider.center.x, GRID_SIZE);
+  const z = snapToGrid(castleCollider.center.z, GRID_SIZE);
   const hx = castleCollider.halfSize.x;
   const hz = castleCollider.halfSize.z;
   // Keep the front entry goal beyond the castle flow-field blocker inflation.
@@ -1439,8 +1439,8 @@ const getCastleEntryGoals = () => {
   for (const lateral of lateralOrder) {
     const rawX = goalX + tangentX * lateral * GRID_SIZE;
     const rawZ = goalZ + tangentZ * lateral * GRID_SIZE;
-    const snappedX = snapToGrid(rawX);
-    const snappedZ = snapToGrid(rawZ);
+    const snappedX = snapToGrid(rawX, GRID_SIZE);
+    const snappedZ = snapToGrid(rawZ, GRID_SIZE);
     rawGoals.push({ x: rawX, z: rawZ });
     snappedGoals.push({ x: snappedX, z: snappedZ });
     goals.push(new THREE.Vector3(snappedX, 0, snappedZ));

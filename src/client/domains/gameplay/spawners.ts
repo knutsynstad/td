@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { weightedSplit } from '../../../shared/utils';
 import type { WaveSpawner } from './types/entities';
 
 type SpawnerOptions = {
@@ -9,38 +10,15 @@ type SpawnerOptions = {
   random?: () => number;
 };
 
-const weightedSplit = (
-  total: number,
-  count: number,
-  random: () => number
-): number[] => {
-  if (count <= 0) return [];
-  const weights = Array.from({ length: count }, () => 0.75 + random());
-  const weightSum = weights.reduce((sum, value) => sum + value, 0);
-  const raw = weights.map((weight) => (weight / weightSum) * total);
-  const base = raw.map((value) => Math.floor(value));
-  let remainder = total - base.reduce((sum, value) => sum + value, 0);
-  while (remainder > 0) {
-    let bestIdx = 0;
-    let bestFrac = -1;
-    for (let i = 0; i < raw.length; i += 1) {
-      const frac = raw[i]! - base[i]!;
-      if (frac > bestFrac) {
-        bestFrac = frac;
-        bestIdx = i;
-      }
-    }
-    base[bestIdx] = (base[bestIdx] ?? 0) + 1;
-    remainder -= 1;
-  }
-  return base;
-};
-
 export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
   const random = opts.random ?? Math.random;
   const spawnerCount = opts.doorPositions.length;
   if (spawnerCount === 0) return [];
-  const split = weightedSplit(opts.totalMobCount, spawnerCount, random);
+  const split = weightedSplit(
+    opts.totalMobCount,
+    spawnerCount,
+    random,
+  );
 
   return split.map((count, index) => {
     const position = opts.doorPositions[index]!.clone();

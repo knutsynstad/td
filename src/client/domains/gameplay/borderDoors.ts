@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clampInt, pickUniqueRandom } from '../../../shared/utils';
 
 export const getAllBorderDoors = (worldBounds: number): THREE.Vector3[] => {
   return [
@@ -7,25 +8,6 @@ export const getAllBorderDoors = (worldBounds: number): THREE.Vector3[] => {
     new THREE.Vector3(0, 0, worldBounds),
     new THREE.Vector3(-worldBounds, 0, 0),
   ];
-};
-
-const clampInt = (value: number, min: number, max: number) => {
-  return Math.max(min, Math.min(max, Math.floor(value)));
-};
-
-const pickUniqueRandom = <T>(
-  items: T[],
-  count: number,
-  random: () => number
-): T[] => {
-  const pool = items.slice();
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
-    const tmp = pool[i];
-    pool[i] = pool[j]!;
-    pool[j] = tmp!;
-  }
-  return pool.slice(0, count);
 };
 
 export const selectActiveDoorsForWave = (

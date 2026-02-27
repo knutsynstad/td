@@ -1,4 +1,5 @@
 import { createMulberry32, deriveSeed } from './rng';
+import { lerp, smoothStep } from '../utils';
 
 export type TreePlacement = {
   x: number;
@@ -48,9 +49,6 @@ export type SeededWorldGenConfig = {
   gridStep?: number;
   rules?: WorldGenRule[];
 };
-
-const smoothStep = (t: number) => t * t * (3 - 2 * t);
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 const hash2 = (seed: number, x: number, z: number) => {
   let h = seed >>> 0;

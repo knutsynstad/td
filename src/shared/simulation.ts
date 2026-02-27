@@ -23,6 +23,14 @@ import {
   WAVE_MAX_SPAWNERS,
 } from './content/waves';
 import { WORLD_BOUNDS, GRID_SIZE, CASTLE_HALF_EXTENT } from './content/world';
+import {
+  clamp,
+  distance2d,
+  hashString01,
+  normalize2d,
+  shuffle,
+  weightedSplit,
+} from './utils';
 
 // Simulation constants
 export const SIM_TICK_MS = 100;
@@ -42,26 +50,6 @@ export const ENABLE_INTEREST_MANAGED_MOB_DELTAS = true;
 export const ENABLE_SERVER_TOWER_SPATIAL_DAMAGE = true;
 export const AUTO_WAVE_INITIAL_DELAY_MS = 5_000;
 export const AUTO_WAVE_INTERMISSION_MS = 10_000;
-
-const clamp = (value: number, min: number, max: number): number =>
-  Math.max(min, Math.min(max, value));
-const distance = (ax: number, az: number, bx: number, bz: number): number =>
-  Math.hypot(bx - ax, bz - az);
-
-const normalize = (x: number, z: number): { x: number; z: number } => {
-  const len = Math.hypot(x, z);
-  if (len <= 0.0001) return { x: 0, z: 0 };
-  return { x: x / len, z: z / len };
-};
-
-const hashString01 = (value: string): number => {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0) / 4294967296;
-};
 
 const SPAWNER_ENTRY_INSET_CELLS = 3;
 const STAGING_ISLAND_DISTANCE = 14;
@@ -246,40 +234,6 @@ const getCastleEntryGoals = (): Array<{ x: number; z: number }> => {
     { x: CASTLE_HALF_EXTENT + approachOffset, z: 0 },
     { x: -CASTLE_HALF_EXTENT - approachOffset, z: 0 },
   ];
-};
-
-const shuffle = <T>(values: T[]): T[] => {
-  const out = values.slice();
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = out[i]!;
-    out[i] = out[j]!;
-    out[j] = tmp;
-  }
-  return out;
-};
-
-const splitByWeights = (total: number, count: number): number[] => {
-  if (count <= 0) return [];
-  const weights = Array.from({ length: count }, () => 0.75 + Math.random());
-  const sum = weights.reduce((acc, value) => acc + value, 0);
-  const raw = weights.map((value) => (value / sum) * total);
-  const base = raw.map((value) => Math.floor(value));
-  let remainder = total - base.reduce((acc, value) => acc + value, 0);
-  while (remainder > 0) {
-    let bestIndex = 0;
-    let bestFraction = -1;
-    for (let i = 0; i < raw.length; i += 1) {
-      const fraction = raw[i]! - base[i]!;
-      if (fraction > bestFraction) {
-        bestFraction = fraction;
-        bestIndex = i;
-      }
-    }
-    base[bestIndex] = (base[bestIndex] ?? 0) + 1;
-    remainder -= 1;
-  }
-  return base;
 };
 
 const pickSpawnerSidesForWave = (wave: number): SideDef[] => {
@@ -499,7 +453,7 @@ const getNearestGoalDistance = (
 ) => {
   let best = Number.POSITIVE_INFINITY;
   for (const goal of goals) {
-    const d = distance(goal.x, goal.z, x, z);
+    const d = distance2d(goal.x, goal.z, x, z);
     if (d < best) best = d;
   }
   return best;
@@ -557,7 +511,7 @@ const buildSpawnerRoute = (
     const [nx, nz] = fromIdx(nextIdx);
     const nextPoint = toWorld(nx, nz);
     const last = route[route.length - 1]!;
-    if (distance(last.x, last.z, nextPoint.x, nextPoint.z) > 0.25) {
+    if (distance2d(last.x, last.z, nextPoint.x, nextPoint.z) > 0.25) {
       route.push(nextPoint);
     }
     idx = nextIdx;
@@ -575,7 +529,7 @@ const getNearestRouteIndex = (
   let bestDist = Number.POSITIVE_INFINITY;
   for (let i = 0; i < route.length; i += 1) {
     const point = route[i]!;
-    const d = distance(point.x, point.z, position.x, position.z);
+    const d = distance2d(point.x, point.z, position.x, position.z);
     if (d < bestDist) {
       bestDist = d;
       bestIdx = i;
@@ -668,7 +622,7 @@ const prepareNextWaveSpawners = (
   const nextWave = world.wave.wave + 1;
   const totalMobCount = getWaveMobCount(nextWave);
   const sides = pickSpawnerSidesForWave(nextWave);
-  const split = splitByWeights(totalMobCount, sides.length);
+  const split = weightedSplit(totalMobCount, sides.length, Math.random);
   return split.map((count, index) => {
     const side = sides[index]!;
     return {
@@ -769,7 +723,7 @@ const updateMobs = (
       mob.routeIndex = Math.max(0, Math.min(mob.routeIndex, maxRouteIndex));
       const currentTarget = route[mob.routeIndex] ?? route[maxRouteIndex]!;
       if (
-        distance(
+        distance2d(
           mob.position.x,
           mob.position.z,
           currentTarget.x,
@@ -786,7 +740,7 @@ const updateMobs = (
       const prevPoint = route[prevRouteIdx] ?? routedTarget;
       const hasForwardSegment =
         nextPoint.x !== routedTarget.x || nextPoint.z !== routedTarget.z;
-      const forward = normalize(
+      const forward = normalize2d(
         hasForwardSegment
           ? nextPoint.x - routedTarget.x
           : routedTarget.x - prevPoint.x,
@@ -804,7 +758,7 @@ const updateMobs = (
       target = entry;
     }
 
-    const moveDir = normalize(
+    const moveDir = normalize2d(
       target.x - mob.position.x,
       target.z - mob.position.z
     );
@@ -825,7 +779,7 @@ const updateMobs = (
       for (const tower of nearbyTowers) {
         perf.towerMobChecks += 1;
         if (
-          distance(
+          distance2d(
             tower.center.x,
             tower.center.z,
             mob.position.x,
@@ -839,7 +793,7 @@ const updateMobs = (
       for (const tower of towerList) {
         perf.towerMobChecks += 1;
         if (
-          distance(
+          distance2d(
             tower.center.x,
             tower.center.z,
             mob.position.x,
@@ -1132,8 +1086,8 @@ const buildUnifiedMobDelta = (
       .slice()
       .sort(
         (a, b) =>
-          distance(a.position.x, a.position.z, 0, 0) -
-          distance(b.position.x, b.position.z, 0, 0)
+          distance2d(a.position.x, a.position.z, 0, 0) -
+          distance2d(b.position.x, b.position.z, 0, 0)
       )
       .slice(0, DELTA_CASTLE_THREAT_MOBS_BUDGET);
     const recentlyDamaged = allMobs

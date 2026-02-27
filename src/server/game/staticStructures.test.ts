@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { intersectsAabb } from '../../shared/utils';
 import {
   buildStaticMapStructures,
   sanitizeStaticMapStructures,
@@ -17,9 +18,6 @@ type Aabb = {
   minZ: number;
   maxZ: number;
 };
-
-const intersectsAabb = (a: Aabb, b: Aabb): boolean =>
-  a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 
 const getSpawnerClearanceZones = (): Aabb[] => {
   const entryCoord = WORLD_BOUNDS - SPAWNER_ENTRY_INSET_CELLS;

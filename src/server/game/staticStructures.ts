@@ -1,4 +1,5 @@
 import type { StructureState } from '../../shared/game-state';
+import { intersectsAabb } from '../../shared/utils';
 import {
   generateSeededWorldFeatures,
   type RockPlacement,
@@ -23,9 +24,6 @@ type Aabb = {
   minZ: number;
   maxZ: number;
 };
-
-const intersectsAabb = (a: Aabb, b: Aabb): boolean =>
-  a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 
 const toObstacleAabb = (
   x: number,

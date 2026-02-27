@@ -17,6 +17,7 @@ import type {
   CastleCoinsWithdrawResponse,
   GamePreviewResponse,
 } from '../../shared/api';
+import { isRecord, parsePositiveInt } from '../../shared/utils';
 import {
   applyCommand,
   getCoinBalance,
@@ -39,13 +40,11 @@ type ErrorResponse = {
 
 export const api = new Hono();
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 const requireObjectBody = async (
   c: Context
 ): Promise<Record<string, unknown> | Response> => {
   const body = await c.req.json().catch(() => undefined);
-  if (!isObject(body)) {
+  if (!isRecord(body)) {
     return c.json<ErrorResponse>(
       { status: 'error', message: 'invalid request body' },
       400
@@ -53,12 +52,6 @@ const requireObjectBody = async (
   }
   return body;
 };
-const parsePositiveInt = (value: unknown): number => {
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.max(0, Math.floor(numeric));
-};
-
 api.post('/game/join', async (c) => {
   try {
     // Request body currently optional; reserved for future join options.
@@ -91,11 +84,11 @@ api.post('/game/command', async (c) => {
 
 api.post('/game/heartbeat', async (c) => {
   const bodyResult = await requireObjectBody(c);
-  if (!isObject(bodyResult)) return bodyResult;
+  if (!isRecord(bodyResult)) return bodyResult;
   const body = bodyResult;
   const request: HeartbeatRequest = {
     playerId: String(body.playerId ?? ''),
-    position: isObject(body.position)
+    position: isRecord(body.position)
       ? {
           x: Number(body.position.x ?? 0),
           z: Number(body.position.z ?? 0),
@@ -173,7 +166,7 @@ api.get('/castle/coins', async (c) => {
 
 api.post('/castle/coins/deposit', async (c) => {
   const bodyResult = await requireObjectBody(c);
-  if (!isObject(bodyResult)) return bodyResult;
+  if (!isRecord(bodyResult)) return bodyResult;
   const body = bodyResult;
   const amount = parsePositiveInt(body.amount);
   if (amount <= 0) {
@@ -198,7 +191,7 @@ api.post('/castle/coins/deposit', async (c) => {
 
 api.post('/castle/coins/withdraw', async (c) => {
   const bodyResult = await requireObjectBody(c);
-  if (!isObject(bodyResult)) return bodyResult;
+  if (!isRecord(bodyResult)) return bodyResult;
   const body = bodyResult;
   const requested = parsePositiveInt(body.amount);
   if (requested <= 0) {

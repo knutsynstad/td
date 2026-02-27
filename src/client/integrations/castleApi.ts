@@ -3,9 +3,7 @@ import type {
   CastleCoinsDepositResponse,
   CastleCoinsWithdrawResponse,
 } from '../../shared/api';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
+import { isRecord } from '../../shared/utils';
 
 const isCastleCoinsBalanceResponse = (
   value: unknown

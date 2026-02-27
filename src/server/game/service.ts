@@ -35,6 +35,7 @@ import {
   SIM_TICK_MS,
   MAX_STRUCTURE_DELTA_UPSERTS,
 } from '../../shared/simulation';
+import { percentile } from '../../shared/utils';
 import {
   buildStaticMapStructures,
   hasStaticMapStructures,
@@ -148,16 +149,6 @@ type TickProfile = {
   persistMs: number;
   broadcastMs: number;
   totalMs: number;
-};
-
-const percentile = (values: number[], p: number): number => {
-  if (values.length === 0) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const idx = Math.max(
-    0,
-    Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))
-  );
-  return sorted[idx] ?? 0;
 };
 
 const ensureStaticMap = (world: {

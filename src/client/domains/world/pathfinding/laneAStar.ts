@@ -3,6 +3,7 @@ import type {
   StaticCollider,
   SpawnerRouteState,
 } from '../../gameplay/types/entities';
+import { manhattan } from '../../../../shared/utils';
 import { simplifyCollinear } from './pathSimplification';
 
 type LanePathOptions = {
@@ -69,8 +70,6 @@ const heapPop = (heap: HeapNode[]): HeapNode => {
   }
   return top;
 };
-
-const manhattan = (dx: number, dz: number) => Math.abs(dx) + Math.abs(dz);
 
 const OFFSETS: Array<[number, number, number]> = [
   [1, 0, 1],

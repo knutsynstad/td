@@ -18,6 +18,7 @@ import type {
 import type { StructureStore } from './structureStore';
 import type { BuildMode } from './types/buildMode';
 import { aabbOverlap } from '../world/collision';
+import { snapToGrid as snapToGridUtil } from '../../../shared/utils';
 
 export type { BuildMode } from './types/buildMode';
 
@@ -33,15 +34,15 @@ type PlaceContext = {
 };
 
 export const snapToGrid = (value: number) =>
-  Math.round(value / GRID_SIZE) * GRID_SIZE;
+  snapToGridUtil(value, GRID_SIZE);
 
 const snapForFootprint = (value: number, sizeAxis: number) => {
   const tileCount = Math.max(1, Math.round(sizeAxis / GRID_SIZE));
   if (tileCount % 2 === 0) {
     const halfGrid = GRID_SIZE * 0.5;
-    return Math.round((value - halfGrid) / GRID_SIZE) * GRID_SIZE + halfGrid;
+    return snapToGridUtil(value - halfGrid, GRID_SIZE) + halfGrid;
   }
-  return snapToGrid(value);
+  return snapToGridUtil(value, GRID_SIZE);
 };
 
 export const getBuildSize = (buildMode: Exclude<BuildMode, 'off'>) =>

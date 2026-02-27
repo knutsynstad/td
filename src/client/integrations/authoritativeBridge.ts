@@ -12,6 +12,7 @@ import type {
   WaveDelta,
 } from '../../shared/game-protocol';
 import type { Vec2, WorldState } from '../../shared/game-state';
+import { isRecord } from '../../shared/utils';
 
 type PresenceCallbacks = {
   onSnapshot: (snapshot: WorldState) => void;
@@ -74,9 +75,6 @@ const getJson = async (url: string): Promise<unknown> => {
   }
   return response.json();
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 const isVec2 = (value: unknown): value is Vec2 =>
   isRecord(value) && typeof value.x === 'number' && typeof value.z === 'number';

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import type { Entity, StaticCollider } from '../gameplay/types/entities';
+import { clamp } from '../../../shared/utils';
 
-export const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
+export { clamp };
 
 export const aabbOverlap = (
   aCenter: THREE.Vector3,
