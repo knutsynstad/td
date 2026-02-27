@@ -142,7 +142,7 @@ api.post('/game/reset', async (c) => {
     await c.req.json().catch(() => undefined);
     await resetGame();
     return c.json({
-      showToast: 'Game reset. Wave 1 will start after the initial countdown.',
+      showToast: 'Game reset',
     });
   } catch (error) {
     return c.json<ErrorResponse>(
