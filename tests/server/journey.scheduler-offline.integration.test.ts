@@ -37,7 +37,7 @@ devvitTest(
 
     const tickResponse = await postJson(
       app,
-      '/internal/scheduler/game-tick',
+      '/internal/scheduler/server-clock',
       {}
     );
     expect(tickResponse.status).toBe(200);

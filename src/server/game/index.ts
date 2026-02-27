@@ -60,7 +60,6 @@ export {
   getCoinBalance,
   getGamePreview,
   resyncGame,
-  runMaintenance,
   resetGame,
 } from './handlers';
 export type { GamePreview } from './handlers';

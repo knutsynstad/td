@@ -22,7 +22,7 @@ import {
   removeOldPlayersByLastSeen,
   touchPlayerPresence,
 } from './players';
-import { enqueueCommand, trimCommandQueue } from './queue';
+import { enqueueCommand } from './queue';
 import { loadWorldState, persistWorldState, resetGameState } from './world';
 import { broadcast, ensureStaticMap } from './leaderLoop';
 
@@ -219,18 +219,6 @@ export const resyncGame = async (
   return {
     type: 'snapshot',
     snapshot: world,
-  };
-};
-
-export const runMaintenance = async (): Promise<{ stalePlayers: number }> => {
-  await trimCommandQueue();
-  const nowMs = Date.now();
-  const stale = await removeOldPlayersByLastSeen(
-    nowMs - PLAYER_TIMEOUT_MS,
-    500
-  );
-  return {
-    stalePlayers: stale.length,
   };
 };
 

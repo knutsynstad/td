@@ -38,7 +38,7 @@ import {
   verifyLeaderLock,
 } from './lock';
 import { removeOldPlayersByLastSeen } from './players';
-import { popPendingCommands } from './queue';
+import { popPendingCommands, trimCommandQueue } from './queue';
 import { loadWorldState, persistWorldState } from './world';
 
 const BATCH_ENVELOPE_OVERHEAD = 80;
@@ -158,6 +158,7 @@ export const runLeaderLoop = async (
       let stageBroadcastMs = 0;
 
       if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
+        await trimCommandQueue();
         const stalePlayers = await removeOldPlayersByLastSeen(
           nowMs - PLAYER_TIMEOUT_MS,
           500

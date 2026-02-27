@@ -29,11 +29,8 @@
   },
   "scheduler": {
     "tasks": {
-      "game-maintenance": {
-        "endpoint": "/internal/scheduler/game-maintenance"
-      },
-      "game-tick": {
-        "endpoint": "/internal/scheduler/game-tick",
+      "server-clock": {
+        "endpoint": "/internal/scheduler/server-clock",
         "cron": "*/15 * * * * *"
       }
     }
