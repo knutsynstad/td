@@ -96,3 +96,13 @@ export type WorldState = {
   mobs: Record<string, MobState>;
   wave: WaveState;
 };
+
+export type GameWorld = {
+  meta: WorldMeta;
+  mobs: Map<string, MobState>;
+  structures: Map<string, StructureState>;
+  players: Map<string, PlayerState>;
+  intents: Map<string, PlayerIntent>;
+  wave: WaveState;
+  waveDirty: boolean;
+};

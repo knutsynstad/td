@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { WorldState } from '../../shared/game-state';
+import type { GameWorld } from '../../shared/game-state';
+import { TrackedMap } from '../../shared/utils/trackedMap';
 import { runLoadHarness } from './loadHarness';
 
-const baseWorld = (): WorldState => ({
+const baseWorld = (): GameWorld => ({
   meta: {
     tickSeq: 0,
     worldVersion: 0,
@@ -12,16 +13,17 @@ const baseWorld = (): WorldState => ({
     lives: 1,
     nextMobSeq: 1,
   },
-  players: {},
-  intents: {},
-  structures: {},
-  mobs: {},
+  players: new TrackedMap(),
+  intents: new TrackedMap(),
+  structures: new TrackedMap(),
+  mobs: new TrackedMap(),
   wave: {
     wave: 0,
     active: false,
     nextWaveAtMs: 0,
     spawners: [],
   },
+  waveDirty: false,
 });
 
 describe('runLoadHarness', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandEnvelope } from './game-protocol';
-import type { WorldState } from './game-state';
+import type { GameWorld } from './game-state';
+import { TrackedMap } from './utils/trackedMap';
 import {
   AUTO_WAVE_INITIAL_DELAY_MS,
   FULL_MOB_DELTA_INTERVAL_MS,
@@ -10,7 +11,7 @@ import {
   SIM_TICK_MS,
 } from './simulation';
 
-function world(nowMs: number): WorldState {
+function world(nowMs: number): GameWorld {
   return {
     meta: {
       tickSeq: 0,
@@ -21,16 +22,17 @@ function world(nowMs: number): WorldState {
       lives: 1,
       nextMobSeq: 1,
     },
-    players: {},
-    intents: {},
-    structures: {},
-    mobs: {},
+    players: new TrackedMap(),
+    intents: new TrackedMap(),
+    structures: new TrackedMap(),
+    mobs: new TrackedMap(),
     wave: {
       wave: 0,
       active: false,
       nextWaveAtMs: 0,
       spawners: [],
     },
+    waveDirty: false,
   };
 }
 
@@ -115,8 +117,8 @@ describe('runSimulation', () => {
     ];
 
     const result = runSimulation(gameWorld, nowMs + 100, commands, 1);
-    expect(result.world.structures['wall-a']?.type).toBe('wall');
-    expect(result.world.structures['wall-b']?.type).toBe('wall');
+    expect(result.world.structures.get('wall-a')?.type).toBe('wall');
+    expect(result.world.structures.get('wall-b')?.type).toBe('wall');
 
     const structureDelta = result.deltas.find(
       (delta) => delta.type === 'structureDelta',
@@ -149,7 +151,7 @@ describe('runSimulation', () => {
         route: [{ x: 20, z: 20 }],
       },
     ];
-    gameWorld.mobs['99999'] = {
+    gameWorld.mobs.set('99999', {
       mobId: '99999',
       position: { x: 20, z: 20 },
       velocity: { x: 0, z: 0 },
@@ -159,12 +161,12 @@ describe('runSimulation', () => {
       routeIndex: 0,
       stuckMs: 0,
       lastProgressDistanceToGoal: 1000,
-    };
+    });
     const runUntilMs = nowMs + 121_000;
     const maxSteps = Math.ceil((runUntilMs - nowMs) / 100) + 5;
     const result = runSimulation(gameWorld, runUntilMs, [], maxSteps);
 
-    expect(result.world.mobs['99999']).toBeUndefined();
+    expect(result.world.mobs.get('99999')).toBeUndefined();
     const entityDelta = result.deltas.find(
       (delta) => delta.type === 'entityDelta',
     );
@@ -195,7 +197,7 @@ describe('runSimulation', () => {
         ],
       },
     ];
-    gameWorld.mobs['88888'] = {
+    gameWorld.mobs.set('88888', {
       mobId: '88888',
       position: { x: 0, z: -50 },
       velocity: { x: 0, z: 0 },
@@ -203,11 +205,11 @@ describe('runSimulation', () => {
       maxHp: 100,
       spawnerId: 'wave-1-north',
       routeIndex: 0,
-    };
+    });
 
     const result = runSimulation(gameWorld, nowMs + 100, [], 1);
-    expect(result.world.mobs['88888']).toBeDefined();
-    const moved = result.world.mobs['88888']!;
+    expect(result.world.mobs.get('88888')).toBeDefined();
+    const moved = result.world.mobs.get('88888')!;
     expect(moved.position.z).toBeLessThan(-50);
   });
 
@@ -229,7 +231,7 @@ describe('runSimulation', () => {
         route: [],
       },
     ];
-    gameWorld.structures['player-blocker'] = {
+    gameWorld.structures.set('player-blocker', {
       structureId: 'player-blocker',
       ownerId: 'player-1',
       type: 'rock',
@@ -248,8 +250,8 @@ describe('runSimulation', () => {
           verticalScale: 1,
         },
       },
-    };
-    gameWorld.structures['map-nonblocker'] = {
+    });
+    gameWorld.structures.set('map-nonblocker', {
       structureId: 'map-nonblocker',
       ownerId: 'Map',
       type: 'tower',
@@ -257,11 +259,11 @@ describe('runSimulation', () => {
       hp: 100,
       maxHp: 100,
       createdAtMs: nowMs - 1,
-    };
+    });
 
     const result = runSimulation(gameWorld, nowMs, [], 1);
-    expect(result.world.structures['player-blocker']).toBeUndefined();
-    expect(result.world.structures['map-nonblocker']).toBeDefined();
+    expect(result.world.structures.get('player-blocker')).toBeUndefined();
+    expect(result.world.structures.get('map-nonblocker')).toBeDefined();
     expect(result.world.wave.spawners[0]?.routeState).toBe('reachable');
     const structureDelta = result.deltas.find(
       (delta) => delta.type === 'structureDelta',
@@ -291,7 +293,7 @@ describe('runSimulation', () => {
         route: [],
       },
     ];
-    gameWorld.structures['map-blocker'] = {
+    gameWorld.structures.set('map-blocker', {
       structureId: 'map-blocker',
       ownerId: 'Map',
       type: 'rock',
@@ -310,10 +312,10 @@ describe('runSimulation', () => {
           verticalScale: 1,
         },
       },
-    };
+    });
 
     const result = runSimulation(gameWorld, nowMs, [], 1);
-    expect(result.world.structures['map-blocker']).toBeUndefined();
+    expect(result.world.structures.get('map-blocker')).toBeUndefined();
     expect(result.world.wave.spawners[0]?.routeState).toBe('reachable');
     const structureDelta = result.deltas.find(
       (delta) => delta.type === 'structureDelta',
@@ -327,14 +329,14 @@ describe('runSimulation', () => {
   it('includes priority mob slices in entity deltas', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);
-    gameWorld.players['p1'] = {
+    gameWorld.players.set('p1', {
       playerId: 'p1',
       username: 'one',
       position: { x: 0, z: 0 },
       velocity: { x: 0, z: 0 },
       speed: 1,
       lastSeenMs: nowMs,
-    };
+    });
     gameWorld.wave.wave = 1;
     gameWorld.wave.active = true;
     gameWorld.wave.spawners = [
@@ -354,7 +356,7 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < 16; i += 1) {
-      gameWorld.mobs[String(i + 1)] = {
+      gameWorld.mobs.set(String(i + 1), {
         mobId: String(i + 1),
         position: { x: i - 8, z: i - 7 },
         velocity: { x: 0, z: 0 },
@@ -362,7 +364,7 @@ describe('runSimulation', () => {
         maxHp: 100,
         spawnerId: 'wave-1-north',
         routeIndex: 0,
-      };
+      });
     }
     const result = runSimulation(gameWorld, nowMs + 100, [], 1);
     const entityDelta = result.deltas.find(
@@ -403,7 +405,7 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
-      gameWorld.mobs[String(i + 1)] = {
+      gameWorld.mobs.set(String(i + 1), {
         mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
         velocity: { x: 0, z: 0 },
@@ -411,7 +413,7 @@ describe('runSimulation', () => {
         maxHp: 100,
         spawnerId: 'wave-1-north',
         routeIndex: 0,
-      };
+      });
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
     const entityDelta = result.deltas.find(
@@ -453,7 +455,7 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25; i += 1) {
-      gameWorld.mobs[String(i + 1)] = {
+      gameWorld.mobs.set(String(i + 1), {
         mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
         velocity: { x: 0, z: 0 },
@@ -461,7 +463,7 @@ describe('runSimulation', () => {
         maxHp: 100,
         spawnerId: 'wave-1-north',
         routeIndex: 0,
-      };
+      });
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
     const entityDeltas = result.deltas.filter(
@@ -517,7 +519,7 @@ describe('runSimulation', () => {
       },
     ];
     for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
-      gameWorld.mobs[String(i + 1)] = {
+      gameWorld.mobs.set(String(i + 1), {
         mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
         velocity: { x: 0, z: 0 },
@@ -525,7 +527,7 @@ describe('runSimulation', () => {
         maxHp: 100,
         spawnerId: 'wave-1-north',
         routeIndex: 0,
-      };
+      });
     }
     const commandNow: CommandEnvelope[] = [
       {

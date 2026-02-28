@@ -96,12 +96,12 @@ function isDisallowedStaticStructure(structure: StructureState): boolean {
 }
 
 export function sanitizeStaticMapStructures(
-  structures: Record<string, StructureState>,
+  structures: Map<string, StructureState>,
 ): string[] {
   const removed: string[] = [];
-  for (const [structureId, structure] of Object.entries(structures)) {
+  for (const [structureId, structure] of structures) {
     if (!isDisallowedStaticStructure(structure)) continue;
-    delete structures[structureId];
+    structures.delete(structureId);
     removed.push(structureId);
   }
   return removed;
@@ -209,9 +209,9 @@ export function buildStaticMapStructures(
 }
 
 export function hasStaticMapStructures(
-  structures: Record<string, StructureState>,
+  structures: ReadonlyMap<string, StructureState>,
 ): boolean {
-  for (const structure of Object.values(structures)) {
+  for (const structure of structures.values()) {
     if (structure.ownerId === 'Map') return true;
   }
   return false;

@@ -8,10 +8,10 @@ import type {
   WaveDelta,
 } from './game-protocol';
 import type {
+  GameWorld,
   MobState,
   StructureState,
   WorldMeta,
-  WorldState,
 } from './game-state';
 import { getStructureFootprint, STRUCTURE_DEFS } from './content/structures';
 import { getTowerDef, getTowerDps } from './content/towers';
@@ -251,7 +251,7 @@ const pickSpawnerSidesForWave = (wave: number): SideDef[] => {
 };
 
 const buildFlowField = (
-  structures: Record<string, StructureState>,
+  structures: ReadonlyMap<string, StructureState>,
   goals: Array<{ x: number; z: number }>
 ): FlowField => {
   const minWX = -WORLD_BOUNDS;
@@ -321,7 +321,7 @@ const buildFlowField = (
   // Keep castle walls blocked so routes terminate at entrances.
   markBlockedAabb(0, 0, CASTLE_HALF_EXTENT, CASTLE_HALF_EXTENT);
 
-  for (const structure of Object.values(structures)) {
+  for (const structure of structures.values()) {
     const def = STRUCTURE_DEFS[structure.type];
     const foot = getStructureFootprint(structure);
     markBlockedAabb(
@@ -556,7 +556,7 @@ const makeMob = (meta: WorldMeta, spawnerId: string): MobState => {
   };
 };
 
-const recomputeSpawnerRoutes = (world: WorldState): void => {
+const recomputeSpawnerRoutes = (world: GameWorld): void => {
   const goals = getCastleEntryGoals();
   const field = buildFlowField(world.structures, goals);
   const routesBySpawner = new Map<string, Array<{ x: number; z: number }>>();
@@ -569,7 +569,7 @@ const recomputeSpawnerRoutes = (world: WorldState): void => {
     routesBySpawner.set(spawner.spawnerId, route.route);
   }
 
-  for (const mob of Object.values(world.mobs)) {
+  for (const mob of world.mobs.values()) {
     const route = routesBySpawner.get(mob.spawnerId) ?? [];
     const nearest = getNearestRouteIndex(route, mob.position);
     mob.routeIndex = Math.max(
@@ -579,7 +579,7 @@ const recomputeSpawnerRoutes = (world: WorldState): void => {
   }
 };
 
-const hasAtLeastOneReachableSpawner = (world: WorldState): boolean => {
+const hasAtLeastOneReachableSpawner = (world: GameWorld): boolean => {
   if (world.wave.spawners.length === 0) return true;
   return world.wave.spawners.some(
     (spawner) => spawner.routeState === 'reachable'
@@ -587,9 +587,9 @@ const hasAtLeastOneReachableSpawner = (world: WorldState): boolean => {
 };
 
 const collectAutoUnblockCandidates = (
-  structures: Record<string, StructureState>
+  structures: Map<string, StructureState>
 ): StructureState[] =>
-  Object.values(structures)
+  [...structures.values()]
     .filter((structure) => STRUCTURE_DEFS[structure.type].blocksPath)
     .sort((a, b) => {
       const ownerPriorityA = a.ownerId === 'Map' ? 1 : 0;
@@ -599,7 +599,7 @@ const collectAutoUnblockCandidates = (
       return b.createdAtMs - a.createdAtMs;
     });
 
-const autoUnblockFullyBlockedPaths = (world: WorldState): string[] => {
+const autoUnblockFullyBlockedPaths = (world: GameWorld): string[] => {
   if (world.wave.spawners.length === 0) return [];
   if (hasAtLeastOneReachableSpawner(world)) return [];
 
@@ -607,8 +607,8 @@ const autoUnblockFullyBlockedPaths = (world: WorldState): string[] => {
   const candidates = collectAutoUnblockCandidates(world.structures);
   for (const candidate of candidates) {
     if (removedIds.length >= MAX_STRUCTURE_DELTA_REMOVES) break;
-    if (!world.structures[candidate.structureId]) continue;
-    delete world.structures[candidate.structureId];
+    if (!world.structures.has(candidate.structureId)) continue;
+    world.structures.delete(candidate.structureId);
     removedIds.push(candidate.structureId);
     recomputeSpawnerRoutes(world);
     if (hasAtLeastOneReachableSpawner(world)) break;
@@ -617,8 +617,8 @@ const autoUnblockFullyBlockedPaths = (world: WorldState): string[] => {
 };
 
 const prepareNextWaveSpawners = (
-  world: WorldState
-): WorldState['wave']['spawners'] => {
+  world: GameWorld
+): GameWorld['wave']['spawners'] => {
   const nextWave = world.wave.wave + 1;
   const totalMobCount = getWaveMobCount(nextWave);
   const sides = pickSpawnerSidesForWave(nextWave);
@@ -640,12 +640,12 @@ const prepareNextWaveSpawners = (
   });
 };
 
-const prepareUpcomingWave = (world: WorldState): void => {
+const prepareUpcomingWave = (world: GameWorld): void => {
   world.wave.spawners = prepareNextWaveSpawners(world);
   recomputeSpawnerRoutes(world);
 };
 
-const activateWave = (world: WorldState): boolean => {
+const activateWave = (world: GameWorld): boolean => {
   if (world.wave.active) return false;
   if (world.wave.spawners.length === 0) {
     prepareUpcomingWave(world);
@@ -662,7 +662,7 @@ const activateWave = (world: WorldState): boolean => {
   return true;
 };
 
-const ensureInitialWaveSchedule = (world: WorldState): boolean => {
+const ensureInitialWaveSchedule = (world: GameWorld): boolean => {
   if (world.wave.wave > 0 || world.wave.active || world.wave.nextWaveAtMs > 0) {
     return false;
   }
@@ -673,21 +673,21 @@ const ensureInitialWaveSchedule = (world: WorldState): boolean => {
   return true;
 };
 
-const maybeActivateScheduledWave = (world: WorldState): boolean => {
+const maybeActivateScheduledWave = (world: GameWorld): boolean => {
   if (world.wave.active || world.wave.nextWaveAtMs <= 0) return false;
   if (world.meta.lastTickMs < world.wave.nextWaveAtMs) return false;
   return activateWave(world);
 };
 
 const updateMobs = (
-  world: WorldState,
+  world: GameWorld,
   deltaSeconds: number,
   perf: SimulationPerfStats
 ): { upserts: MobState[]; despawnedIds: string[] } => {
   const upserts: MobState[] = [];
   const despawnedIds: string[] = [];
 
-  const towerList = Object.values(world.structures).filter(
+  const towerList = [...world.structures.values()].filter(
     (structure) => structure.type === 'tower'
   );
   perf.towersSimulated += towerList.length;
@@ -704,7 +704,7 @@ const updateMobs = (
     world.wave.spawners.map((spawner) => [spawner.spawnerId, spawner])
   );
   const goals = getCastleEntryGoals();
-  const mobValues = Object.values(world.mobs);
+  const mobValues = [...world.mobs.values()];
   perf.mobsSimulated += mobValues.length;
   for (const mob of mobValues) {
     const side = toSideDef(mob.spawnerId);
@@ -831,7 +831,7 @@ const updateMobs = (
       stuckTimedOut
     ) {
       despawnedIds.push(mob.mobId);
-      delete world.mobs[mob.mobId];
+      world.mobs.delete(mob.mobId);
       if (spawner) {
         spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
       }
@@ -843,7 +843,7 @@ const updateMobs = (
 };
 
 const updateWave = (
-  world: WorldState,
+  world: GameWorld,
   deltaSeconds: number
 ): { changed: boolean; spawned: number } => {
   let changed = false;
@@ -852,7 +852,7 @@ const updateWave = (
     changed = true;
   }
   if (!world.wave.active) return { changed: false, spawned: 0 };
-  let currentMobCount = Object.keys(world.mobs).length;
+  let currentMobCount = world.mobs.size;
   for (const spawner of world.wave.spawners) {
     if (!spawner.gateOpen) spawner.gateOpen = true;
     spawner.spawnAccumulator += spawner.spawnRatePerSecond * deltaSeconds;
@@ -866,7 +866,7 @@ const updateWave = (
     );
     for (let i = 0; i < spawnCount; i += 1) {
       const mob = makeMob(world.meta, spawner.spawnerId);
-      world.mobs[mob.mobId] = mob;
+      world.mobs.set(mob.mobId, mob);
       spawner.spawnedCount += 1;
       spawner.aliveCount += 1;
       spawner.spawnAccumulator -= 1;
@@ -897,7 +897,7 @@ type CommandApplyResult = {
 };
 
 const applyCommands = (
-  world: WorldState,
+  world: GameWorld,
   commands: CommandEnvelope[],
   nowMs: number
 ): CommandApplyResult => {
@@ -909,8 +909,8 @@ const applyCommands = (
   for (const envelope of commands) {
     const { command } = envelope;
     if (command.type === 'moveIntent') {
-      world.intents[command.playerId] = command.intent;
-      const player = world.players[command.playerId];
+      world.intents.set(command.playerId, command.intent);
+      const player = world.players.get(command.playerId);
       if (!player) continue;
       const from = { x: player.position.x, z: player.position.z };
       const nextPosition = command.clientPosition
@@ -949,7 +949,7 @@ const applyCommands = (
         maxHp: def.maxHp,
         createdAtMs: world.meta.lastTickMs,
       };
-      world.structures[structure.structureId] = structure;
+      world.structures.set(structure.structureId, structure);
       structureUpserts.push(structure);
       continue;
     }
@@ -965,13 +965,13 @@ const applyCommands = (
           maxHp: def.maxHp,
           createdAtMs: world.meta.lastTickMs,
         };
-        world.structures[structure.structureId] = structure;
+        world.structures.set(structure.structureId, structure);
         structureUpserts.push(structure);
       }
       continue;
     }
     if (command.type === 'removeStructure') {
-      delete world.structures[command.structureId];
+      world.structures.delete(command.structureId);
       structureRemoves.push(command.structureId);
       continue;
     }
@@ -987,9 +987,9 @@ const applyCommands = (
 const Q = 100;
 const quantize = (v: number): number => Math.round(v * Q);
 
-const nearestPlayerDistanceSq = (mob: MobState, world: WorldState): number => {
+const nearestPlayerDistanceSq = (mob: MobState, world: GameWorld): number => {
   let best = Number.POSITIVE_INFINITY;
-  for (const player of Object.values(world.players)) {
+  for (const player of world.players.values()) {
     const dx = mob.position.x - player.position.x;
     const dz = mob.position.z - player.position.z;
     const d2 = dx * dx + dz * dz;
@@ -1060,7 +1060,7 @@ const buildMobPoolFromList = (
 
 const buildUnifiedMobDelta = (
   allMobs: MobState[],
-  world: WorldState
+  world: GameWorld
 ): { pool: MobPool; slices: MobSlices } => {
   const builder = createMobPoolBuilder();
 
@@ -1123,13 +1123,13 @@ const buildUnifiedMobDelta = (
 };
 
 export type SimulationResult = {
-  world: WorldState;
+  world: GameWorld;
   deltas: GameDelta[];
   perf: SimulationPerfStats;
 };
 
 export const runSimulation = (
-  world: WorldState,
+  world: GameWorld,
   nowMs: number,
   commands: CommandEnvelope[],
   maxSteps: number

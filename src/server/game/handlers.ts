@@ -23,7 +23,12 @@ import {
   touchPlayerPresence,
 } from './players';
 import { enqueueCommand } from './queue';
-import { loadWorldState, persistWorldState, resetGameState } from './world';
+import { loadWorldState, resetGameState } from './world';
+import {
+  flushGameWorld,
+  gameWorldToSnapshot,
+  loadGameWorld,
+} from './gameWorld';
 import { broadcast, ensureStaticMap } from './gameLoop';
 
 const getPlayerId = async (): Promise<string> => {
@@ -35,23 +40,22 @@ const getPlayerId = async (): Promise<string> => {
 export const joinGame = async (): Promise<JoinResponse> => {
   const nowMs = Date.now();
   await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
-  const world = await loadWorldState();
+  const world = await loadGameWorld();
   ensureStaticMap(world);
-  const playerCount = Object.keys(world.players).length;
-  if (playerCount >= MAX_PLAYERS) {
+  if (world.players.size >= MAX_PLAYERS) {
     throw new Error('game is full');
   }
 
   const username = (await reddit.getCurrentUsername()) ?? 'anonymous';
   const playerId = await getPlayerId();
-  const existing = world.players[playerId];
+  const existing = world.players.get(playerId);
   const player: PlayerState =
     existing ?? createDefaultPlayer(playerId, username, nowMs);
   player.username = username;
   player.position = { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z };
   player.velocity = { x: 0, z: 0 };
   player.lastSeenMs = nowMs;
-  world.players[playerId] = player;
+  world.players.set(playerId, player);
   await touchPlayerPresence(player);
   const coins = await getCoins(nowMs);
   world.meta.energy = coins;
@@ -71,7 +75,7 @@ export const joinGame = async (): Promise<JoinResponse> => {
     playerId,
     username,
     channel: getGameChannelName(),
-    snapshot: world,
+    snapshot: gameWorldToSnapshot(world),
   };
 };
 
@@ -207,15 +211,15 @@ export const getGamePreview = async (): Promise<GamePreview> => {
 export const resyncGame = async (
   _playerId?: string
 ): Promise<ResyncResponse> => {
-  const world = await loadWorldState();
+  const world = await loadGameWorld();
   const staticSync = ensureStaticMap(world);
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
-    await persistWorldState(world);
+    await flushGameWorld(world);
   }
   world.meta.energy = await getCoins(Date.now());
   return {
     type: 'snapshot',
-    snapshot: world,
+    snapshot: gameWorldToSnapshot(world),
   };
 };
 

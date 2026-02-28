@@ -50,8 +50,9 @@ describe('buildStaticMapStructures', () => {
   });
 
   it('sanitizes invalid existing map blockers from persisted structures', () => {
-    const structures = buildStaticMapStructures(Date.now());
-    structures['map-tree-castle-camper'] = {
+    const record = buildStaticMapStructures(Date.now());
+    const structures = new Map(Object.entries(record));
+    structures.set('map-tree-castle-camper', {
       structureId: 'map-tree-castle-camper',
       ownerId: 'Map',
       type: 'tree',
@@ -60,8 +61,8 @@ describe('buildStaticMapStructures', () => {
       maxHp: 100,
       createdAtMs: Date.now(),
       metadata: { treeFootprint: 4 },
-    };
-    structures['map-rock-spawn-camper'] = {
+    });
+    structures.set('map-rock-spawn-camper', {
       structureId: 'map-rock-spawn-camper',
       ownerId: 'Map',
       type: 'rock',
@@ -80,7 +81,7 @@ describe('buildStaticMapStructures', () => {
           verticalScale: 1,
         },
       },
-    };
+    });
     const removed = sanitizeStaticMapStructures(structures);
     expect(removed).toEqual(
       expect.arrayContaining([
@@ -88,7 +89,7 @@ describe('buildStaticMapStructures', () => {
         'map-rock-spawn-camper',
       ]),
     );
-    expect(structures['map-tree-castle-camper']).toBeUndefined();
-    expect(structures['map-rock-spawn-camper']).toBeUndefined();
+    expect(structures.get('map-tree-castle-camper')).toBeUndefined();
+    expect(structures.get('map-rock-spawn-camper')).toBeUndefined();
   });
 });
