@@ -36,8 +36,6 @@ export {
   trimCommandQueue,
 } from './queue';
 
-export { consumeRateLimitToken } from './rateLimit';
-
 export {
   runGameLoop,
   broadcast,

@@ -15,7 +15,6 @@ import { getStructureEnergyCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from './config';
 import { getGameChannelName } from './keys';
 import { getCoins, spendCoins, addCoins } from '../economy';
-import { consumeRateLimitToken } from './rateLimit';
 import {
   createDefaultPlayer,
   enforceStructureCap,
@@ -83,19 +82,7 @@ export const applyCommand = async (
   envelope: CommandEnvelope
 ): Promise<CommandResponse> => {
   const nowMs = Date.now();
-  const playerId = envelope.command.playerId;
   let spentBuildCoins = 0;
-  const hasToken = await consumeRateLimitToken(playerId, nowMs);
-  if (!hasToken) {
-    const world = await loadWorldState();
-    return {
-      type: 'commandAck',
-      accepted: false,
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion,
-      reason: 'rate limited',
-    };
-  }
 
   if (
     envelope.command.type === 'buildStructure' ||

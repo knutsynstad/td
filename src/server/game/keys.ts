@@ -7,7 +7,6 @@ export type GameRedisKeys = {
   wave: string;
   queue: string;
   seen: string;
-  rate: string;
   snaps: string;
   leaderLock: string;
 };
@@ -31,7 +30,6 @@ export const getGameRedisKeys = (): GameRedisKeys => {
     wave: `${prefix}:w`,
     queue: `${prefix}:q`,
     seen: `${prefix}:ls`,
-    rate: `${prefix}:rl`,
     snaps: `${prefix}:sn`,
     leaderLock: `${prefix}:ll`,
   };

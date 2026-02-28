@@ -205,7 +205,6 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
     redis.del(keys.mobs),
     redis.del(keys.queue),
     redis.del(keys.seen),
-    redis.del(keys.rate),
     redis.del(keys.snaps),
     redis.del(keys.leaderLock),
   ]);
