@@ -130,6 +130,7 @@ export type WaveDelta = {
   type: 'waveDelta';
   wave: WaveState;
   routesIncluded: boolean;
+  lives?: number;
 };
 
 export type ResyncRequiredDelta = {

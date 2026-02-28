@@ -2821,18 +2821,15 @@ const selectionDialog = new SelectionDialog(
       const colliders = getSelectedInRange();
       if (colliders.length === 0) return;
       if (colliders.some((collider) => collider.type === 'bank')) return;
-      if (authoritativeBridgeRef.current) {
-        for (const collider of colliders) {
+      for (const collider of colliders) {
+        if (authoritativeBridgeRef.current) {
           const structureId = getStructureIdFromCollider(collider);
           if (structureId) {
             void authoritativeBridgeRef.current.sendRemoveStructure(structureId);
           }
         }
-      } else {
-        for (const collider of colliders) {
-          queueTreeRegrow(collider);
-          structureStore.removeStructureCollider(collider);
-        }
+        queueTreeRegrow(collider);
+        structureStore.removeStructureCollider(collider);
       }
       clearSelection();
     },
@@ -3533,12 +3530,15 @@ const hasPlayerReachedBlockedTarget = () => {
   return false;
 };
 
+const PLAYER_VELOCITY_SMOOTHING = 14;
+
 const motionSystem = createEntityMotionSystem({
   structureStore,
   staticColliders,
   spatialGrid,
   npcs,
   playerFacingOffset,
+  playerVelocitySmoothing: PLAYER_VELOCITY_SMOOTHING,
   constants: {
     mobBerserkAttackCooldown: MOB_SIEGE_ATTACK_COOLDOWN,
     mobBerserkDamage: MOB_SIEGE_DAMAGE,

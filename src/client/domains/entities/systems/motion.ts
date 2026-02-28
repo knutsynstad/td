@@ -30,6 +30,7 @@ type MotionContext = {
   npcs: Entity[];
   constants: MobConstants;
   playerFacingOffset: { value: number };
+  playerVelocitySmoothing: number;
   random: () => number;
   spawnCubeEffects: (pos: THREE.Vector3) => void;
   onStructureDestroyed?: (collider: DestructibleCollider) => void;
@@ -344,15 +345,29 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     }
   };
 
+  const desiredVelocityScratch = new THREE.Vector3();
+
   const applyMotionTail = (
     entity: Entity,
     dir: THREE.Vector3,
     delta: number
   ) => {
     if (dir.length() > 0.1) {
-      entity.velocity.copy(dir).multiplyScalar(entity.speed);
+      desiredVelocityScratch.copy(dir).multiplyScalar(entity.speed);
     } else {
-      entity.velocity.set(0, 0, 0);
+      desiredVelocityScratch.set(0, 0, 0);
+    }
+    if (
+      (entity.kind === 'player' || entity.kind === 'npc') &&
+      context.playerVelocitySmoothing > 0
+    ) {
+      const t = Math.min(1, context.playerVelocitySmoothing * delta);
+      entity.velocity.lerp(desiredVelocityScratch, t);
+      if (entity.velocity.lengthSq() < 1e-4) {
+        entity.velocity.set(0, 0, 0);
+      }
+    } else {
+      entity.velocity.copy(desiredVelocityScratch);
     }
     entity.mesh.position.x += entity.velocity.x * delta;
     entity.mesh.position.z += entity.velocity.z * delta;

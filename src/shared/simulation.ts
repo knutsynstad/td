@@ -683,9 +683,10 @@ const updateMobs = (
   world: GameWorld,
   deltaSeconds: number,
   perf: SimulationPerfStats
-): { upserts: MobState[]; despawnedIds: string[] } => {
+): { upserts: MobState[]; despawnedIds: string[]; castleCaptures: number } => {
   const upserts: MobState[] = [];
   const despawnedIds: string[] = [];
+  let castleCaptures = 0;
 
   const towerList = [...world.structures.values()].filter(
     (structure) => structure.type === 'tower'
@@ -825,11 +826,12 @@ const updateMobs = (
       );
     }
     const stuckTimedOut = (mob.stuckMs ?? 0) >= MOB_STUCK_TIMEOUT_MS;
-    if (
-      mob.hp <= 0 ||
-      nearestGoalDistance <= CASTLE_CAPTURE_RADIUS ||
-      stuckTimedOut
-    ) {
+    const reachedCastle = nearestGoalDistance <= CASTLE_CAPTURE_RADIUS;
+    if (mob.hp <= 0 || reachedCastle || stuckTimedOut) {
+      if (reachedCastle) {
+        world.meta.lives = Math.max(0, world.meta.lives - 1);
+        castleCaptures += 1;
+      }
       despawnedIds.push(mob.mobId);
       world.mobs.delete(mob.mobId);
       if (spawner) {
@@ -839,7 +841,7 @@ const updateMobs = (
     }
     upserts.push({ ...mob });
   }
-  return { upserts, despawnedIds };
+  return { upserts, despawnedIds, castleCaptures };
 };
 
 const updateWave = (
@@ -1193,6 +1195,7 @@ export const runSimulation = (
   let latestMobUpserts: MobState[] = [];
   const despawnedDuringRun = new Set<string>();
   let latestWaveDelta: WaveDelta | null = null;
+  let totalCastleCaptures = 0;
   while (world.meta.lastTickMs + SIM_TICK_MS <= nowMs && steps < maxSteps) {
     world.meta.lastTickMs += SIM_TICK_MS;
     world.meta.tickSeq += 1;
@@ -1202,6 +1205,7 @@ export const runSimulation = (
     const waveResult = updateWave(world, deltaSeconds);
     perf.waveSpawnedMobs += waveResult.spawned;
     const mobResult = updateMobs(world, deltaSeconds, perf);
+    totalCastleCaptures += mobResult.castleCaptures;
     latestMobUpserts = mobResult.upserts;
     for (const mobId of mobResult.despawnedIds) {
       despawnedDuringRun.add(mobId);
@@ -1214,6 +1218,10 @@ export const runSimulation = (
         routesIncluded: routesChanged,
       };
     }
+  }
+
+  if (totalCastleCaptures > 0) {
+    waveChanged = true;
   }
 
   if (waveChanged && !latestWaveDelta) {
@@ -1306,6 +1314,9 @@ export const runSimulation = (
           })),
         },
       };
+    }
+    if (totalCastleCaptures > 0) {
+      latestWaveDelta = { ...latestWaveDelta, lives: world.meta.lives };
     }
     deltas.push(latestWaveDelta);
   }

@@ -770,6 +770,9 @@ export const createAuthoritativeSync = (
     ctx.serverWaveActiveRef.current = delta.wave.active;
     ctx.gameState.nextWaveAt =
       delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0;
+    if (delta.lives !== undefined) {
+      ctx.gameState.lives = delta.lives;
+    }
     syncServerWaveSpawners(delta.wave, delta.routesIncluded ?? true);
   };
 
