@@ -4,7 +4,6 @@ import type {
 } from '../../shared/game-protocol';
 import type { GameWorld, StructureState } from '../../shared/game-state';
 import {
-  ENABLE_SERVER_TICK_PROFILING,
   LEADER_BROADCAST_WINDOW_MS,
   LEADER_LOCK_TTL_SECONDS,
   LEADER_STALE_PLAYER_INTERVAL,
@@ -13,9 +12,6 @@ import {
   MAX_BATCH_EVENTS,
   PERSIST_INTERVAL_TICKS,
   PLAYER_TIMEOUT_MS,
-  SERVER_TICK_P95_TARGET_MS,
-  SERVER_TICK_PROFILE_LOG_EVERY_TICKS,
-  SLOW_TICK_LOG_THRESHOLD_MS,
 } from './config';
 import { getGameChannelName, getGameRedisKeys } from './keys';
 import {
@@ -29,8 +25,7 @@ import {
   sanitizeStaticMapStructures,
 } from '../../shared/world/staticStructures';
 import { broadcastBatched } from '../core/broadcast';
-import { runTickLoop } from '../tick';
-import type { TickContext } from '../tick';
+import { runTickLoop, type TickContext } from './tick';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {
   flushGameWorld,
@@ -90,7 +85,7 @@ export const ensureStaticMap = (world: {
 
 const onGameTick = async (
   world: GameWorld,
-  { nowMs, ticksProcessed, timer }: TickContext
+  { nowMs, ticksProcessed }: TickContext
 ) => {
   const deltas: GameDelta[] = [];
 
@@ -99,31 +94,27 @@ const onGameTick = async (
     ticksProcessed % PERSIST_INTERVAL_TICKS === 0;
 
   if (isMaintenanceTick) {
-    await timer.measureAsync('maintenance', async () => {
-      await flushGameWorld(world);
-      await mergePlayersFromRedis(world);
+    await flushGameWorld(world);
+    await mergePlayersFromRedis(world);
 
-      if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
-        await trimCommandQueue();
-        const stalePlayers = findAndRemoveStalePlayersInMemory(
-          world,
-          nowMs - PLAYER_TIMEOUT_MS,
-          500
-        );
-        if (stalePlayers.length > 0) {
-          await cleanupStalePlayersSeen(stalePlayers);
-          for (const playerId of stalePlayers) {
-            deltas.push(buildPresenceLeaveDelta(playerId));
-          }
+    if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
+      await trimCommandQueue();
+      const stalePlayers = findAndRemoveStalePlayersInMemory(
+        world,
+        nowMs - PLAYER_TIMEOUT_MS,
+        500
+      );
+      if (stalePlayers.length > 0) {
+        await cleanupStalePlayersSeen(stalePlayers);
+        for (const playerId of stalePlayers) {
+          deltas.push(buildPresenceLeaveDelta(playerId));
         }
       }
-    });
+    }
   }
 
   const commands = await popPendingCommands(nowMs);
-  const result = timer.measureSync('simulation', () =>
-    runSimulation(world, nowMs, commands, 1)
-  );
+  const result = runSimulation(world, nowMs, commands, 1);
 
   if (result.deltas.some((d) => d.type === 'waveDelta')) {
     world.waveDirty = true;
@@ -132,12 +123,10 @@ const onGameTick = async (
   deltas.push(...result.deltas);
 
   if (deltas.length > 0) {
-    await timer.measureAsync('broadcast', () =>
-      broadcast(
-        result.world.meta.worldVersion,
-        result.world.meta.tickSeq,
-        deltas
-      )
+    await broadcast(
+      result.world.meta.worldVersion,
+      result.world.meta.tickSeq,
+      deltas
     );
   }
 
@@ -145,7 +134,6 @@ const onGameTick = async (
     tickSeq: result.world.meta.tickSeq,
     commandCount: commands.length,
     deltaCount: deltas.length,
-    perf: result.perf,
   };
 };
 
@@ -168,12 +156,6 @@ export const runGameLoop = (
       lockTtlSeconds: LEADER_LOCK_TTL_SECONDS,
       lockRefreshIntervalTicks: LOCK_REFRESH_INTERVAL_TICKS,
       channelName: getGameChannelName(),
-      instrumentation: {
-        slowThresholdMs: SLOW_TICK_LOG_THRESHOLD_MS,
-        enableProfiling: ENABLE_SERVER_TICK_PROFILING,
-        profileLogEveryTicks: SERVER_TICK_PROFILE_LOG_EVERY_TICKS,
-        targetP95Ms: SERVER_TICK_P95_TARGET_MS,
-      },
     },
     {
       onInit: async () => {

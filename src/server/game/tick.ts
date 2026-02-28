@@ -5,11 +5,6 @@ import {
   sleep,
   verifyLock,
 } from '../core/lock';
-import type { InstrumentationConfig } from './instrumentation';
-import { createTickInstrumentation } from './instrumentation';
-import { createGameLoopLogger } from './logger';
-import { createTickTimer } from './timer';
-
 export type TickLoopConfig = {
   windowMs: number;
   tickIntervalMs: number;
@@ -17,20 +12,17 @@ export type TickLoopConfig = {
   lockTtlSeconds: number;
   lockRefreshIntervalTicks: number;
   channelName: string;
-  instrumentation: InstrumentationConfig;
 };
 
 export type TickContext = {
   nowMs: number;
   ticksProcessed: number;
-  timer: ReturnType<typeof createTickTimer>;
 };
 
 export type TickResult = {
   tickSeq: number;
   commandCount: number;
   deltaCount: number;
-  perf?: unknown;
 };
 
 export type TickLoopHandlers<TState> = {
@@ -58,10 +50,6 @@ export const runTickLoop = async <TState>(
   let nextTick = startedAt;
   let ticksProcessed = 0;
 
-  const logger = createGameLoopLogger();
-  const instrumentation = createTickInstrumentation(config.instrumentation);
-  const timer = createTickTimer();
-
   const acquired = await acquireLock(
     config.lockKey,
     ownerToken,
@@ -75,7 +63,7 @@ export const runTickLoop = async <TState>(
     };
   }
 
-  logger.onStarted(ownerToken, config.channelName);
+  console.info('Game loop started', { ownerToken, channel: config.channelName });
 
   const state = await handlers.onInit();
 
@@ -86,7 +74,6 @@ export const runTickLoop = async <TState>(
         await sleep(nextTick - now);
       }
 
-      timer.startTick();
       const nowMs = Date.now();
 
       if (
@@ -95,7 +82,7 @@ export const runTickLoop = async <TState>(
       ) {
         const stillOwner = await verifyLock(config.lockKey, ownerToken);
         if (!stillOwner) {
-          logger.onLockStolen(ownerToken);
+          console.warn('Leader lock stolen, exiting loop', { ownerToken });
           break;
         }
         const stillRefreshed = await refreshLock(
@@ -104,28 +91,17 @@ export const runTickLoop = async <TState>(
           config.lockTtlSeconds
         );
         if (!stillRefreshed) {
-          logger.onLockLost(ownerToken);
+          console.warn('Leader lock lost during refresh', { ownerToken });
           break;
         }
       }
 
-      const result = await handlers.onTick(state, {
+      await handlers.onTick(state, {
         nowMs,
         ticksProcessed,
-        timer,
       });
 
       ticksProcessed += 1;
-
-      const timing = timer.getTiming();
-      instrumentation.recordTick({
-        ...timing,
-        tickSeq: result.tickSeq,
-        commandCount: result.commandCount,
-        deltaCount: result.deltaCount,
-        ticksProcessed,
-        perf: result.perf,
-      });
 
       const afterSend = Date.now();
       const intervalsElapsed = Math.max(
@@ -135,7 +111,7 @@ export const runTickLoop = async <TState>(
       nextTick = startedAt + intervalsElapsed * config.tickIntervalMs;
     }
   } catch (error) {
-    logger.onError(ownerToken, error);
+    console.error('Game loop error', { ownerToken, error });
   } finally {
     try {
       await handlers.onTeardown(state);
@@ -146,6 +122,6 @@ export const runTickLoop = async <TState>(
   }
 
   const durationMs = Date.now() - startedAt;
-  logger.onEnded(ownerToken, durationMs, ticksProcessed);
+  console.info('Game loop ended', { ownerToken, durationMs, ticksProcessed });
   return { ownerToken, durationMs, ticksProcessed };
 };
