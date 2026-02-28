@@ -1,21 +1,10 @@
 import { redis } from '@devvit/web/server';
 import { ENERGY_CAP, ENERGY_REGEN_PER_SECOND } from '../../shared/content';
-import { isRecord } from '../../shared/utils';
+import { isRecord, safeParseJson } from '../../shared/utils';
 import { getEconomyRedisKeys } from './keys';
 
 const MAX_TX_RETRIES = 5;
 const economyKeys = getEconomyRedisKeys();
-
-const toJson = (value: unknown): string => JSON.stringify(value);
-
-const parseJson = (value: string | undefined): unknown => {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-};
 
 export const clampCoins = (coins: number): number =>
   Math.max(0, Math.min(ENERGY_CAP, coins));
@@ -29,7 +18,7 @@ export const parseGlobalCoinState = (
   raw: string | undefined,
   nowMs: number
 ): GlobalCoinState => {
-  const parsed = parseJson(raw ?? undefined);
+  const parsed = safeParseJson(raw ?? undefined);
   if (!isRecord(parsed)) {
     return {
       coins: ENERGY_CAP,
@@ -74,7 +63,7 @@ export const spendCoins = async (
     await tx.multi();
     await tx.set(
       economyKeys.coins,
-      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+      JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
     const result = await tx.exec();
     if (result !== null) {
@@ -102,7 +91,7 @@ export const addCoins = async (
     await tx.multi();
     await tx.set(
       economyKeys.coins,
-      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+      JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
     const result = await tx.exec();
     if (result !== null) {

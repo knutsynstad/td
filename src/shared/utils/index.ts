@@ -13,5 +13,5 @@ export {
 export { hashString01 } from './hash';
 export { snapToGrid } from './grid';
 export { percentile, weightedSplit } from './numeric';
-export { parsePositiveInt } from './parse';
+export { parsePositiveInt, safeParseJson } from './parse';
 export { isRecord } from './typeGuards';

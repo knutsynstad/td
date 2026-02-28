@@ -1,9 +1,19 @@
+import { isRecord } from './utils';
+
 export type Vec2 = {
   x: number;
   z: number;
 };
 
 export const DEFAULT_PLAYER_SPAWN: Vec2 = { x: 10, z: 0 };
+
+export const parseVec2 = (value: unknown): Vec2 => {
+  if (!isRecord(value)) return { x: 0, z: 0 };
+  return {
+    x: Number(value.x ?? 0),
+    z: Number(value.z ?? 0),
+  };
+};
 
 export type PlayerIntent = {
   desiredDir?: Vec2;

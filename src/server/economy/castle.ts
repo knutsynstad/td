@@ -11,8 +11,6 @@ import {
 const MAX_TX_RETRIES = 5;
 const economyKeys = getEconomyRedisKeys();
 
-const toJson = (value: unknown): string => JSON.stringify(value);
-
 const parseCastleCoins = (raw: string | undefined): number => {
   const numeric = Number(raw ?? 0);
   if (!Number.isFinite(numeric)) return 0;
@@ -57,7 +55,7 @@ export const depositCastleCoins = async (
     await tx.multi();
     await tx.set(
       economyKeys.coins,
-      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+      JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
     await tx.set(economyKeys.castle, String(nextCastleCoins));
     const result = await tx.exec();
@@ -109,7 +107,7 @@ export const withdrawCastleCoins = async (
     await tx.multi();
     await tx.set(
       economyKeys.coins,
-      toJson({ coins: nextCoins, lastAccruedMs: nowMs })
+      JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
     await tx.set(economyKeys.castle, String(nextCastleCoins));
     const result = await tx.exec();

@@ -10,19 +10,16 @@ import type {
   WorldMeta,
   WorldState,
 } from '../../shared/game-state';
-import { isRecord } from '../../shared/utils';
+import { parseVec2 } from '../../shared/game-state';
+import { isRecord, safeParseJson } from '../../shared/utils';
 import { TrackedMap } from '../../shared/utils/trackedMap';
 import { getGameRedisKeys } from './keys';
+import { parseIntent, parsePlayerState } from './players';
 import {
   defaultWave,
-  parseIntent,
-  parseJson,
   parseMob,
-  parsePlayerState,
   parseStructure,
-  parseVec2,
-  toJson,
-} from './parsers';
+} from './world';
 
 const parseTrackedMapFromHash = <T>(
   raw: Record<string, string> | undefined,
@@ -31,13 +28,13 @@ const parseTrackedMapFromHash = <T>(
   const map = new TrackedMap<T>();
   if (!raw) return map;
   for (const [key, encoded] of Object.entries(raw)) {
-    Map.prototype.set.call(map, key, parser(parseJson(encoded)));
+    Map.prototype.set.call(map, key, parser(safeParseJson(encoded)));
   }
   return map;
 };
 
 const parseWaveState = (waveRaw: string | undefined): WaveState => {
-  const parsed = parseJson(waveRaw);
+  const parsed = safeParseJson(waveRaw);
   const makeDefaultSpawner = (): WaveState['spawners'][number] => ({
     spawnerId: '',
     totalCount: 0,
@@ -152,7 +149,7 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
       const writes: Record<string, string> = {};
       for (const id of map.upserted) {
         const value = map.get(id);
-        if (value !== undefined) writes[id] = toJson(value);
+        if (value !== undefined) writes[id] = JSON.stringify(value);
       }
       if (Object.keys(writes).length > 0) {
         ops.push(redis.hSet(redisKey, writes));
@@ -170,7 +167,7 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
   flushCollection(keys.intents, world.intents as TrackedMap<PlayerIntent>);
 
   if (world.waveDirty) {
-    ops.push(redis.set(keys.wave, toJson(world.wave)));
+    ops.push(redis.set(keys.wave, JSON.stringify(world.wave)));
     world.waveDirty = false;
   }
 
@@ -207,7 +204,7 @@ export const mergePlayersFromRedis = async (
 
   if (playersRaw) {
     for (const [playerId, encoded] of Object.entries(playersRaw)) {
-      const redisPlayer = parsePlayerState(parseJson(encoded));
+      const redisPlayer = parsePlayerState(safeParseJson(encoded));
       const existing = world.players.get(playerId);
       if (!existing) {
         world.players.set(playerId, redisPlayer);
@@ -220,7 +217,7 @@ export const mergePlayersFromRedis = async (
   if (intentsRaw) {
     for (const [playerId, encoded] of Object.entries(intentsRaw)) {
       if (!world.intents.has(playerId)) {
-        world.intents.set(playerId, parseIntent(parseJson(encoded)));
+        world.intents.set(playerId, parseIntent(safeParseJson(encoded)));
       }
     }
   }
