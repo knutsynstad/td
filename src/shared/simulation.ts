@@ -57,7 +57,7 @@ const CASTLE_CAPTURE_RADIUS = 2;
 const CASTLE_ROUTE_HALF_WIDTH_CELLS = 1;
 const MOB_ROUTE_REACH_RADIUS = 0.65;
 const MOB_ROUTE_LATERAL_SPREAD = 0.9;
-const MOB_STUCK_TIMEOUT_MS = 2 * 60 * 1000;
+const MOB_STUCK_TIMEOUT_MS = 15_000;
 const MOB_STUCK_PROGRESS_EPSILON = 0.1;
 
 const baseTower = getTowerDef('base');
@@ -827,7 +827,7 @@ const updateMobs = (
     const stuckTimedOut = (mob.stuckMs ?? 0) >= MOB_STUCK_TIMEOUT_MS;
     if (
       mob.hp <= 0 ||
-      nearestGoalDistance < CASTLE_CAPTURE_RADIUS ||
+      nearestGoalDistance <= CASTLE_CAPTURE_RADIUS ||
       stuckTimedOut
     ) {
       despawnedIds.push(mob.mobId);

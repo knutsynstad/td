@@ -164,6 +164,8 @@ export const createAuthoritativeSync = (
   const serverMobDeltaPosScratch = new THREE.Vector3();
   const serverMobDeltaVelScratch = new THREE.Vector3();
   let pendingFullMobSnapshotId: number | null = null;
+  let pendingFullMobSnapshotStartMs = 0;
+  const PENDING_SNAPSHOT_TIMEOUT_MS = 2_000;
   const pendingFullMobSnapshotSeenIds = new Set<string>();
 
   const syncServerClockSkew = (serverEpochMs: number) => {
@@ -478,7 +480,7 @@ export const createAuthoritativeSync = (
     for (const structure of delta.upserts) {
       upsertServerStructure(structure);
     }
-    if (delta.requiresPathRefresh && !ctx.isServerAuthoritative()) {
+    if (delta.requiresPathRefresh) {
       ctx.refreshAllSpawnerPathlines();
     }
   };
@@ -690,6 +692,15 @@ export const createAuthoritativeSync = (
       }
     }
 
+    if (
+      pendingFullMobSnapshotId !== null &&
+      performance.now() - pendingFullMobSnapshotStartMs >
+        PENDING_SNAPSHOT_TIMEOUT_MS
+    ) {
+      pendingFullMobSnapshotId = null;
+      pendingFullMobSnapshotSeenIds.clear();
+    }
+
     if (delta.fullMobList) {
       const chunkCount = Math.max(1, delta.fullMobSnapshotChunkCount ?? 1);
       const chunkIndex = Math.max(0, delta.fullMobSnapshotChunkIndex ?? 0);
@@ -699,6 +710,7 @@ export const createAuthoritativeSync = (
           pendingFullMobSnapshotId !== snapshotId || chunkIndex === 0;
         if (startsNewSnapshot) {
           pendingFullMobSnapshotId = snapshotId;
+          pendingFullMobSnapshotStartMs = performance.now();
           pendingFullMobSnapshotSeenIds.clear();
         }
         for (const mobId of serverMobSeenIdsScratch) {
@@ -729,7 +741,11 @@ export const createAuthoritativeSync = (
         pendingFullMobSnapshotId = null;
         pendingFullMobSnapshotSeenIds.clear();
       }
-    } else if (pendingFullMobSnapshotId === null) {
+    } else if (pendingFullMobSnapshotId !== null) {
+      for (const mobId of serverMobSeenIdsScratch) {
+        pendingFullMobSnapshotSeenIds.add(mobId);
+      }
+    } else {
       pendingFullMobSnapshotSeenIds.clear();
     }
     for (const numId of delta.despawnedMobIds) {

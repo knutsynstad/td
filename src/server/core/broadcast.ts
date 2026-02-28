@@ -45,28 +45,23 @@ export const broadcastBatched = async <T>(
     batches.push(currentBatch);
   }
 
-  try {
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
-      const batchEvents = batches[batchIndex]!;
-      const payload = wrapBatch(batchEvents);
-      const serialized = JSON.stringify(payload);
-      const messageSizeBytes = encoder.encode(serialized).length;
-      try {
-        await realtime.send(channel, payload);
-      } catch (error) {
-        console.error('Realtime broadcast failed', {
-          channel,
-          eventCount: events.length,
-          batchIndex,
-          totalBatches: batches.length,
-          batchEventCount: batchEvents.length,
-          messageSizeBytes,
-          error,
-        });
-        throw error;
-      }
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    const batchEvents = batches[batchIndex]!;
+    const payload = wrapBatch(batchEvents);
+    const serialized = JSON.stringify(payload);
+    const messageSizeBytes = encoder.encode(serialized).length;
+    try {
+      await realtime.send(channel, payload);
+    } catch (error) {
+      console.error('Realtime broadcast failed', {
+        channel,
+        eventCount: events.length,
+        batchIndex,
+        totalBatches: batches.length,
+        batchEventCount: batchEvents.length,
+        messageSizeBytes,
+        error,
+      });
     }
-  } catch (error) {
-    void error;
   }
 };
