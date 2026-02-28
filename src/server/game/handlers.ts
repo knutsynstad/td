@@ -188,6 +188,9 @@ export const heartbeatGame = async (
     type: 'heartbeatAck',
     tickSeq: world.meta.tickSeq,
     worldVersion: world.meta.worldVersion,
+    wave: world.wave.wave,
+    waveActive: world.wave.active,
+    nextWaveAtMs: world.wave.nextWaveAtMs,
   };
 };
 

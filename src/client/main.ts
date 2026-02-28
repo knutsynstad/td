@@ -2029,6 +2029,9 @@ const setupAuthoritativeBridge = async () => {
           console.error('Failed to resync authoritative snapshot', error);
         });
       },
+      onHeartbeatWaveState: (wave, active, nextWaveAtMs) => {
+        authoritativeSync.applyServerWaveTiming(wave, active, nextWaveAtMs);
+      },
     });
     nextServerStructureResyncAtMs =
       performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;

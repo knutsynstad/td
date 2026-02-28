@@ -1223,6 +1223,13 @@ export const runSimulation = (
       routesIncluded: routesChanged,
     };
   }
+  if (!latestWaveDelta && !world.wave.active && world.wave.nextWaveAtMs > 0) {
+    latestWaveDelta = {
+      type: 'waveDelta',
+      wave: world.wave,
+      routesIncluded: routesChanged,
+    };
+  }
 
   if (steps > 0) {
     const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);

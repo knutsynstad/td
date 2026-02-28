@@ -146,6 +146,7 @@ export type AuthoritativeSync = {
   upsertServerMobFromSnapshot: (mobState: SharedMobState) => void;
   applyServerMobDelta: (delta: EntityDelta) => void;
   applyServerWaveDelta: (delta: WaveDelta) => void;
+  applyServerWaveTiming: (wave: number, active: boolean, nextWaveAtMs: number) => void;
   applyServerSnapshot: (snapshot: SharedWorldState) => void;
   updateServerMobInterpolation: (now: number) => void;
   serverWaveActiveRef: { current: boolean };
@@ -772,6 +773,17 @@ export const createAuthoritativeSync = (
     syncServerWaveSpawners(delta.wave, delta.routesIncluded ?? true);
   };
 
+  const applyServerWaveTiming = (
+    wave: number,
+    active: boolean,
+    nextWaveAtMs: number
+  ) => {
+    ctx.gameState.wave = wave;
+    ctx.serverWaveActiveRef.current = active;
+    ctx.gameState.nextWaveAt =
+      nextWaveAtMs > 0 ? toPerfTime(nextWaveAtMs) : 0;
+  };
+
   const applyServerSnapshot = (snapshot: SharedWorldState) => {
     syncServerMeta(snapshot.wave, snapshot.meta);
 
@@ -908,6 +920,7 @@ export const createAuthoritativeSync = (
     upsertServerMobFromSnapshot,
     applyServerMobDelta,
     applyServerWaveDelta,
+    applyServerWaveTiming,
     applyServerSnapshot,
     updateServerMobInterpolation,
     serverWaveActiveRef: ctx.serverWaveActiveRef,

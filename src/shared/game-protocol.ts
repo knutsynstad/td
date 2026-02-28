@@ -184,6 +184,9 @@ export type HeartbeatResponse = {
   type: 'heartbeatAck';
   tickSeq: number;
   worldVersion: number;
+  wave?: number;
+  waveActive?: boolean;
+  nextWaveAtMs?: number;
 };
 
 export type CoinBalanceResponse = {

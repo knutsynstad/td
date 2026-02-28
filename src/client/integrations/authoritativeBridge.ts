@@ -25,6 +25,11 @@ type PresenceCallbacks = {
   onWaveDelta: (delta: WaveDelta) => void;
   onCoinBalance: (coins: number) => void;
   onResyncRequired: (reason: string) => void;
+  onHeartbeatWaveState?: (
+    wave: number,
+    active: boolean,
+    nextWaveAtMs: number
+  ) => void;
 };
 
 type AuthoritativeBridge = {
@@ -111,6 +116,17 @@ const isHeartbeatResponse = (value: unknown): value is HeartbeatResponse =>
   value.type === 'heartbeatAck' &&
   typeof value.tickSeq === 'number' &&
   typeof value.worldVersion === 'number';
+
+const hasHeartbeatWaveState = (
+  value: HeartbeatResponse
+): value is HeartbeatResponse & {
+  wave: number;
+  waveActive: boolean;
+  nextWaveAtMs: number;
+} =>
+  typeof value.wave === 'number' &&
+  typeof value.waveActive === 'boolean' &&
+  typeof value.nextWaveAtMs === 'number';
 
 const isResyncResponse = (value: unknown): value is ResyncResponse =>
   isRecord(value) && value.type === 'snapshot' && isRecord(value.snapshot);
@@ -208,6 +224,13 @@ export const connectAuthoritativeBridge = async (
     });
     if (!isHeartbeatResponse(payload)) {
       throw new Error('invalid heartbeat response');
+    }
+    if (hasHeartbeatWaveState(payload) && callbacks.onHeartbeatWaveState) {
+      callbacks.onHeartbeatWaveState(
+        payload.wave,
+        payload.waveActive,
+        payload.nextWaveAtMs
+      );
     }
   };
 
