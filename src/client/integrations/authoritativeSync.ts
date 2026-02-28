@@ -168,6 +168,9 @@ export const createAuthoritativeSync = (
   const PENDING_SNAPSHOT_TIMEOUT_MS = 2_000;
   const pendingFullMobSnapshotSeenIds = new Set<string>();
 
+  let lastMobDeltaReceivedAtMs = 0;
+  const CONNECTION_ALIVE_THRESHOLD_MS = 3_000;
+
   const syncServerClockSkew = (serverEpochMs: number) => {
     const sample = serverEpochMs - Date.now();
     if (!serverClockSkewInitialized) {
@@ -672,6 +675,7 @@ export const createAuthoritativeSync = (
 
   const applyServerMobDelta = (delta: EntityDelta) => {
     syncServerClockSkew(delta.serverTimeMs);
+    lastMobDeltaReceivedAtMs = performance.now();
     serverMobSeenIdsScratch.clear();
 
     const pool = delta.mobPool;
@@ -806,6 +810,10 @@ export const createAuthoritativeSync = (
   };
 
   const updateServerMobInterpolation = (now: number) => {
+    const connectionAlive =
+      lastMobDeltaReceivedAtMs > 0 &&
+      now - lastMobDeltaReceivedAtMs < CONNECTION_ALIVE_THRESHOLD_MS;
+
     const staleMobIds: string[] = [];
     for (const [mobId, sample] of ctx.serverMobSampleById.entries()) {
       const mob = ctx.serverMobsById.get(mobId);
@@ -813,6 +821,7 @@ export const createAuthoritativeSync = (
         staleMobIds.push(mobId);
         continue;
       }
+      if (!connectionAlive) continue;
       const staleMs = now - sample.receivedAtPerfMs;
       const sampleIsFinite =
         Number.isFinite(sample.position.x) &&

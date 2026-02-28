@@ -48,11 +48,10 @@ export const broadcastBatched = async <T>(
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
     const batchEvents = batches[batchIndex]!;
     const payload = wrapBatch(batchEvents);
-    const serialized = JSON.stringify(payload);
-    const messageSizeBytes = encoder.encode(serialized).length;
     try {
       await realtime.send(channel, payload);
     } catch (error) {
+      const messageSizeBytes = encoder.encode(JSON.stringify(payload)).length;
       console.error('Realtime broadcast failed', {
         channel,
         eventCount: events.length,

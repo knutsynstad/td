@@ -137,7 +137,11 @@ export const runTickLoop = async <TState>(
   } catch (error) {
     logger.onError(ownerToken, error);
   } finally {
-    await handlers.onTeardown(state);
+    try {
+      await handlers.onTeardown(state);
+    } catch (teardownError) {
+      console.error('Tick loop teardown failed', { ownerToken, teardownError });
+    }
     await releaseLock(config.lockKey, ownerToken);
   }
 
