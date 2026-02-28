@@ -115,6 +115,7 @@ export type AuthoritativeSyncContext = {
   ENERGY_CAP: number;
   SERVER_MOB_INTERPOLATION_BACKTIME_MS: number;
   SERVER_MOB_EXTRAPOLATION_MAX_MS: number;
+  SERVER_MOB_EXTRAPOLATION_GAP_MAX_MS: number;
   SERVER_MOB_DEAD_STALE_REMOVE_MS: number;
   SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS: number;
   SERVER_MOB_POST_WAVE_STALE_REMOVE_MS: number;
@@ -873,10 +874,10 @@ export const createAuthoritativeSync = (
       );
       mob.mesh.position.lerpVectors(entry.from, entry.to, t);
       if (renderNow > entry.t1) {
-        const extrapolationMs = Math.min(
-          ctx.SERVER_MOB_EXTRAPOLATION_MAX_MS,
-          renderNow - entry.t1
-        );
+        const maxExtrapolation = connectionAlive
+          ? ctx.SERVER_MOB_EXTRAPOLATION_MAX_MS
+          : ctx.SERVER_MOB_EXTRAPOLATION_GAP_MAX_MS;
+        const extrapolationMs = Math.min(maxExtrapolation, renderNow - entry.t1);
         if (extrapolationMs > 0) {
           mob.mesh.position.x += entry.velocity.x * (extrapolationMs / 1000);
           mob.mesh.position.z += entry.velocity.z * (extrapolationMs / 1000);
