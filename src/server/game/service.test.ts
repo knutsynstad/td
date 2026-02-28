@@ -1,16 +1,16 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
 import type { CommandEnvelope } from '../../shared/game-protocol';
+import type { StructureState } from '../../shared/game-state';
 import {
   applyCommand,
   getCoinBalance,
   joinGame,
   resetGame,
   resyncGame,
-  runGameLoop,
-  loadWorldState,
-  persistWorldState,
-} from '.';
+} from './handlers';
+import { runGameLoop } from './gameLoop';
+import { loadWorldState, persistWorldState } from './world';
 
 const test = createDevvitTest();
 
@@ -32,7 +32,7 @@ test('resetGame resets wave progression without economy tax', async () => {
   expect(Object.keys(snapshot.snapshot.mobs)).toHaveLength(0);
   const structures = Object.values(snapshot.snapshot.structures);
   expect(structures.length).toBeGreaterThan(0);
-  expect(structures.every((structure) => structure.ownerId === 'Map')).toBe(
+  expect(structures.every((s: StructureState) => s.ownerId === 'Map')).toBe(
     true
   );
 });

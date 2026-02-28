@@ -20,16 +20,18 @@ import type {
 import { isRecord, parsePositiveInt } from '../../shared/utils';
 import {
   applyCommand,
-  depositCastleCoins,
-  getCastleCoins,
   getCoinBalance,
   getGamePreview,
   heartbeatGame,
   joinGame,
   resetGame,
   resyncGame,
+} from '../game/handlers';
+import {
+  depositCastleCoins,
+  getCastleCoins,
   withdrawCastleCoins,
-} from '../game';
+} from '../game/economy';
 
 type ErrorResponse = {
   status: 'error';

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
-import { resetGame } from '../game';
+import { resetGame } from '../game/handlers';
 
 type MenuActionResponse = {
   showToast: string;
