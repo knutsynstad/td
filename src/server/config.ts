@@ -4,7 +4,6 @@ export const MAX_STRUCTURES = 8_000;
 export const MAX_QUEUE_COMMANDS = 20_000;
 export const MAX_COMMANDS_PER_BATCH = 512;
 export const MAX_BATCH_EVENTS = 8;
-export const MAX_BATCH_BYTES = 80_000;
 export const LEADER_BROADCAST_WINDOW_MS = 55_000;
 export const LEADER_LOCK_TTL_SECONDS = 60;
 export const LEADER_STALE_PLAYER_INTERVAL = 100;

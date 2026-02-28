@@ -13,7 +13,7 @@ import {
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
-import { getGameChannelName } from './keys';
+import { CHANNELS } from '../core/realtime';
 import { getCoins, spendCoins, addCoins } from './economy';
 import {
   createDefaultPlayer,
@@ -73,7 +73,7 @@ export const joinGame = async (): Promise<JoinResponse> => {
     type: 'join',
     playerId,
     username,
-    channel: getGameChannelName(),
+    channel: CHANNELS.game,
     snapshot: gameWorldToSnapshot(world),
   };
 };

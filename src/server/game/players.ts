@@ -8,7 +8,7 @@ import {
 import { PLAYER_SPEED } from '../../shared/content';
 import { isRecord } from '../../shared/utils';
 import { MAX_STRUCTURES } from '../config';
-import { getGameRedisKeys } from './keys';
+import { KEYS } from '../core/redis';
 
 export const parsePlayerState = (value: unknown): PlayerState => {
   if (!isRecord(value)) {
@@ -46,10 +46,9 @@ export const parseIntent = (value: unknown): PlayerIntent => {
 export const touchPlayerPresence = async (
   player: PlayerState
 ): Promise<void> => {
-  const keys = getGameRedisKeys();
   await Promise.all([
-    redis.hSet(keys.players, { [player.playerId]: JSON.stringify(player) }),
-    redis.zAdd(keys.seen, {
+    redis.hSet(KEYS.players, { [player.playerId]: JSON.stringify(player) }),
+    redis.zAdd(KEYS.seen, {
       member: player.playerId,
       score: player.lastSeenMs,
     }),
@@ -58,11 +57,10 @@ export const touchPlayerPresence = async (
 
 export const removePlayers = async (playerIds: string[]): Promise<void> => {
   if (playerIds.length === 0) return;
-  const keys = getGameRedisKeys();
   await Promise.all([
-    redis.hDel(keys.players, playerIds),
-    redis.hDel(keys.intents, playerIds),
-    redis.zRem(keys.seen, playerIds),
+    redis.hDel(KEYS.players, playerIds),
+    redis.hDel(KEYS.intents, playerIds),
+    redis.zRem(KEYS.seen, playerIds),
   ]);
 };
 
@@ -70,8 +68,7 @@ export const removeOldPlayersByLastSeen = async (
   cutoffMs: number,
   limit = 250
 ): Promise<string[]> => {
-  const keys = getGameRedisKeys();
-  const stale = await redis.zRange(keys.seen, 0, cutoffMs, {
+  const stale = await redis.zRange(KEYS.seen, 0, cutoffMs, {
     by: 'score',
     limit: { offset: 0, count: limit },
   });
@@ -84,8 +81,7 @@ export const removeOldPlayersByLastSeen = async (
 export const enforceStructureCap = async (
   incomingCount = 1
 ): Promise<boolean> => {
-  const keys = getGameRedisKeys();
-  const count = await redis.hLen(keys.structures);
+  const count = await redis.hLen(KEYS.structures);
   const safeIncoming = Math.max(0, Math.floor(incomingCount));
   return count + safeIncoming <= MAX_STRUCTURES;
 };

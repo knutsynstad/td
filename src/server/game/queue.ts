@@ -3,7 +3,7 @@ import type { CommandEnvelope } from '../../shared/game-protocol';
 import { parseVec2 } from '../../shared/game-state';
 import { isRecord, safeParseJson } from '../../shared/utils';
 import { MAX_COMMANDS_PER_BATCH, MAX_QUEUE_COMMANDS } from '../config';
-import { getGameRedisKeys } from './keys';
+import { KEYS } from '../core/redis';
 import { parseIntent } from './players';
 import { parseStructureType } from './world';
 
@@ -109,16 +109,15 @@ export const enqueueCommand = async (
   nowMs: number,
   envelope: CommandEnvelope
 ): Promise<{ accepted: boolean; reason?: string }> => {
-  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(keys.queue);
-    const queueSize = await redis.zCard(keys.queue);
+    const tx = await redis.watch(KEYS.queue);
+    const queueSize = await redis.zCard(KEYS.queue);
     if (queueSize >= MAX_QUEUE_COMMANDS) {
       await tx.unwatch();
       return { accepted: false, reason: 'command queue is full' };
     }
     await tx.multi();
-    await tx.zAdd(keys.queue, {
+    await tx.zAdd(KEYS.queue, {
       member: JSON.stringify(envelope),
       score: nowMs,
     });
@@ -133,10 +132,9 @@ export const enqueueCommand = async (
 export const popPendingCommands = async (
   upToMs: number
 ): Promise<CommandEnvelope[]> => {
-  const keys = getGameRedisKeys();
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(keys.queue);
-    const items = await redis.zRange(keys.queue, 0, upToMs, {
+    const tx = await redis.watch(KEYS.queue);
+    const items = await redis.zRange(KEYS.queue, 0, upToMs, {
       by: 'score',
       limit: { offset: 0, count: MAX_COMMANDS_PER_BATCH },
     });
@@ -162,7 +160,7 @@ export const popPendingCommands = async (
     }
 
     await tx.multi();
-    await tx.zRem(keys.queue, membersToRemove);
+    await tx.zRem(KEYS.queue, membersToRemove);
     const result = await tx.exec();
     if (result !== null) {
       return envelopes;
@@ -172,9 +170,8 @@ export const popPendingCommands = async (
 };
 
 export const trimCommandQueue = async (): Promise<void> => {
-  const keys = getGameRedisKeys();
-  const count = await redis.zCard(keys.queue);
+  const count = await redis.zCard(KEYS.queue);
   if (count <= MAX_QUEUE_COMMANDS) return;
   const overflow = count - MAX_QUEUE_COMMANDS;
-  await redis.zRemRangeByRank(keys.queue, 0, overflow - 1);
+  await redis.zRemRangeByRank(KEYS.queue, 0, overflow - 1);
 };

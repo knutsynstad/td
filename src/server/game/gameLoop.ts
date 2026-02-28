@@ -5,12 +5,12 @@ import {
   LEADER_LOCK_TTL_SECONDS,
   LEADER_STALE_PLAYER_INTERVAL,
   LOCK_REFRESH_INTERVAL_TICKS,
-  MAX_BATCH_BYTES,
   MAX_BATCH_EVENTS,
   PERSIST_INTERVAL_TICKS,
   PLAYER_TIMEOUT_MS,
 } from '../config';
-import { getGameChannelName, getGameRedisKeys } from './keys';
+import { KEYS } from '../core/redis';
+import { CHANNELS } from '../core/realtime';
 import {
   buildPresenceLeaveDelta,
   runSimulation,
@@ -21,7 +21,7 @@ import {
   hasStaticMapStructures,
   sanitizeStaticMapStructures,
 } from '../../shared/world/staticStructures';
-import { broadcastBatched } from '../core/broadcast';
+import { broadcastBatched } from '../core/realtime';
 import { runTickLoop, type TickContext } from './tick';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {
@@ -32,23 +32,15 @@ import {
 } from './gameWorld';
 import { cleanupStalePlayersSeen } from './world';
 
-const BATCH_ENVELOPE_OVERHEAD = 80;
-
-const broadcastConfig = {
-  maxBatchBytes: MAX_BATCH_BYTES,
-  maxBatchEvents: MAX_BATCH_EVENTS,
-  envelopeOverhead: BATCH_ENVELOPE_OVERHEAD,
-};
-
 export const broadcast = async (
   worldVersion: number,
   tickSeq: number,
   events: GameDelta[]
 ): Promise<void> => {
   await broadcastBatched<GameDelta>(
-    getGameChannelName(),
+    CHANNELS.game,
     events,
-    broadcastConfig,
+    MAX_BATCH_EVENTS,
     (batchEvents) => {
       const batch: DeltaBatch = {
         type: 'deltaBatch',
@@ -142,7 +134,7 @@ export type GameLoopResult = {
 export const runGameLoop = (
   windowMs: number = LEADER_BROADCAST_WINDOW_MS
 ): Promise<GameLoopResult> => {
-  const { leaderLock } = getGameRedisKeys();
+  const { leaderLock } = KEYS;
 
   return runTickLoop<GameWorld>(
     {
@@ -151,7 +143,7 @@ export const runGameLoop = (
       lockKey: leaderLock,
       lockTtlSeconds: LEADER_LOCK_TTL_SECONDS,
       lockRefreshIntervalTicks: LOCK_REFRESH_INTERVAL_TICKS,
-      channelName: getGameChannelName(),
+      channelName: CHANNELS.game,
     },
     {
       onInit: async () => {

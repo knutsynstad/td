@@ -1,22 +1,10 @@
 import { redis } from '@devvit/web/server';
+import { KEYS } from '../core/redis';
 import { COINS_CAP, COINS_REGEN_PER_SECOND } from '../../shared/content';
 import { isRecord, safeParseJson } from '../../shared/utils';
 
 const MAX_TX_RETRIES = 5;
 
-export type EconomyRedisKeys = {
-  coins: string;
-  castle: string;
-};
-
-const getEconomyRedisKeys = (): EconomyRedisKeys => ({
-  coins: 'g:c',
-  castle: 'g:cs',
-});
-
-export { getEconomyRedisKeys };
-
-const economyKeys = getEconomyRedisKeys();
 
 export const clampCoins = (coins: number): number =>
   Math.max(0, Math.min(COINS_CAP, coins));
@@ -47,7 +35,7 @@ const accrueCoins = (state: GlobalCoinState, nowMs: number): number => {
 };
 
 export const getCoins = async (nowMs: number): Promise<number> => {
-  const raw = await redis.get(economyKeys.coins);
+  const raw = await redis.get(KEYS.coins);
   return accrueCoins(parseGlobalCoinState(raw ?? undefined, nowMs), nowMs);
 };
 
@@ -57,9 +45,9 @@ export const spendCoins = async (
 ): Promise<{ ok: boolean; coins: number }> => {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(economyKeys.coins);
+    const tx = await redis.watch(KEYS.coins);
     const current = parseGlobalCoinState(
-      await redis.get(economyKeys.coins),
+      await redis.get(KEYS.coins),
       nowMs
     );
     const accrued = accrueCoins(current, nowMs);
@@ -70,7 +58,7 @@ export const spendCoins = async (
     const nextCoins = clampCoins(accrued - safeAmount);
     await tx.multi();
     await tx.set(
-      economyKeys.coins,
+      KEYS.coins,
       JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
     const result = await tx.exec();
@@ -85,9 +73,9 @@ export const addCoins = async (
 ): Promise<{ added: number; coins: number }> => {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(economyKeys.coins);
+    const tx = await redis.watch(KEYS.coins);
     const current = parseGlobalCoinState(
-      await redis.get(economyKeys.coins),
+      await redis.get(KEYS.coins),
       nowMs
     );
     const accrued = accrueCoins(current, nowMs);
@@ -95,7 +83,7 @@ export const addCoins = async (
     const added = Math.max(0, nextCoins - accrued);
     await tx.multi();
     await tx.set(
-      economyKeys.coins,
+      KEYS.coins,
       JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
     const result = await tx.exec();
@@ -111,7 +99,7 @@ const parseCastleCoins = (raw: string | undefined): number => {
 };
 
 export const getCastleCoins = async (): Promise<number> =>
-  parseCastleCoins(await redis.get(economyKeys.castle));
+  parseCastleCoins(await redis.get(KEYS.castle));
 
 export const depositCastleCoins = async (
   amount: number,
@@ -132,12 +120,12 @@ export const depositCastleCoins = async (
     };
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(economyKeys.coins, economyKeys.castle);
+    const tx = await redis.watch(KEYS.coins, KEYS.castle);
     const coinState = parseGlobalCoinState(
-      await redis.get(economyKeys.coins),
+      await redis.get(KEYS.coins),
       nowMs
     );
-    const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
+    const castleCoins = parseCastleCoins(await redis.get(KEYS.castle));
     const accrued = accrueCoins(coinState, nowMs);
     if (accrued < safeAmount) {
       await tx.unwatch();
@@ -147,10 +135,10 @@ export const depositCastleCoins = async (
     const nextCastleCoins = castleCoins + safeAmount;
     await tx.multi();
     await tx.set(
-      economyKeys.coins,
+      KEYS.coins,
       JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
-    await tx.set(economyKeys.castle, String(nextCastleCoins));
+    await tx.set(KEYS.castle, String(nextCastleCoins));
     const result = await tx.exec();
     if (result !== null) {
       return {
@@ -182,12 +170,12 @@ export const withdrawCastleCoins = async (
     };
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(economyKeys.coins, economyKeys.castle);
+    const tx = await redis.watch(KEYS.coins, KEYS.castle);
     const coinState = parseGlobalCoinState(
-      await redis.get(economyKeys.coins),
+      await redis.get(KEYS.coins),
       nowMs
     );
-    const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
+    const castleCoins = parseCastleCoins(await redis.get(KEYS.castle));
     const accrued = accrueCoins(coinState, nowMs);
     const maxAddable = Math.max(0, COINS_CAP - accrued);
     const withdrawn = Math.min(
@@ -199,10 +187,10 @@ export const withdrawCastleCoins = async (
     const nextCastleCoins = Math.max(0, castleCoins - withdrawn);
     await tx.multi();
     await tx.set(
-      economyKeys.coins,
+      KEYS.coins,
       JSON.stringify({ coins: nextCoins, lastAccruedMs: nowMs })
     );
-    await tx.set(economyKeys.castle, String(nextCastleCoins));
+    await tx.set(KEYS.castle, String(nextCastleCoins));
     const result = await tx.exec();
     if (result !== null) {
       return { withdrawn, coins: nextCoins, castleCoins: nextCastleCoins };

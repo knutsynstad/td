@@ -14,7 +14,7 @@ import { parseVec2 } from '../../shared/game-state';
 import { isRecord, safeParseJson } from '../../shared/utils';
 import { buildStaticMapStructures } from '../../shared/world/staticStructures';
 import { clampCoins, getCoins } from './economy';
-import { getGameRedisKeys } from './keys';
+import { KEYS } from '../core/redis';
 import { parseIntent, parsePlayerState } from './players';
 
 export const parseStructureType = (value: unknown): StructureState['type'] =>
@@ -143,15 +143,14 @@ export const defaultMeta = (nowMs: number, coins: number): WorldMeta => ({
 });
 
 export const loadWorldState = async (): Promise<WorldState> => {
-  const keys = getGameRedisKeys();
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
-      redis.hGetAll(keys.meta),
-      redis.hGetAll(keys.players),
-      redis.hGetAll(keys.intents),
-      redis.hGetAll(keys.structures),
-      redis.hGetAll(keys.mobs),
-      redis.get(keys.wave),
+      redis.hGetAll(KEYS.meta),
+      redis.hGetAll(KEYS.players),
+      redis.hGetAll(KEYS.intents),
+      redis.hGetAll(KEYS.structures),
+      redis.hGetAll(KEYS.mobs),
+      redis.get(KEYS.wave),
     ]);
 
   const now = Date.now();
@@ -224,7 +223,6 @@ export const loadWorldState = async (): Promise<WorldState> => {
 };
 
 export const persistWorldState = async (world: WorldState): Promise<void> => {
-  const keys = getGameRedisKeys();
   const metaWrites: Record<string, string> = {
     tickSeq: String(world.meta.tickSeq),
     worldVersion: String(world.meta.worldVersion),
@@ -259,26 +257,26 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
   }
 
   await Promise.all([
-    redis.hSet(keys.meta, metaWrites),
-    redis.del(keys.players),
-    redis.del(keys.intents),
-    redis.del(keys.structures),
-    redis.del(keys.mobs),
-    redis.set(keys.wave, JSON.stringify(world.wave)),
+    redis.hSet(KEYS.meta, metaWrites),
+    redis.del(KEYS.players),
+    redis.del(KEYS.intents),
+    redis.del(KEYS.structures),
+    redis.del(KEYS.mobs),
+    redis.set(KEYS.wave, JSON.stringify(world.wave)),
   ]);
 
   await Promise.all([
     Object.keys(playersWrites).length > 0
-      ? redis.hSet(keys.players, playersWrites)
+      ? redis.hSet(KEYS.players, playersWrites)
       : Promise.resolve(),
     Object.keys(intentsWrites).length > 0
-      ? redis.hSet(keys.intents, intentsWrites)
+      ? redis.hSet(KEYS.intents, intentsWrites)
       : Promise.resolve(),
     Object.keys(structureWrites).length > 0
-      ? redis.hSet(keys.structures, structureWrites)
+      ? redis.hSet(KEYS.structures, structureWrites)
       : Promise.resolve(),
     Object.keys(mobWrites).length > 0
-      ? redis.hSet(keys.mobs, mobWrites)
+      ? redis.hSet(KEYS.mobs, mobWrites)
       : Promise.resolve(),
   ]);
 };
@@ -287,12 +285,10 @@ export const cleanupStalePlayersSeen = async (
   playerIds: string[]
 ): Promise<void> => {
   if (playerIds.length === 0) return;
-  const keys = getGameRedisKeys();
-  await redis.zRem(keys.seen, playerIds);
+  await redis.zRem(KEYS.seen, playerIds);
 };
 
 export const resetGameState = async (nowMs: number): Promise<void> => {
-  const keys = getGameRedisKeys();
   const preservedCoins = await getCoins(nowMs);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
 
@@ -303,7 +299,7 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
   }
 
   await Promise.all([
-    redis.hSet(keys.meta, {
+    redis.hSet(KEYS.meta, {
       tickSeq: String(nextMeta.tickSeq),
       worldVersion: String(nextMeta.worldVersion),
       lastTickMs: String(nextMeta.lastTickMs),
@@ -314,17 +310,17 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
       coins: String(nextMeta.coins),
       lives: String(nextMeta.lives),
     }),
-    redis.set(keys.wave, JSON.stringify(defaultWave())),
-    redis.del(keys.players),
-    redis.del(keys.intents),
-    redis.del(keys.structures),
-    redis.del(keys.mobs),
-    redis.del(keys.queue),
-    redis.del(keys.seen),
-    redis.del(keys.snaps),
-    redis.del(keys.leaderLock),
+    redis.set(KEYS.wave, JSON.stringify(defaultWave())),
+    redis.del(KEYS.players),
+    redis.del(KEYS.intents),
+    redis.del(KEYS.structures),
+    redis.del(KEYS.mobs),
+    redis.del(KEYS.queue),
+    redis.del(KEYS.seen),
+    redis.del(KEYS.snaps),
+    redis.del(KEYS.leaderLock),
   ]);
   if (Object.keys(structureWrites).length > 0) {
-    await redis.hSet(keys.structures, structureWrites);
+    await redis.hSet(KEYS.structures, structureWrites);
   }
 };
