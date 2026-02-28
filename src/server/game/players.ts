@@ -10,7 +10,7 @@ import { isRecord } from '../../shared/utils';
 import { MAX_STRUCTURES } from '../config';
 import { KEYS } from '../core/redis';
 
-export const parsePlayerState = (value: unknown): PlayerState => {
+export function parsePlayerState(value: unknown): PlayerState {
   if (!isRecord(value)) {
     return {
       playerId: '',
@@ -29,9 +29,9 @@ export const parsePlayerState = (value: unknown): PlayerState => {
     speed: Number(value.speed ?? PLAYER_SPEED),
     lastSeenMs: Number(value.lastSeenMs ?? 0),
   };
-};
+}
 
-export const parseIntent = (value: unknown): PlayerIntent => {
+export function parseIntent(value: unknown): PlayerIntent {
   if (!isRecord(value)) {
     return { updatedAtMs: 0 };
   }
@@ -41,11 +41,11 @@ export const parseIntent = (value: unknown): PlayerIntent => {
   if (value.desiredDir) parsed.desiredDir = parseVec2(value.desiredDir);
   if (value.target) parsed.target = parseVec2(value.target);
   return parsed;
-};
+}
 
-export const touchPlayerPresence = async (
+export async function touchPlayerPresence(
   player: PlayerState
-): Promise<void> => {
+): Promise<void> {
   await Promise.all([
     redis.hSet(KEYS.players, { [player.playerId]: JSON.stringify(player) }),
     redis.zAdd(KEYS.seen, {
@@ -53,21 +53,21 @@ export const touchPlayerPresence = async (
       score: player.lastSeenMs,
     }),
   ]);
-};
+}
 
-export const removePlayers = async (playerIds: string[]): Promise<void> => {
+export async function removePlayers(playerIds: string[]): Promise<void> {
   if (playerIds.length === 0) return;
   await Promise.all([
     redis.hDel(KEYS.players, playerIds),
     redis.hDel(KEYS.intents, playerIds),
     redis.zRem(KEYS.seen, playerIds),
   ]);
-};
+}
 
-export const removeOldPlayersByLastSeen = async (
+export async function removeOldPlayersByLastSeen(
   cutoffMs: number,
   limit = 250
-): Promise<string[]> => {
+): Promise<string[]> {
   const stale = await redis.zRange(KEYS.seen, 0, cutoffMs, {
     by: 'score',
     limit: { offset: 0, count: limit },
@@ -76,25 +76,27 @@ export const removeOldPlayersByLastSeen = async (
   const playerIds = stale.map((entry) => entry.member);
   await removePlayers(playerIds);
   return playerIds;
-};
+}
 
-export const enforceStructureCap = async (
+export async function enforceStructureCap(
   incomingCount = 1
-): Promise<boolean> => {
+): Promise<boolean> {
   const count = await redis.hLen(KEYS.structures);
   const safeIncoming = Math.max(0, Math.floor(incomingCount));
   return count + safeIncoming <= MAX_STRUCTURES;
-};
+}
 
-export const createDefaultPlayer = (
+export function createDefaultPlayer(
   playerId: string,
   username: string,
   nowMs: number
-): PlayerState => ({
+): PlayerState {
+  return {
   playerId,
   username,
   position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
   velocity: { x: 0, z: 0 },
   speed: PLAYER_SPEED,
   lastSeenMs: nowMs,
-});
+};
+}

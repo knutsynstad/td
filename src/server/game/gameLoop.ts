@@ -30,11 +30,11 @@ import {
 } from './gameWorld';
 import { cleanupStalePlayersSeen } from './world';
 
-export const broadcast = async (
+export async function broadcast(
   worldVersion: number,
   tickSeq: number,
   events: GameDelta[]
-): Promise<void> => {
+): Promise<void> {
   await broadcastToChannel<GameDelta>(CHANNELS.game, events, (batchEvents) => {
     const batch: DeltaBatch = {
       type: 'deltaBatch',
@@ -44,12 +44,12 @@ export const broadcast = async (
     };
     return batch;
   });
-};
+}
 
-export const ensureStaticMap = (world: {
+export function ensureStaticMap(world: {
   structures: Map<string, StructureState>;
   meta: { lastTickMs: number; worldVersion: number };
-}): { upserts: StructureState[]; removes: string[] } => {
+}): { upserts: StructureState[]; removes: string[] } {
   const removes = sanitizeStaticMapStructures(world.structures);
   if (hasStaticMapStructures(world.structures)) {
     if (removes.length > 0) world.meta.worldVersion += 1;
@@ -63,12 +63,16 @@ export const ensureStaticMap = (world: {
   }
   if (upserts.length > 0 || removes.length > 0) world.meta.worldVersion += 1;
   return { upserts, removes };
-};
+}
 
-const onGameTick = async (
+async function onGameTick(
   world: GameWorld,
   { nowMs, ticksProcessed }: TickContext
-) => {
+): Promise<{
+  tickSeq: number;
+  commandCount: number;
+  deltaCount: number;
+}> {
   const deltas: GameDelta[] = [];
 
   const isMaintenanceTick =
@@ -116,7 +120,7 @@ const onGameTick = async (
     commandCount: commands.length,
     deltaCount: deltas.length,
   };
-};
+}
 
 export type GameLoopResult = {
   ownerToken: string;
@@ -124,9 +128,9 @@ export type GameLoopResult = {
   ticksProcessed: number;
 };
 
-export const runGameLoop = (
+export function runGameLoop(
   windowMs: number = LEADER_BROADCAST_WINDOW_MS
-): Promise<GameLoopResult> => {
+): Promise<GameLoopResult> {
   const { leaderLock } = KEYS;
 
   return runTickLoop<GameWorld>(
@@ -139,14 +143,14 @@ export const runGameLoop = (
       channelName: CHANNELS.game,
     },
     {
-      onInit: async () => {
+      onInit: async function () {
         const world = await loadGameWorld();
         ensureStaticMap(world);
         world.waveDirty = true;
         return world;
       },
       onTick: onGameTick,
-      onTeardown: async (world) => {
+      onTeardown: async function (world) {
         await flushGameWorld(world);
       },
     }

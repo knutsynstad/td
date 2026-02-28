@@ -17,12 +17,15 @@ import { clampCoins, getCoins } from './economy';
 import { KEYS } from '../core/redis';
 import { parseIntent, parsePlayerState } from './players';
 
-export const parseStructureType = (value: unknown): StructureState['type'] =>
-  value === 'tower' || value === 'tree' || value === 'rock' ? value : 'wall';
+export function parseStructureType(value: unknown): StructureState['type'] {
+  return value === 'tower' || value === 'tree' || value === 'rock'
+    ? value
+    : 'wall';
+}
 
-const parseStructureMetadata = (
+function parseStructureMetadata(
   raw: unknown
-): StructureMetadata | undefined => {
+): StructureMetadata | undefined {
   if (!isRecord(raw)) return undefined;
   const out: StructureMetadata = {};
   const treeFootprint = Number(raw.treeFootprint ?? 0);
@@ -54,9 +57,9 @@ const parseStructureMetadata = (
   }
   if (!out.treeFootprint && !out.rock) return undefined;
   return out;
-};
+}
 
-export const parseStructure = (value: unknown): StructureState => {
+export function parseStructure(value: unknown): StructureState {
   if (!isRecord(value)) {
     return {
       structureId: '',
@@ -81,9 +84,9 @@ export const parseStructure = (value: unknown): StructureState => {
     createdAtMs: Number(value.createdAtMs ?? 0),
     metadata: parseStructureMetadata(value.metadata),
   };
-};
+}
 
-export const parseMob = (value: unknown): MobState => {
+export function parseMob(value: unknown): MobState {
   if (!isRecord(value)) {
     return {
       mobId: '',
@@ -110,28 +113,31 @@ export const parseMob = (value: unknown): MobState => {
       value.lastProgressDistanceToGoal ?? Number.POSITIVE_INFINITY
     ),
   };
-};
+}
 
-export const parseMapFromHash = <T>(
+export function parseMapFromHash<T>(
   value: Record<string, string> | undefined,
   parser: (entry: unknown) => T
-): Record<string, T> => {
+): Record<string, T> {
   const out: Record<string, T> = {};
   if (!value) return out;
   for (const [field, encoded] of Object.entries(value)) {
     out[field] = parser(safeParseJson(encoded));
   }
   return out;
-};
+}
 
-export const defaultWave = (): WaveState => ({
+export function defaultWave(): WaveState {
+  return {
   wave: 0,
   active: false,
   nextWaveAtMs: 0,
   spawners: [],
-});
+};
+}
 
-export const defaultMeta = (nowMs: number, coins: number): WorldMeta => ({
+export function defaultMeta(nowMs: number, coins: number): WorldMeta {
+  return {
   tickSeq: 0,
   worldVersion: 0,
   lastTickMs: nowMs,
@@ -140,9 +146,10 @@ export const defaultMeta = (nowMs: number, coins: number): WorldMeta => ({
   coins: clampCoins(coins),
   lives: 1,
   nextMobSeq: 1,
-});
+};
+}
 
-export const loadWorldState = async (): Promise<WorldState> => {
+export async function loadWorldState(): Promise<WorldState> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
       redis.hGetAll(KEYS.meta),
@@ -178,7 +185,8 @@ export const loadWorldState = async (): Promise<WorldState> => {
   );
   const mobs = parseMapFromHash<MobState>(mobsRaw, parseMob);
   const parsedWave = safeParseJson(waveRaw ?? undefined);
-  const makeDefaultSpawner = (): WaveState['spawners'][number] => ({
+  function makeDefaultSpawner(): WaveState['spawners'][number] {
+    return {
     spawnerId: '',
     totalCount: 0,
     spawnedCount: 0,
@@ -188,7 +196,8 @@ export const loadWorldState = async (): Promise<WorldState> => {
     gateOpen: false,
     routeState: 'blocked',
     route: [],
-  });
+  };
+  }
   const wave: WaveState = isRecord(parsedWave)
     ? {
         wave: Number(parsedWave.wave ?? 0),
@@ -220,9 +229,9 @@ export const loadWorldState = async (): Promise<WorldState> => {
     : defaultWave();
 
   return { meta, players, intents, structures, mobs, wave };
-};
+}
 
-export const persistWorldState = async (world: WorldState): Promise<void> => {
+export async function persistWorldState(world: WorldState): Promise<void> {
   const metaWrites: Record<string, string> = {
     tickSeq: String(world.meta.tickSeq),
     worldVersion: String(world.meta.worldVersion),
@@ -279,16 +288,16 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
       ? redis.hSet(KEYS.mobs, mobWrites)
       : Promise.resolve(),
   ]);
-};
+}
 
-export const cleanupStalePlayersSeen = async (
+export async function cleanupStalePlayersSeen(
   playerIds: string[]
-): Promise<void> => {
+): Promise<void> {
   if (playerIds.length === 0) return;
   await redis.zRem(KEYS.seen, playerIds);
-};
+}
 
-export const resetGameState = async (nowMs: number): Promise<void> => {
+export async function resetGameState(nowMs: number): Promise<void> {
   const preservedCoins = await getCoins(nowMs);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
 
@@ -323,4 +332,4 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
   if (Object.keys(structureWrites).length > 0) {
     await redis.hSet(KEYS.structures, structureWrites);
   }
-};
+}

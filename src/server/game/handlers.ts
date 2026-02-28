@@ -30,13 +30,13 @@ import {
 } from './gameWorld';
 import { broadcast, ensureStaticMap } from './gameLoop';
 
-const getPlayerId = async (): Promise<string> => {
+async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();
   if (!username) return `anon-${Date.now()}`;
   return username.toLowerCase();
-};
+}
 
-export const joinGame = async (): Promise<JoinResponse> => {
+export async function joinGame(): Promise<JoinResponse> {
   const nowMs = Date.now();
   await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
   const world = await loadGameWorld();
@@ -76,11 +76,11 @@ export const joinGame = async (): Promise<JoinResponse> => {
     channel: CHANNELS.game,
     snapshot: gameWorldToSnapshot(world),
   };
-};
+}
 
-export const applyCommand = async (
+export async function applyCommand(
   envelope: CommandEnvelope
-): Promise<CommandResponse> => {
+): Promise<CommandResponse> {
   const nowMs = Date.now();
   let spentBuildCoins = 0;
 
@@ -154,12 +154,12 @@ export const applyCommand = async (
     tickSeq: world.meta.tickSeq,
     worldVersion: world.meta.worldVersion,
   };
-};
+}
 
-export const heartbeatGame = async (
+export async function heartbeatGame(
   playerId: string,
   position?: { x: number; z: number }
-): Promise<HeartbeatResponse> => {
+): Promise<HeartbeatResponse> {
   const nowMs = Date.now();
   const world = await loadWorldState();
   const player = world.players[playerId];
@@ -179,9 +179,11 @@ export const heartbeatGame = async (
     waveActive: world.wave.active,
     nextWaveAtMs: world.wave.nextWaveAtMs,
   };
-};
+}
 
-export const getCoinBalance = async (): Promise<number> => getCoins(Date.now());
+export async function getCoinBalance(): Promise<number> {
+  return getCoins(Date.now());
+}
 
 export type GamePreview = {
   wave: number;
@@ -189,18 +191,18 @@ export type GamePreview = {
   playerCount: number;
 };
 
-export const getGamePreview = async (): Promise<GamePreview> => {
+export async function getGamePreview(): Promise<GamePreview> {
   const world = await loadWorldState();
   return {
     wave: world.wave.wave,
     mobsLeft: Object.keys(world.mobs).length,
     playerCount: Object.keys(world.players).length,
   };
-};
+}
 
-export const resyncGame = async (
+export async function resyncGame(
   _playerId?: string
-): Promise<ResyncResponse> => {
+): Promise<ResyncResponse> {
   const world = await loadGameWorld();
   const staticSync = ensureStaticMap(world);
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
@@ -211,12 +213,12 @@ export const resyncGame = async (
     type: 'snapshot',
     snapshot: gameWorldToSnapshot(world),
   };
-};
+}
 
-export const resetGame = async (): Promise<{
+export async function resetGame(): Promise<{
   tickSeq: number;
   worldVersion: number;
-}> => {
+}> {
   const nowMs = Date.now();
   await resetGameState(nowMs);
   const world = await loadWorldState();
@@ -230,4 +232,4 @@ export const resetGame = async (): Promise<{
     tickSeq: world.meta.tickSeq,
     worldVersion: world.meta.worldVersion,
   };
-};
+}

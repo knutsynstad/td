@@ -5,18 +5,19 @@ import { isRecord, safeParseJson } from '../../shared/utils';
 
 const MAX_TX_RETRIES = 5;
 
-export const clampCoins = (coins: number): number =>
-  Math.max(0, Math.min(COINS_CAP, coins));
+export function clampCoins(coins: number): number {
+  return Math.max(0, Math.min(COINS_CAP, coins));
+}
 
 type GlobalCoinState = {
   coins: number;
   lastAccruedMs: number;
 };
 
-const parseGlobalCoinState = (
+function parseGlobalCoinState(
   raw: string | undefined,
   nowMs: number
-): GlobalCoinState => {
+): GlobalCoinState {
   const parsed = safeParseJson(raw ?? undefined);
   if (!isRecord(parsed)) {
     return { coins: COINS_CAP, lastAccruedMs: nowMs };
@@ -25,23 +26,23 @@ const parseGlobalCoinState = (
     coins: clampCoins(Number(parsed.coins ?? COINS_CAP)),
     lastAccruedMs: Number(parsed.lastAccruedMs ?? nowMs),
   };
-};
+}
 
-const accrueCoins = (state: GlobalCoinState, nowMs: number): number => {
+function accrueCoins(state: GlobalCoinState, nowMs: number): number {
   const elapsedMs = Math.max(0, nowMs - state.lastAccruedMs);
   const regenerated = (elapsedMs / 1000) * COINS_REGEN_PER_SECOND;
   return clampCoins(state.coins + regenerated);
-};
+}
 
-export const getCoins = async (nowMs: number): Promise<number> => {
+export async function getCoins(nowMs: number): Promise<number> {
   const raw = await redis.get(KEYS.coins);
   return accrueCoins(parseGlobalCoinState(raw ?? undefined, nowMs), nowMs);
-};
+}
 
-export const spendCoins = async (
+export async function spendCoins(
   amount: number,
   nowMs: number
-): Promise<{ ok: boolean; coins: number }> => {
+): Promise<{ ok: boolean; coins: number }> {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.coins);
@@ -61,12 +62,12 @@ export const spendCoins = async (
     if (result !== null) return { ok: true, coins: nextCoins };
   }
   return { ok: false, coins: await getCoins(nowMs) };
-};
+}
 
-export const addCoins = async (
+export async function addCoins(
   amount: number,
   nowMs: number
-): Promise<{ added: number; coins: number }> => {
+): Promise<{ added: number; coins: number }> {
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.coins);
@@ -83,18 +84,19 @@ export const addCoins = async (
     if (result !== null) return { added, coins: nextCoins };
   }
   return { added: 0, coins: await getCoins(nowMs) };
-};
+}
 
-const parseCastleCoins = (raw: string | undefined): number => {
+function parseCastleCoins(raw: string | undefined): number {
   const numeric = Number(raw ?? 0);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.floor(numeric));
-};
+}
 
-export const getCastleCoins = async (): Promise<number> =>
-  parseCastleCoins(await redis.get(KEYS.castle));
+export async function getCastleCoins(): Promise<number> {
+  return parseCastleCoins(await redis.get(KEYS.castle));
+}
 
-export const depositCastleCoins = async (
+export async function depositCastleCoins(
   amount: number,
   nowMs: number
 ): Promise<{
@@ -102,7 +104,7 @@ export const depositCastleCoins = async (
   deposited: number;
   coins: number;
   castleCoins: number;
-}> => {
+}> {
   const safeAmount = Math.max(0, Math.floor(amount));
   if (safeAmount <= 0) {
     return {
@@ -145,12 +147,12 @@ export const depositCastleCoins = async (
     coins: await getCoins(nowMs),
     castleCoins: await getCastleCoins(),
   };
-};
+}
 
-export const withdrawCastleCoins = async (
+export async function withdrawCastleCoins(
   requested: number,
   nowMs: number
-): Promise<{ withdrawn: number; coins: number; castleCoins: number }> => {
+): Promise<{ withdrawn: number; coins: number; castleCoins: number }> {
   const safeRequested = Math.max(0, Math.floor(requested));
   if (safeRequested <= 0) {
     return {
@@ -188,4 +190,4 @@ export const withdrawCastleCoins = async (
     coins: await getCoins(nowMs),
     castleCoins: await getCastleCoins(),
   };
-};
+}

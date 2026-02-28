@@ -37,13 +37,14 @@ export type TickLoopResult = {
   ticksProcessed: number;
 };
 
-const createOwnerToken = (): string =>
-  `leader:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+function createOwnerToken(): string {
+  return `leader:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+}
 
-export const runTickLoop = async <TState>(
+export async function runTickLoop<TState>(
   config: TickLoopConfig,
   handlers: TickLoopHandlers<TState>
-): Promise<TickLoopResult> => {
+): Promise<TickLoopResult> {
   const ownerToken = createOwnerToken();
   const startedAt = Date.now();
   const endAt = startedAt + config.windowMs;

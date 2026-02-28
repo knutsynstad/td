@@ -9,7 +9,9 @@ import { parseStructureType } from './world';
 
 const MAX_TX_RETRIES = 5;
 
-const parseCommandEnvelope = (value: unknown): CommandEnvelope | undefined => {
+function parseCommandEnvelope(
+  value: unknown
+): CommandEnvelope | undefined {
   if (!isRecord(value)) return undefined;
   const seq = Number(value.seq ?? -1);
   const sentAtMs = Number(value.sentAtMs ?? 0);
@@ -103,12 +105,12 @@ const parseCommandEnvelope = (value: unknown): CommandEnvelope | undefined => {
     };
   }
   return undefined;
-};
+}
 
-export const enqueueCommand = async (
+export async function enqueueCommand(
   nowMs: number,
   envelope: CommandEnvelope
-): Promise<{ accepted: boolean; reason?: string }> => {
+): Promise<{ accepted: boolean; reason?: string }> {
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.queue);
     const queueSize = await redis.zCard(KEYS.queue);
@@ -127,11 +129,11 @@ export const enqueueCommand = async (
     }
   }
   return { accepted: false, reason: 'queue contention' };
-};
+}
 
-export const popPendingCommands = async (
+export async function popPendingCommands(
   upToMs: number
-): Promise<CommandEnvelope[]> => {
+): Promise<CommandEnvelope[]> {
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.queue);
     const items = await redis.zRange(KEYS.queue, 0, upToMs, {
@@ -167,11 +169,11 @@ export const popPendingCommands = async (
     }
   }
   return [];
-};
+}
 
-export const trimCommandQueue = async (): Promise<void> => {
+export async function trimCommandQueue(): Promise<void> {
   const count = await redis.zCard(KEYS.queue);
   if (count <= MAX_QUEUE_COMMANDS) return;
   const overflow = count - MAX_QUEUE_COMMANDS;
   await redis.zRemRangeByRank(KEYS.queue, 0, overflow - 1);
-};
+}

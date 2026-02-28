@@ -17,21 +17,22 @@ import { KEYS } from '../core/redis';
 import { parseIntent, parsePlayerState } from './players';
 import { defaultWave, parseMob, parseStructure } from './world';
 
-const parseTrackedMapFromHash = <T>(
+function parseTrackedMapFromHash<T>(
   raw: Record<string, string> | undefined,
   parser: (entry: unknown) => T
-): TrackedMap<T> => {
+): TrackedMap<T> {
   const map = new TrackedMap<T>();
   if (!raw) return map;
   for (const [key, encoded] of Object.entries(raw)) {
     Map.prototype.set.call(map, key, parser(safeParseJson(encoded)));
   }
   return map;
-};
+}
 
-const parseWaveState = (waveRaw: string | undefined): WaveState => {
+function parseWaveState(waveRaw: string | undefined): WaveState {
   const parsed = safeParseJson(waveRaw);
-  const makeDefaultSpawner = (): WaveState['spawners'][number] => ({
+  function makeDefaultSpawner(): WaveState['spawners'][number] {
+    return {
     spawnerId: '',
     totalCount: 0,
     spawnedCount: 0,
@@ -41,7 +42,8 @@ const parseWaveState = (waveRaw: string | undefined): WaveState => {
     gateOpen: false,
     routeState: 'blocked',
     route: [],
-  });
+  };
+  }
   if (!isRecord(parsed)) return defaultWave();
   return {
     wave: Number(parsed.wave ?? 0),
@@ -69,9 +71,9 @@ const parseWaveState = (waveRaw: string | undefined): WaveState => {
         })
       : [],
   };
-};
+}
 
-export const loadGameWorld = async (): Promise<GameWorld> => {
+export async function loadGameWorld(): Promise<GameWorld> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
       redis.hGetAll(KEYS.meta),
@@ -111,9 +113,9 @@ export const loadGameWorld = async (): Promise<GameWorld> => {
     wave: parseWaveState(waveRaw ?? undefined),
     waveDirty: false,
   };
-};
+}
 
-export const flushGameWorld = async (world: GameWorld): Promise<void> => {
+export async function flushGameWorld(world: GameWorld): Promise<void> {
   const ops: Promise<unknown>[] = [];
 
   ops.push(
@@ -131,14 +133,14 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
     })
   );
 
-  const flushCollection = (
+  function flushCollection(
     redisKey: string,
     map: Map<string, unknown> & {
       upserted: ReadonlySet<string>;
       removed: ReadonlySet<string>;
       resetTracking(): void;
     }
-  ) => {
+  ): void {
     if (map.upserted.size > 0) {
       const writes: Record<string, string> = {};
       for (const id of map.upserted) {
@@ -153,7 +155,7 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
       ops.push(redis.hDel(redisKey, Array.from(map.removed)));
     }
     map.resetTracking();
-  };
+  }
 
   flushCollection(KEYS.mobs, world.mobs as TrackedMap<MobState>);
   flushCollection(
@@ -169,16 +171,16 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
   }
 
   await Promise.all(ops);
-};
+}
 
-export const gameWorldToSnapshot = (world: GameWorld): WorldState => {
-  const toRecord = <V>(map: Map<string, V>): Record<string, V> => {
+export function gameWorldToSnapshot(world: GameWorld): WorldState {
+  function toRecord<V>(map: Map<string, V>): Record<string, V> {
     const record: Record<string, V> = {};
     for (const [key, value] of map.entries()) {
       record[key] = value;
     }
     return record;
-  };
+  }
 
   return {
     meta: world.meta,
@@ -188,11 +190,9 @@ export const gameWorldToSnapshot = (world: GameWorld): WorldState => {
     mobs: toRecord(world.mobs),
     wave: world.wave,
   };
-};
+}
 
-export const mergePlayersFromRedis = async (
-  world: GameWorld
-): Promise<void> => {
+export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
   const [playersRaw, intentsRaw] = await Promise.all([
     redis.hGetAll(KEYS.players),
     redis.hGetAll(KEYS.intents),
@@ -220,13 +220,13 @@ export const mergePlayersFromRedis = async (
       }
     }
   }
-};
+}
 
-export const findAndRemoveStalePlayersInMemory = (
+export function findAndRemoveStalePlayersInMemory(
   world: GameWorld,
   cutoffMs: number,
   limit: number
-): string[] => {
+): string[] {
   const stale: string[] = [];
   for (const player of world.players.values()) {
     if (player.lastSeenMs < cutoffMs) {
@@ -239,4 +239,4 @@ export const findAndRemoveStalePlayersInMemory = (
     world.intents.delete(id);
   }
   return stale;
-};
+}
