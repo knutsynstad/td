@@ -5,7 +5,6 @@ import { isRecord, safeParseJson } from '../../shared/utils';
 
 const MAX_TX_RETRIES = 5;
 
-
 export const clampCoins = (coins: number): number =>
   Math.max(0, Math.min(COINS_CAP, coins));
 
@@ -46,10 +45,7 @@ export const spendCoins = async (
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.coins);
-    const current = parseGlobalCoinState(
-      await redis.get(KEYS.coins),
-      nowMs
-    );
+    const current = parseGlobalCoinState(await redis.get(KEYS.coins), nowMs);
     const accrued = accrueCoins(current, nowMs);
     if (accrued < safeAmount) {
       await tx.unwatch();
@@ -74,10 +70,7 @@ export const addCoins = async (
   const safeAmount = Math.max(0, amount);
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.coins);
-    const current = parseGlobalCoinState(
-      await redis.get(KEYS.coins),
-      nowMs
-    );
+    const current = parseGlobalCoinState(await redis.get(KEYS.coins), nowMs);
     const accrued = accrueCoins(current, nowMs);
     const nextCoins = clampCoins(accrued + safeAmount);
     const added = Math.max(0, nextCoins - accrued);
@@ -121,10 +114,7 @@ export const depositCastleCoins = async (
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.coins, KEYS.castle);
-    const coinState = parseGlobalCoinState(
-      await redis.get(KEYS.coins),
-      nowMs
-    );
+    const coinState = parseGlobalCoinState(await redis.get(KEYS.coins), nowMs);
     const castleCoins = parseCastleCoins(await redis.get(KEYS.castle));
     const accrued = accrueCoins(coinState, nowMs);
     if (accrued < safeAmount) {
@@ -171,10 +161,7 @@ export const withdrawCastleCoins = async (
   }
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.coins, KEYS.castle);
-    const coinState = parseGlobalCoinState(
-      await redis.get(KEYS.coins),
-      nowMs
-    );
+    const coinState = parseGlobalCoinState(await redis.get(KEYS.coins), nowMs);
     const castleCoins = parseCastleCoins(await redis.get(KEYS.castle));
     const accrued = accrueCoins(coinState, nowMs);
     const maxAddable = Math.max(0, COINS_CAP - accrued);

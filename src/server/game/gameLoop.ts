@@ -5,12 +5,10 @@ import {
   LEADER_LOCK_TTL_SECONDS,
   LEADER_STALE_PLAYER_INTERVAL,
   LOCK_REFRESH_INTERVAL_TICKS,
-  MAX_BATCH_EVENTS,
   PERSIST_INTERVAL_TICKS,
   PLAYER_TIMEOUT_MS,
 } from '../config';
 import { KEYS } from '../core/redis';
-import { CHANNELS } from '../core/realtime';
 import {
   buildPresenceLeaveDelta,
   runSimulation,
@@ -21,7 +19,7 @@ import {
   hasStaticMapStructures,
   sanitizeStaticMapStructures,
 } from '../../shared/world/staticStructures';
-import { broadcastBatched } from '../core/realtime';
+import { CHANNELS, broadcast as broadcastToChannel } from '../core/realtime';
 import { runTickLoop, type TickContext } from './tick';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {
@@ -37,20 +35,15 @@ export const broadcast = async (
   tickSeq: number,
   events: GameDelta[]
 ): Promise<void> => {
-  await broadcastBatched<GameDelta>(
-    CHANNELS.game,
-    events,
-    MAX_BATCH_EVENTS,
-    (batchEvents) => {
-      const batch: DeltaBatch = {
-        type: 'deltaBatch',
-        tickSeq,
-        worldVersion,
-        events: batchEvents,
-      };
-      return batch;
-    }
-  );
+  await broadcastToChannel<GameDelta>(CHANNELS.game, events, (batchEvents) => {
+    const batch: DeltaBatch = {
+      type: 'deltaBatch',
+      tickSeq,
+      worldVersion,
+      events: batchEvents,
+    };
+    return batch;
+  });
 };
 
 export const ensureStaticMap = (world: {
