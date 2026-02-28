@@ -14,7 +14,11 @@ import {
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
 import { CHANNELS } from '../core/realtime';
-import { getCoins, spendCoins, addCoins } from './economy';
+import {
+  addPlayerCoins,
+  getPlayerCoins,
+  spendPlayerCoins,
+} from './economy';
 import {
   createDefaultPlayer,
   enforceStructureCap,
@@ -56,7 +60,7 @@ export async function joinGame(): Promise<JoinResponse> {
   player.lastSeenMs = nowMs;
   world.players.set(playerId, player);
   await touchPlayerPresence(player);
-  const coins = await getCoins(nowMs);
+  const coins = await getPlayerCoins(nowMs);
   world.meta.coins = coins;
 
   const joinDelta: GameDelta = {
@@ -118,7 +122,7 @@ export async function applyCommand(
       (total, structure) => total + getStructureCoinCost(structure.type),
       0
     );
-    const spendResult = await spendCoins(coinCost, nowMs);
+    const spendResult = await spendPlayerCoins(coinCost, nowMs);
     if (!spendResult.ok) {
       const world = await loadWorldState();
       return {
@@ -135,7 +139,7 @@ export async function applyCommand(
   const enqueueResult = await enqueueCommand(nowMs, envelope);
   if (!enqueueResult.accepted) {
     if (spentBuildCoins > 0) {
-      await addCoins(spentBuildCoins, nowMs);
+      await addPlayerCoins(spentBuildCoins, nowMs);
     }
     const world = await loadWorldState();
     return {
@@ -182,7 +186,7 @@ export async function heartbeatGame(
 }
 
 export async function getCoinBalance(): Promise<number> {
-  return getCoins(Date.now());
+  return getPlayerCoins(Date.now());
 }
 
 export type GamePreview = {
@@ -208,7 +212,7 @@ export async function resyncGame(
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
     await flushGameWorld(world);
   }
-  world.meta.coins = await getCoins(Date.now());
+  world.meta.coins = await getPlayerCoins(Date.now());
   return {
     type: 'snapshot',
     snapshot: gameWorldToSnapshot(world),

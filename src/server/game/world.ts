@@ -11,9 +11,9 @@ import type {
   WorldState,
 } from '../../shared/game-state';
 import { parseVec2 } from '../../shared/game-state';
-import { isRecord, safeParseJson } from '../../shared/utils';
+import { clamp, isRecord, safeParseJson } from '../../shared/utils';
 import { buildStaticMapStructures } from '../../shared/world/staticStructures';
-import { clampCoins, getCoins } from './economy';
+import { getPlayerCoins } from './economy';
 import { KEYS } from '../core/redis';
 import { parseIntent, parsePlayerState } from './players';
 
@@ -143,7 +143,7 @@ export function defaultMeta(nowMs: number, coins: number): WorldMeta {
   lastTickMs: nowMs,
   lastStructureChangeTickSeq: 0,
   seed: nowMs,
-  coins: clampCoins(coins),
+  coins: clamp(coins, 0, COINS_CAP),
   lives: 1,
   nextMobSeq: 1,
 };
@@ -298,7 +298,7 @@ export async function cleanupStalePlayersSeen(
 }
 
 export async function resetGameState(nowMs: number): Promise<void> {
-  const preservedCoins = await getCoins(nowMs);
+  const preservedCoins = await getPlayerCoins(nowMs);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
 
   const staticStructures = buildStaticMapStructures(nowMs);

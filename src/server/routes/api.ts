@@ -28,9 +28,9 @@ import {
   resyncGame,
 } from '../game/handlers';
 import {
-  depositCastleCoins,
-  getCastleCoins,
-  withdrawCastleCoins,
+  depositToCastle,
+  getCastleBalance,
+  withdrawFromCastle,
 } from '../game/economy';
 
 type ErrorResponse = {
@@ -157,10 +157,10 @@ api.post('/game/reset', async (c) => {
 });
 
 api.get('/castle/coins', async (c) => {
-  const castleCoins = await getCastleCoins();
+  const castleBalance = await getCastleBalance();
   return c.json<CastleCoinsBalanceResponse>({
     type: 'castleCoinsBalance',
-    castleCoins,
+    castleCoins: castleBalance,
   });
 });
 
@@ -175,8 +175,8 @@ api.post('/castle/coins/deposit', async (c) => {
       400
     );
   }
-  const result = await depositCastleCoins(amount, Date.now());
-  if (!result.ok) {
+  const result = await depositToCastle(amount);
+  if (result.deposited === 0) {
     return c.json<ErrorResponse>(
       { status: 'error', message: 'insufficient coins' },
       400
@@ -185,8 +185,8 @@ api.post('/castle/coins/deposit', async (c) => {
   return c.json<CastleCoinsDepositResponse>({
     type: 'castleCoinsDeposit',
     deposited: result.deposited,
-    castleCoins: result.castleCoins,
-    coins: result.coins,
+    castleCoins: result.castleBalance,
+    coins: result.userBalance,
   });
 });
 
@@ -201,11 +201,11 @@ api.post('/castle/coins/withdraw', async (c) => {
       400
     );
   }
-  const result = await withdrawCastleCoins(requested, Date.now());
+  const result = await withdrawFromCastle(requested);
   return c.json<CastleCoinsWithdrawResponse>({
     type: 'castleCoinsWithdraw',
     withdrawn: result.withdrawn,
-    castleCoins: result.castleCoins,
-    coins: result.coins,
+    castleCoins: result.castleBalance,
+    coins: result.userBalance,
   });
 });
