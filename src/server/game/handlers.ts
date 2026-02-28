@@ -14,7 +14,7 @@ import {
 import { getStructureEnergyCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from './config';
 import { getGameChannelName } from './keys';
-import { getCoins, spendCoins, addCoins } from '../economy';
+import { getCoins, spendCoins, addCoins } from './economy';
 import {
   createDefaultPlayer,
   enforceStructureCap,

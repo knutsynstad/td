@@ -13,7 +13,7 @@ import type {
 import { parseVec2 } from '../../shared/game-state';
 import { isRecord, safeParseJson } from '../../shared/utils';
 import { buildStaticMapStructures } from '../../shared/world/staticStructures';
-import { clampCoins, getCoins } from '../economy';
+import { clampCoins, getCoins } from './economy';
 import { getGameRedisKeys } from './keys';
 import { parseIntent, parsePlayerState } from './players';
 

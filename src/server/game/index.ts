@@ -38,3 +38,15 @@ export {
   resetGame,
 } from './handlers';
 export type { GamePreview } from './handlers';
+
+export {
+  getEconomyRedisKeys,
+  clampCoins,
+  getCoins,
+  spendCoins,
+  addCoins,
+  getCastleCoins,
+  depositCastleCoins,
+  withdrawCastleCoins,
+} from './economy';
+export type { EconomyRedisKeys } from './economy';
