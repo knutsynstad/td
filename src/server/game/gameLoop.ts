@@ -9,7 +9,7 @@ import {
   MAX_BATCH_EVENTS,
   PERSIST_INTERVAL_TICKS,
   PLAYER_TIMEOUT_MS,
-} from './config';
+} from '../config';
 import { getGameChannelName, getGameRedisKeys } from './keys';
 import {
   buildPresenceLeaveDelta,

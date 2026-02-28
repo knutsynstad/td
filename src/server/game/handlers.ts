@@ -12,7 +12,7 @@ import {
   type PlayerState,
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
-import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from './config';
+import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
 import { getGameChannelName } from './keys';
 import { getCoins, spendCoins, addCoins } from './economy';
 import {

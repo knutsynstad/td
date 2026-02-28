@@ -2,7 +2,7 @@ import { redis } from '@devvit/web/server';
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import { parseVec2 } from '../../shared/game-state';
 import { isRecord, safeParseJson } from '../../shared/utils';
-import { MAX_COMMANDS_PER_BATCH, MAX_QUEUE_COMMANDS } from './config';
+import { MAX_COMMANDS_PER_BATCH, MAX_QUEUE_COMMANDS } from '../config';
 import { getGameRedisKeys } from './keys';
 import { parseIntent } from './players';
 import { parseStructureType } from './world';

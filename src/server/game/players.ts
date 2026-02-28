@@ -7,7 +7,7 @@ import {
 } from '../../shared/game-state';
 import { PLAYER_SPEED } from '../../shared/content';
 import { isRecord } from '../../shared/utils';
-import { MAX_STRUCTURES } from './config';
+import { MAX_STRUCTURES } from '../config';
 import { getGameRedisKeys } from './keys';
 
 export const parsePlayerState = (value: unknown): PlayerState => {
