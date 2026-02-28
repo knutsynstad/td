@@ -382,10 +382,6 @@ describe('runSimulation', () => {
   it('sends compact mob deltas between full snapshot intervals', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);
-    const intervalTicks = Math.max(
-      1,
-      Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS),
-    );
     gameWorld.meta.tickSeq = 1;
     gameWorld.meta.lastStructureChangeTickSeq = 0;
     gameWorld.wave.wave = 1;
@@ -423,7 +419,6 @@ describe('runSimulation', () => {
     );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
-      expect(entityDelta.tickSeq % intervalTicks).not.toBe(0);
       expect(entityDelta.fullMobList).toBe(false);
       expect(entityDelta.mobSlices?.base.length).toBe(MAX_DELTA_MOBS);
       expect(entityDelta.mobSlices).toBeDefined();
@@ -475,10 +470,9 @@ describe('runSimulation', () => {
     expect(entityDeltas.length).toBe(2);
     for (let i = 0; i < entityDeltas.length; i += 1) {
       const entityDelta = entityDeltas[i]!;
-      expect(entityDelta.tickSeq % intervalTicks).toBe(0);
       expect(entityDelta.fullMobList).toBe(true);
       expect(entityDelta.mobSlices).toBeUndefined();
-      expect(entityDelta.fullMobSnapshotId).toBe(entityDelta.tickSeq);
+      expect(entityDelta.fullMobSnapshotId).toBe(intervalTicks);
       expect(entityDelta.fullMobSnapshotChunkCount).toBe(2);
       expect(entityDelta.fullMobSnapshotChunkIndex).toBe(i);
       expect(entityDelta.mobPool).toBeDefined();

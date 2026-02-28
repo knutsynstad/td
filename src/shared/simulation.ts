@@ -1169,8 +1169,6 @@ export const runSimulation = (
   if (commandChanges.movedPlayers.length > 0) {
     deltas.push({
       type: 'entityDelta',
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion,
       serverTimeMs: world.meta.lastTickMs,
       tickMs: SIM_TICK_MS,
       players: commandChanges.movedPlayers.slice(0, MAX_DELTA_PLAYERS),
@@ -1181,15 +1179,13 @@ export const runSimulation = (
     recomputeSpawnerRoutes(world);
     waveChanged = true;
     routesChanged = true;
+    world.meta.worldVersion += 1;
     const structureDelta: StructureDelta = {
       type: 'structureDelta',
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion + 1,
       upserts: structureUpserts.slice(0, MAX_STRUCTURE_DELTA_UPSERTS),
       removes: structureRemoves.slice(0, MAX_STRUCTURE_DELTA_REMOVES),
       requiresPathRefresh: true,
     };
-    world.meta.worldVersion += 1;
     deltas.push(structureDelta);
   }
 
@@ -1214,8 +1210,6 @@ export const runSimulation = (
     if (waveResult.changed) {
       latestWaveDelta = {
         type: 'waveDelta',
-        tickSeq: world.meta.tickSeq,
-        worldVersion: world.meta.worldVersion,
         wave: world.wave,
         routesIncluded: routesChanged,
       };
@@ -1225,8 +1219,6 @@ export const runSimulation = (
   if (waveChanged && !latestWaveDelta) {
     latestWaveDelta = {
       type: 'waveDelta',
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion,
       wave: world.wave,
       routesIncluded: routesChanged,
     };
@@ -1257,7 +1249,6 @@ export const runSimulation = (
       const snapshotId = world.meta.tickSeq;
       console.info('Mob snapshot payload', {
         tickSeq: world.meta.tickSeq,
-        worldVersion: world.meta.worldVersion,
         totalMobs: latestMobUpserts.length,
         chunkCount,
         chunkSize,
@@ -1269,8 +1260,6 @@ export const runSimulation = (
         const chunkMobs = latestMobUpserts.slice(start, end);
         const chunkDelta: EntityDelta = {
           type: 'entityDelta',
-          tickSeq: world.meta.tickSeq,
-          worldVersion: world.meta.worldVersion,
           serverTimeMs: world.meta.lastTickMs,
           tickMs: simulatedWindowMs,
           players: [],
@@ -1287,8 +1276,6 @@ export const runSimulation = (
       const { pool, slices } = buildUnifiedMobDelta(latestMobUpserts, world);
       const entityDelta: EntityDelta = {
         type: 'entityDelta',
-        tickSeq: world.meta.tickSeq,
-        worldVersion: world.meta.worldVersion,
         serverTimeMs: world.meta.lastTickMs,
         tickMs: simulatedWindowMs,
         players: [],
@@ -1320,14 +1307,8 @@ export const runSimulation = (
   return { world, deltas, perf };
 };
 
-export const buildPresenceLeaveDelta = (
-  tickSeq: number,
-  worldVersion: number,
-  playerId: string
-): GameDelta => ({
+export const buildPresenceLeaveDelta = (playerId: string): GameDelta => ({
   type: 'presenceDelta',
-  tickSeq,
-  worldVersion,
   left: {
     playerId,
     reason: 'timeout',

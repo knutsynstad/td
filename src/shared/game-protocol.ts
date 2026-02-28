@@ -73,8 +73,6 @@ export type CommandEnvelope = {
 
 export type PresenceDelta = {
   type: 'presenceDelta';
-  tickSeq: number;
-  worldVersion: number;
   joined?: {
     playerId: string;
     username: string;
@@ -105,8 +103,6 @@ export type MobSlices = {
 
 export type EntityDelta = {
   type: 'entityDelta';
-  tickSeq: number;
-  worldVersion: number;
   serverTimeMs: number;
   tickMs: number;
   players: Array<{
@@ -125,8 +121,6 @@ export type EntityDelta = {
 
 export type StructureDelta = {
   type: 'structureDelta';
-  tickSeq: number;
-  worldVersion: number;
   upserts: StructureState[];
   removes: string[];
   requiresPathRefresh: boolean;
@@ -134,23 +128,12 @@ export type StructureDelta = {
 
 export type WaveDelta = {
   type: 'waveDelta';
-  tickSeq: number;
-  worldVersion: number;
   wave: WaveState;
   routesIncluded: boolean;
 };
 
-export type AckDelta = {
-  type: 'ack';
-  tickSeq: number;
-  worldVersion: number;
-  ackSeq: number;
-};
-
 export type ResyncRequiredDelta = {
   type: 'resyncRequired';
-  tickSeq: number;
-  worldVersion: number;
   reason: string;
 };
 
@@ -159,7 +142,6 @@ export type GameDelta =
   | EntityDelta
   | StructureDelta
   | WaveDelta
-  | AckDelta
   | ResyncRequiredDelta;
 
 export type DeltaBatch = {

@@ -23,7 +23,6 @@ type PresenceCallbacks = {
   onMobDelta: (delta: EntityDelta) => void;
   onStructureDelta: (delta: StructureDelta) => void;
   onWaveDelta: (delta: WaveDelta) => void;
-  onAck: (tickSeq: number, worldVersion: number, ackSeq: number) => void;
   onCoinBalance: (coins: number) => void;
   onResyncRequired: (reason: string) => void;
 };
@@ -154,10 +153,6 @@ const applyDelta = (delta: GameDelta, callbacks: PresenceCallbacks): void => {
   }
   if (delta.type === 'waveDelta') {
     callbacks.onWaveDelta(delta);
-    return;
-  }
-  if (delta.type === 'ack') {
-    callbacks.onAck(delta.tickSeq, delta.worldVersion, delta.ackSeq);
     return;
   }
   if (delta.type === 'resyncRequired') {

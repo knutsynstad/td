@@ -2020,12 +2020,6 @@ const setupAuthoritativeBridge = async () => {
       onWaveDelta: (delta) => {
         authoritativeSync.applyServerWaveDelta(delta);
       },
-      onAck: (_tickSeq, _worldVersion, ackSeq) => {
-        serverLastAckSeqRef.current = Math.max(
-          serverLastAckSeqRef.current,
-          ackSeq
-        );
-      },
       onCoinBalance: (coins) => {
         gameState.energy = Math.max(0, Math.min(ENERGY_CAP, coins));
       },

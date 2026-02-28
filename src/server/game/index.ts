@@ -36,22 +36,14 @@ export {
   trimCommandQueue,
 } from './queue';
 
-export {
-  acquireLeaderLock,
-  verifyLeaderLock,
-  refreshLeaderLock,
-  releaseLeaderLock,
-  markTickPublish,
-} from './lock';
-
 export { consumeRateLimitToken } from './rateLimit';
 
 export {
-  runLeaderLoop,
+  runGameLoop,
   broadcast,
   ensureStaticMap,
-} from './leaderLoop';
-export type { LeaderLoopResult } from './leaderLoop';
+} from './gameLoop';
+export type { GameLoopResult } from './gameLoop';
 
 export {
   joinGame,

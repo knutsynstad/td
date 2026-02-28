@@ -7,16 +7,16 @@ import {
   joinGame,
   resetGame,
   resyncGame,
-  runLeaderLoop,
+  runGameLoop,
   loadWorldState,
   persistWorldState,
 } from '.';
 
 const test = createDevvitTest();
 
-test('runLeaderLoop returns result fields', async () => {
+test('runGameLoop returns result fields', async () => {
   await joinGame();
-  const result = await runLeaderLoop(500);
+  const result = await runGameLoop(500);
   expect(typeof result.ownerToken).toBe('string');
   expect(typeof result.durationMs).toBe('number');
   expect(result.ticksProcessed).toBeGreaterThan(0);

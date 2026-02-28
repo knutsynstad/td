@@ -24,7 +24,7 @@ import {
 } from './players';
 import { enqueueCommand } from './queue';
 import { loadWorldState, persistWorldState, resetGameState } from './world';
-import { broadcast, ensureStaticMap } from './leaderLoop';
+import { broadcast, ensureStaticMap } from './gameLoop';
 
 const getPlayerId = async (): Promise<string> => {
   const username = await reddit.getCurrentUsername();
@@ -59,8 +59,6 @@ export const joinGame = async (): Promise<JoinResponse> => {
 
   const joinDelta: GameDelta = {
     type: 'presenceDelta',
-    tickSeq: world.meta.tickSeq,
-    worldVersion: world.meta.worldVersion,
     joined: {
       playerId,
       username,
@@ -232,8 +230,6 @@ export const resetGame = async (): Promise<{
   await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
     {
       type: 'resyncRequired',
-      tickSeq: world.meta.tickSeq,
-      worldVersion: world.meta.worldVersion,
       reason: 'game reset',
     },
   ]);

@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import { runLeaderLoop } from '../game';
+import { runGameLoop } from '../game';
 
 export const schedulerRoutes = new Hono();
 
 schedulerRoutes.post('/server-clock', async (c) => {
   try {
-    const result = await runLeaderLoop();
+    const result = await runGameLoop();
     return c.json({
       status: 'ok',
       owner: result.ownerToken,
@@ -16,7 +16,7 @@ schedulerRoutes.post('/server-clock', async (c) => {
     return c.json(
       {
         status: 'error',
-        message: error instanceof Error ? error.message : 'leader loop failed',
+        message: error instanceof Error ? error.message : 'game loop failed',
       },
       500
     );

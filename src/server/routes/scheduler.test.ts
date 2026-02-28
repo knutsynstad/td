@@ -1,11 +1,11 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import { runLeaderLoop } from '../game';
+import { runGameLoop } from '../game';
 
 const test = createDevvitTest();
 
-test('leader loop processes ticks within short window', async () => {
-  const result = await runLeaderLoop(500);
+test('game loop processes ticks within short window', async () => {
+  const result = await runGameLoop(500);
   expect(result.ticksProcessed).toBeGreaterThan(0);
   expect(result.durationMs).toBeGreaterThanOrEqual(400);
   expect(result.durationMs).toBeLessThan(3000);

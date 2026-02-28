@@ -694,7 +694,7 @@ export const createAuthoritativeSync = (
     if (delta.fullMobList) {
       const chunkCount = Math.max(1, delta.fullMobSnapshotChunkCount ?? 1);
       const chunkIndex = Math.max(0, delta.fullMobSnapshotChunkIndex ?? 0);
-      const snapshotId = delta.fullMobSnapshotId ?? delta.tickSeq;
+      const snapshotId = delta.fullMobSnapshotId ?? 0;
       if (chunkCount > 1) {
         const startsNewSnapshot =
           pendingFullMobSnapshotId !== snapshotId || chunkIndex === 0;
