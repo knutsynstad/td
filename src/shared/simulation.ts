@@ -1169,7 +1169,7 @@ export const runSimulation = (
   if (commandChanges.movedPlayers.length > 0) {
     deltas.push({
       type: 'entityDelta',
-      serverTimeMs: world.meta.lastTickMs,
+      serverTimeMs: nowMs,
       tickMs: SIM_TICK_MS,
       players: commandChanges.movedPlayers.slice(0, MAX_DELTA_PLAYERS),
       despawnedMobIds: [],

@@ -52,7 +52,6 @@ export const joinGame = async (): Promise<JoinResponse> => {
   player.velocity = { x: 0, z: 0 };
   player.lastSeenMs = nowMs;
   world.players[playerId] = player;
-  await persistWorldState(world);
   await touchPlayerPresence(player);
   const coins = await getCoins(nowMs);
   world.meta.energy = coins;

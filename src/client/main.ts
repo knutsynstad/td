@@ -1898,7 +1898,6 @@ const serverMobSampleById = new Map<
 >();
 const serverMobMaxHpCache = new Map<string, number>();
 const serverWaveActiveRef = { current: false };
-const serverLastAckSeqRef = { current: 0 };
 const serverStructureResyncInFlightRef = { current: false };
 const isServerAuthoritative = () => authoritativeBridgeRef.current !== null;
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
@@ -1937,7 +1936,6 @@ const setupAuthoritativeBridge = async () => {
         activeWaveSpawners,
         spawnerById,
         serverWaveActiveRef,
-        serverLastAckSeqRef,
         structureStore,
         scene,
         staticColliders,

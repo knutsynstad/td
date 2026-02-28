@@ -1,4 +1,3 @@
-import { redis } from '@devvit/web/server';
 import type {
   DeltaBatch,
   GameDelta,
@@ -103,11 +102,10 @@ export const ensureStaticMap = (world: {
 type GameState = {
   world: WorldState;
   tracker: DirtyTracker;
-  keys: ReturnType<typeof getGameRedisKeys>;
 };
 
 const onGameTick = async (
-  { world, tracker, keys }: GameState,
+  { world, tracker }: GameState,
   { nowMs, ticksProcessed, timer }: TickContext
 ) => {
   const deltas: GameDelta[] = [];
@@ -151,17 +149,13 @@ const onGameTick = async (
   deltas.push(...result.deltas);
 
   if (deltas.length > 0) {
-    await timer.measureAsync('broadcast', async () => {
-      await redis.set(
-        keys.lastPublishTickSeq,
-        String(Math.max(0, Math.floor(result.world.meta.tickSeq)))
-      );
-      await broadcast(
+    await timer.measureAsync('broadcast', () =>
+      broadcast(
         result.world.meta.worldVersion,
         result.world.meta.tickSeq,
         deltas
-      );
-    });
+      )
+    );
   }
 
   return {
@@ -181,13 +175,13 @@ export type GameLoopResult = {
 export const runGameLoop = (
   windowMs: number = LEADER_BROADCAST_WINDOW_MS
 ): Promise<GameLoopResult> => {
-  const keys = getGameRedisKeys();
+  const { leaderLock } = getGameRedisKeys();
 
   return runTickLoop<GameState>(
     {
       windowMs,
       tickIntervalMs: SIM_TICK_MS,
-      lockKey: keys.leaderLock,
+      lockKey: leaderLock,
       lockTtlSeconds: LEADER_LOCK_TTL_SECONDS,
       lockRefreshIntervalTicks: LOCK_REFRESH_INTERVAL_TICKS,
       channelName: getGameChannelName(),
@@ -212,7 +206,7 @@ export const runGameLoop = (
         if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
           markWaveDirty(tracker);
         }
-        return { world, tracker, keys };
+        return { world, tracker };
       },
       onTick: onGameTick,
       onTeardown: async ({ world, tracker }) => {

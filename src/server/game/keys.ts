@@ -10,7 +10,6 @@ export type GameRedisKeys = {
   rate: string;
   snaps: string;
   leaderLock: string;
-  lastPublishTickSeq: string;
 };
 
 const sanitizeChannelId = (value: string): string =>
@@ -35,6 +34,5 @@ export const getGameRedisKeys = (): GameRedisKeys => {
     rate: `${prefix}:rl`,
     snaps: `${prefix}:sn`,
     leaderLock: `${prefix}:ll`,
-    lastPublishTickSeq: `${prefix}:lpt`,
   };
 };

@@ -68,7 +68,6 @@ export type AuthoritativeSyncContext = {
   activeWaveSpawners: WaveSpawner[];
   spawnerById: Map<string, WaveSpawner>;
   serverWaveActiveRef: { current: boolean };
-  serverLastAckSeqRef: { current: number };
 
   structureStore: StructureStore;
   scene: THREE.Scene;

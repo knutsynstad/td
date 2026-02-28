@@ -348,7 +348,6 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
     redis.del(keys.rate),
     redis.del(keys.snaps),
     redis.del(keys.leaderLock),
-    redis.del(keys.lastPublishTickSeq),
   ]);
   if (Object.keys(structureWrites).length > 0) {
     await redis.hSet(keys.structures, structureWrites);

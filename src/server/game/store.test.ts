@@ -5,7 +5,6 @@ import {
   releaseLock,
   verifyLock,
 } from '../core/lock';
-import { redis } from '@devvit/web/server';
 import { getGameRedisKeys } from './keys';
 
 const test = createDevvitTest();
@@ -22,10 +21,3 @@ test('acquire and release leader lock', async () => {
   expect(afterRelease).toBe(false);
 });
 
-test('markTickPublish stores sequence', async () => {
-  const keys = getKeys();
-  await redis.set(
-    keys.lastPublishTickSeq,
-    String(Math.max(0, Math.floor(42)))
-  );
-});

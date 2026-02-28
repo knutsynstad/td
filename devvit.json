@@ -31,7 +31,7 @@
     "tasks": {
       "server-clock": {
         "endpoint": "/internal/scheduler/server-clock",
-        "cron": "*/15 * * * * *"
+        "cron": "*/5 * * * * *"
       }
     }
   },
