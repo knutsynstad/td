@@ -109,11 +109,11 @@ if (app === null) throw new Error('Missing #app');
 app.innerHTML = `
   <div id="sandboxHud" class="hud">
     <div class="hud-corner hud-corner--top-right">
-      <div class="hud-energy">
-        <div class="hud-energy__icon-view">
-          <canvas id="sandboxCoinCanvas" class="hud-energy__coin-canvas" aria-label="Coins"></canvas>
+      <div class="hud-coins">
+        <div class="hud-coins__icon-view">
+          <canvas id="sandboxCoinCanvas" class="hud-coins__coin-canvas" aria-label="Coins"></canvas>
         </div>
-        <span id="sandboxEnergyCount" class="hud-energy__value">9001</span>
+        <span id="sandboxCoinsCount" class="hud-coins__value">9001</span>
       </div>
     </div>
   </div>
@@ -347,7 +347,7 @@ const installPointerHandler = (handler: (event: PointerEvent) => void) => {
   renderer.domElement.addEventListener('pointerdown', handler);
 };
 installPointerHandler((event) => {
-  if ((event.target as HTMLElement).closest('.selection-dialog, .hud-energy'))
+  if ((event.target as HTMLElement).closest('.selection-dialog, .hud-coins'))
     return;
   const point = getGroundPoint(event);
   if (point) setMoveTarget(point);
@@ -588,9 +588,9 @@ Promise.all([
       const arrowFacing = computeArrowFacingFromTemplate(arrowTemplate);
 
       let coins = SANDBOX_COINS;
-      const energyCountEl = document.getElementById('sandboxEnergyCount');
+      const coinsCountEl = document.getElementById('sandboxCoinsCount');
       const updateCoinsDisplay = () => {
-        if (energyCountEl) energyCountEl.textContent = String(coins);
+        if (coinsCountEl) coinsCountEl.textContent = String(coins);
       };
       updateCoinsDisplay();
 
@@ -650,14 +650,14 @@ Promise.all([
         {
           selectedCount: 0,
           inRangeCount: 0,
-          isBankSelected: false,
+          isCastleSelected: false,
           selectedTowerTypeId: null,
           selectedStructureLabel: '',
-          bankTotal: null,
-          canBankAdd1: false,
-          canBankAdd10: false,
-          canBankRemove1: false,
-          canBankRemove10: false,
+          castleTotal: null,
+          canCastleAdd1: false,
+          canCastleAdd10: false,
+          canCastleRemove1: false,
+          canCastleRemove10: false,
           showRepair: false,
           buildingCoords: null,
           buildingHealth: null,
@@ -672,10 +672,10 @@ Promise.all([
           onUpgrade: applyUpgrade,
           onRepair: () => {},
           onDelete: () => {},
-          onBankAdd1: () => {},
-          onBankAdd10: () => {},
-          onBankRemove1: () => {},
-          onBankRemove10: () => {},
+          onCastleAdd1: () => {},
+          onCastleAdd10: () => {},
+          onCastleRemove1: () => {},
+          onCastleRemove10: () => {},
         }
       );
 
@@ -685,14 +685,14 @@ Promise.all([
           selectionDialog.update({
             selectedCount: 0,
             inRangeCount: 0,
-            isBankSelected: false,
+            isCastleSelected: false,
             selectedTowerTypeId: null,
             selectedStructureLabel: '',
-            bankTotal: null,
-            canBankAdd1: false,
-            canBankAdd10: false,
-            canBankRemove1: false,
-            canBankRemove10: false,
+            castleTotal: null,
+            canCastleAdd1: false,
+            canCastleAdd10: false,
+            canCastleRemove1: false,
+            canCastleRemove10: false,
             showRepair: false,
             buildingCoords: null,
             buildingHealth: null,
@@ -727,14 +727,14 @@ Promise.all([
         selectionDialog.update({
           selectedCount: 1,
           inRangeCount: 1,
-          isBankSelected: false,
+          isCastleSelected: false,
           selectedTowerTypeId: null,
           selectedStructureLabel: label,
-          bankTotal: null,
-          canBankAdd1: false,
-          canBankAdd10: false,
-          canBankRemove1: false,
-          canBankRemove10: false,
+          castleTotal: null,
+          canCastleAdd1: false,
+          canCastleAdd10: false,
+          canCastleRemove1: false,
+          canCastleRemove10: false,
           showRepair: false,
           buildingCoords: null,
           buildingHealth: null,
@@ -1118,7 +1118,7 @@ Promise.all([
       installPointerHandler((event) => {
         if (
           (event.target as HTMLElement).closest(
-            '.selection-dialog, .hud-energy'
+            '.selection-dialog, .hud-coins'
           )
         )
           return;

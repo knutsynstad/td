@@ -1,7 +1,7 @@
 import {
-  ENERGY_COST_UPGRADE_DAMAGE,
-  ENERGY_COST_UPGRADE_RANGE,
-  ENERGY_COST_UPGRADE_SPEED,
+  COINS_COST_UPGRADE_DAMAGE,
+  COINS_COST_UPGRADE_RANGE,
+  COINS_COST_UPGRADE_SPEED,
   REPAIR_CRITICAL_HP_RATIO,
   REPAIR_DISCOUNT_RATE,
   REPAIR_WARNING_HP_RATIO,
@@ -9,10 +9,10 @@ import {
 import type { TowerUpgradeId } from './towers/towerTypes';
 import { clamp } from '../world/collision';
 
-export const getUpgradeEnergyCost = (upgradeId: TowerUpgradeId): number => {
-  if (upgradeId === 'range') return ENERGY_COST_UPGRADE_RANGE;
-  if (upgradeId === 'damage') return ENERGY_COST_UPGRADE_DAMAGE;
-  return ENERGY_COST_UPGRADE_SPEED;
+export const getUpgradeCoinCost = (upgradeId: TowerUpgradeId): number => {
+  if (upgradeId === 'range') return COINS_COST_UPGRADE_RANGE;
+  if (upgradeId === 'damage') return COINS_COST_UPGRADE_DAMAGE;
+  return COINS_COST_UPGRADE_SPEED;
 };
 
 export const getRepairCost = (state: {

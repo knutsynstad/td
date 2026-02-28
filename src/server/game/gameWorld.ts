@@ -1,5 +1,5 @@
 import { redis } from '@devvit/web/server';
-import { ENERGY_CAP } from '../../shared/content';
+import { COINS_CAP } from '../../shared/content';
 import type {
   GameWorld,
   MobState,
@@ -96,9 +96,9 @@ export const loadGameWorld = async (): Promise<GameWorld> => {
       metaRaw?.lastStructureChangeTickSeq ?? '0'
     ),
     seed: Number(metaRaw?.seed ?? String(now)),
-    energy: Math.max(
+    coins: Math.max(
       0,
-      Math.min(ENERGY_CAP, Number(metaRaw?.energy ?? String(ENERGY_CAP)))
+      Math.min(COINS_CAP, Number(metaRaw?.coins ?? String(COINS_CAP)))
     ),
     lives: Number(metaRaw?.lives ?? '1'),
     nextMobSeq: Number(metaRaw?.nextMobSeq ?? '1'),
@@ -131,7 +131,7 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
         world.meta.lastStructureChangeTickSeq ?? 0
       ),
       seed: String(world.meta.seed),
-      energy: String(world.meta.energy),
+      coins: String(world.meta.coins),
       lives: String(world.meta.lives),
       nextMobSeq: String(world.meta.nextMobSeq),
     })

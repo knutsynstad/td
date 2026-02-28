@@ -134,7 +134,7 @@ export class StructureStore {
     return collider;
   }
 
-  addBankCollider(
+  addCastleCoinsCollider(
     center: THREE.Vector3,
     halfSize: THREE.Vector3,
     mesh: THREE.Mesh,
@@ -144,7 +144,7 @@ export class StructureStore {
     const collider: DestructibleCollider = {
       center: center.clone(),
       halfSize: halfSize.clone(),
-      type: 'bank',
+      type: 'castleCoins',
     };
     this.staticColliders.push(collider);
     this.structureStates.set(collider, { mesh, hp, maxHp: hp, ...metadata });
@@ -244,7 +244,7 @@ export class StructureStore {
         collider.type === 'tower' ||
         collider.type === 'tree' ||
         collider.type === 'rock' ||
-        collider.type === 'bank'
+        collider.type === 'castleCoins'
     );
   }
 }

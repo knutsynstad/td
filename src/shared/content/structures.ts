@@ -7,7 +7,7 @@ export type StructureDef = {
   footprint: { halfX: number; halfZ: number };
   pathInflate: number;
   blocksPath: boolean;
-  energyCost: number;
+  coinCost: number;
   deleteCost: number;
 };
 
@@ -19,7 +19,7 @@ export const STRUCTURE_DEFS: Record<StructureType, StructureDef> = {
     footprint: { halfX: 0.6, halfZ: 0.6 },
     pathInflate: 0.25,
     blocksPath: true,
-    energyCost: 2,
+    coinCost: 2,
     deleteCost: 0,
   },
   tower: {
@@ -29,17 +29,17 @@ export const STRUCTURE_DEFS: Record<StructureType, StructureDef> = {
     footprint: { halfX: 1, halfZ: 1 },
     pathInflate: 0.4,
     blocksPath: true,
-    energyCost: 20,
+    coinCost: 20,
     deleteCost: 0,
   },
-  bank: {
-    type: 'bank',
+  castleCoins: {
+    type: 'castleCoins',
     hp: 100,
     maxHp: 100,
     footprint: { halfX: 1.4, halfZ: 1.4 },
     pathInflate: 0.4,
     blocksPath: false,
-    energyCost: 0,
+    coinCost: 0,
     deleteCost: 0,
   },
   tree: {
@@ -49,7 +49,7 @@ export const STRUCTURE_DEFS: Record<StructureType, StructureDef> = {
     footprint: { halfX: 1, halfZ: 1 },
     pathInflate: 0.4,
     blocksPath: true,
-    energyCost: 0,
+    coinCost: 0,
     deleteCost: 0,
   },
   rock: {
@@ -59,7 +59,7 @@ export const STRUCTURE_DEFS: Record<StructureType, StructureDef> = {
     footprint: { halfX: 1, halfZ: 1 },
     pathInflate: 0.4,
     blocksPath: true,
-    energyCost: 0,
+    coinCost: 0,
     deleteCost: 0,
   },
 };
@@ -84,5 +84,5 @@ export const getStructureFootprint = (
   return def.footprint;
 };
 
-export const getStructureEnergyCost = (type: StructureType): number =>
-  STRUCTURE_DEFS[type].energyCost;
+export const getStructureCoinCost = (type: StructureType): number =>
+  STRUCTURE_DEFS[type].coinCost;

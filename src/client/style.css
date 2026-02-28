@@ -713,7 +713,7 @@ canvas {
   grid-column: 1 / -1;
 }
 
-.selection-dialog__bank-adjust-grid {
+.selection-dialog__castle-coins-adjust-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-auto-rows: minmax(38px, 1fr);
@@ -721,7 +721,7 @@ canvas {
   margin-top: var(--dialog-gap-tight);
 }
 
-.selection-dialog__bank-adjust-btn {
+.selection-dialog__castle-coins-adjust-btn {
   min-height: 38px;
   width: 100%;
   border-radius: 0;
@@ -736,41 +736,40 @@ canvas {
   color: #ffffff;
 }
 
-.selection-dialog__bank-adjust-btn--withdraw {
+.selection-dialog__castle-coins-adjust-btn--withdraw {
   background: rgba(180, 50, 50, 0.9);
 }
 
-.selection-dialog__bank-adjust-btn--deposit {
+.selection-dialog__castle-coins-adjust-btn--deposit {
   background: rgba(33, 138, 76, 0.9);
 }
 
-.selection-dialog__bank-adjust-label {
+.selection-dialog__castle-coins-adjust-label {
   font-weight: 900;
 }
 
-.selection-dialog__bank-coin-group {
+.selection-dialog__castle-coins-coin-group {
   display: inline-flex;
   align-items: center;
   gap: 2px;
 }
 
-.selection-dialog__bank-adjust-btn .selection-dialog__bank-coin-icon {
+.selection-dialog__castle-coins-adjust-btn .selection-dialog__castle-coins-coin-icon {
   width: 14px;
   height: 14px;
 }
 
-.selection-dialog__bank-adjust-btn:disabled {
+.selection-dialog__castle-coins-adjust-btn:disabled {
   background: rgba(0, 0, 0, 0.15);
   color: rgba(0, 0, 0, 0.5);
   cursor: not-allowed;
 }
 
-.selection-dialog__bank-adjust-btn:disabled
-  .selection-dialog__bank-adjust-label {
+.selection-dialog__castle-coins-adjust-btn:disabled .selection-dialog__castle-coins-adjust-label {
   color: rgba(0, 0, 0, 0.5);
 }
 
-.selection-dialog__bank-adjust-btn:disabled .selection-dialog__bank-coin-group {
+.selection-dialog__castle-coins-adjust-btn:disabled .selection-dialog__castle-coins-coin-group {
   filter: grayscale(1);
   opacity: 0.8;
 }
@@ -881,7 +880,7 @@ canvas {
   align-items: flex-end;
 }
 
-.hud-energy {
+.hud-coins {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -893,11 +892,11 @@ canvas {
   text-shadow: none;
 }
 
-.hud-energy__icon {
+.hud-coins__icon {
   font-size: 1.05rem;
 }
 
-.hud-energy__icon-view {
+.hud-coins__icon-view {
   width: 32px;
   height: 32px;
   overflow: visible;
@@ -906,25 +905,25 @@ canvas {
   justify-content: center;
 }
 
-.hud-energy__coin-canvas {
+.hud-coins__coin-canvas {
   width: 48px !important;
   height: 48px !important;
   flex-shrink: 0;
   display: block;
 }
 
-.hud-energy__value {
+.hud-coins__value {
   font-size: 32px;
   font-weight: 900;
   line-height: 1;
   color: #dcae2b;
 }
 
-.hud-energy__value.pop {
-  animation: energy-counter-pop 0.2s ease-out;
+.hud-coins__value.pop {
+  animation: coins-counter-pop 0.2s ease-out;
 }
 
-@keyframes energy-counter-pop {
+@keyframes coins-counter-pop {
   0% {
     transform: scale(1);
   }
@@ -936,7 +935,7 @@ canvas {
   }
 }
 
-.energy-trail-orb {
+.coin-trail-orb {
   position: absolute;
   width: 22px;
   height: 22px;

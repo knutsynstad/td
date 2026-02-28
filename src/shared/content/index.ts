@@ -3,7 +3,7 @@ export {
   STRUCTURE_DEFS,
   getStructureDef,
   getStructureFootprint,
-  getStructureEnergyCost,
+  getStructureCoinCost,
 } from './structures';
 
 export {
@@ -35,9 +35,9 @@ export {
 } from './waves';
 
 export {
-  ENERGY_CAP,
-  ENERGY_REGEN_PER_SECOND,
-  ENERGY_PER_PLAYER_KILL,
+  COINS_CAP,
+  COINS_REGEN_PER_SECOND,
+  COINS_PER_PLAYER_KILL,
   DECAY_GRACE_MS,
   DECAY_HP_PER_HOUR,
   REPAIR_DISCOUNT_RATE,

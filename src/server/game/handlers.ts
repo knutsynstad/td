@@ -11,7 +11,7 @@ import {
   DEFAULT_PLAYER_SPAWN,
   type PlayerState,
 } from '../../shared/game-state';
-import { getStructureEnergyCost } from '../../shared/content';
+import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from './config';
 import { getGameChannelName } from './keys';
 import { getCoins, spendCoins, addCoins } from './economy';
@@ -57,7 +57,7 @@ export const joinGame = async (): Promise<JoinResponse> => {
   world.players.set(playerId, player);
   await touchPlayerPresence(player);
   const coins = await getCoins(nowMs);
-  world.meta.energy = coins;
+  world.meta.coins = coins;
 
   const joinDelta: GameDelta = {
     type: 'presenceDelta',
@@ -114,11 +114,11 @@ export const applyCommand = async (
         reason: 'structure cap reached',
       };
     }
-    const energyCost = structures.reduce(
-      (total, structure) => total + getStructureEnergyCost(structure.type),
+    const coinCost = structures.reduce(
+      (total, structure) => total + getStructureCoinCost(structure.type),
       0
     );
-    const spendResult = await spendCoins(energyCost, nowMs);
+    const spendResult = await spendCoins(coinCost, nowMs);
     if (!spendResult.ok) {
       const world = await loadWorldState();
       return {
@@ -129,7 +129,7 @@ export const applyCommand = async (
         reason: 'not enough coins',
       };
     }
-    spentBuildCoins = energyCost;
+    spentBuildCoins = coinCost;
   }
 
   const enqueueResult = await enqueueCommand(nowMs, envelope);
@@ -206,7 +206,7 @@ export const resyncGame = async (
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
     await flushGameWorld(world);
   }
-  world.meta.energy = await getCoins(Date.now());
+  world.meta.coins = await getCoins(Date.now());
   return {
     type: 'snapshot',
     snapshot: gameWorldToSnapshot(world),

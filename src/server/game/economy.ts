@@ -1,5 +1,5 @@
 import { redis } from '@devvit/web/server';
-import { ENERGY_CAP, ENERGY_REGEN_PER_SECOND } from '../../shared/content';
+import { COINS_CAP, COINS_REGEN_PER_SECOND } from '../../shared/content';
 import { isRecord, safeParseJson } from '../../shared/utils';
 
 const MAX_TX_RETRIES = 5;
@@ -19,7 +19,7 @@ export { getEconomyRedisKeys };
 const economyKeys = getEconomyRedisKeys();
 
 export const clampCoins = (coins: number): number =>
-  Math.max(0, Math.min(ENERGY_CAP, coins));
+  Math.max(0, Math.min(COINS_CAP, coins));
 
 type GlobalCoinState = {
   coins: number;
@@ -32,17 +32,17 @@ const parseGlobalCoinState = (
 ): GlobalCoinState => {
   const parsed = safeParseJson(raw ?? undefined);
   if (!isRecord(parsed)) {
-    return { coins: ENERGY_CAP, lastAccruedMs: nowMs };
+    return { coins: COINS_CAP, lastAccruedMs: nowMs };
   }
   return {
-    coins: clampCoins(Number(parsed.coins ?? parsed.energy ?? ENERGY_CAP)),
+    coins: clampCoins(Number(parsed.coins ?? COINS_CAP)),
     lastAccruedMs: Number(parsed.lastAccruedMs ?? nowMs),
   };
 };
 
 const accrueCoins = (state: GlobalCoinState, nowMs: number): number => {
   const elapsedMs = Math.max(0, nowMs - state.lastAccruedMs);
-  const regenerated = (elapsedMs / 1000) * ENERGY_REGEN_PER_SECOND;
+  const regenerated = (elapsedMs / 1000) * COINS_REGEN_PER_SECOND;
   return clampCoins(state.coins + regenerated);
 };
 
@@ -189,7 +189,7 @@ export const withdrawCastleCoins = async (
     );
     const castleCoins = parseCastleCoins(await redis.get(economyKeys.castle));
     const accrued = accrueCoins(coinState, nowMs);
-    const maxAddable = Math.max(0, ENERGY_CAP - accrued);
+    const maxAddable = Math.max(0, COINS_CAP - accrued);
     const withdrawn = Math.min(
       safeRequested,
       castleCoins,

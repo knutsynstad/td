@@ -5,7 +5,7 @@ export type DomRefs = {
   mobsSecondaryEl: HTMLDivElement;
   wallCountEl: HTMLSpanElement;
   towerCountEl: HTMLSpanElement;
-  energyCountEl: HTMLSpanElement;
+  coinsCountEl: HTMLSpanElement;
   finalCountdownEl: HTMLDivElement;
   nextWaveRowEl: HTMLDivElement;
   nextWavePrimaryEl: HTMLDivElement;
@@ -14,7 +14,7 @@ export type DomRefs = {
   hudEl: HTMLElement;
   hudActionsEl: HTMLDivElement;
   hudStatusStackEl: HTMLDivElement;
-  hudEnergyEl: HTMLDivElement;
+  hudCoinsEl: HTMLDivElement;
   buildWallBtn: HTMLButtonElement;
   buildTowerBtn: HTMLButtonElement;
   shootButton: HTMLButtonElement;
@@ -43,7 +43,7 @@ export const createDomRefs = (root: HTMLElement): DomRefs => {
     mobsSecondaryEl: mobsRowEl.querySelector<HTMLDivElement>('.hud-status__secondary')!,
     wallCountEl: root.querySelector<HTMLSpanElement>('#wallCount')!,
     towerCountEl: root.querySelector<HTMLSpanElement>('#towerCount')!,
-    energyCountEl: root.querySelector<HTMLSpanElement>('#energyCount')!,
+    coinsCountEl: root.querySelector<HTMLSpanElement>('#coinsCount')!,
     finalCountdownEl: root.querySelector<HTMLDivElement>('#finalCountdown')!,
     nextWaveRowEl,
     nextWavePrimaryEl: nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__primary')!,
@@ -52,7 +52,7 @@ export const createDomRefs = (root: HTMLElement): DomRefs => {
     hudEl: root.querySelector<HTMLElement>('#hud')!,
     hudActionsEl: root.querySelector<HTMLDivElement>('.hud-actions')!,
     hudStatusStackEl: root.querySelector<HTMLDivElement>('.hud-status-stack')!,
-    hudEnergyEl: root.querySelector<HTMLDivElement>('.hud-energy')!,
+    hudCoinsEl: root.querySelector<HTMLDivElement>('.hud-coins')!,
     buildWallBtn: root.querySelector<HTMLButtonElement>('#buildWall')!,
     buildTowerBtn: root.querySelector<HTMLButtonElement>('#buildTower')!,
     shootButton: root.querySelector<HTMLButtonElement>('#shootButton')!,

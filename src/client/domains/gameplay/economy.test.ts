@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { getUpgradeEnergyCost, getRepairCost, getRepairStatus } from './economy';
+import { getUpgradeCoinCost, getRepairCost, getRepairStatus } from './economy';
 
-describe('getUpgradeEnergyCost', () => {
+describe('getUpgradeCoinCost', () => {
   it('returns range cost', () => {
-    expect(getUpgradeEnergyCost('range')).toBeGreaterThan(0);
+    expect(getUpgradeCoinCost('range')).toBeGreaterThan(0);
   });
 
   it('returns damage cost', () => {
-    expect(getUpgradeEnergyCost('damage')).toBeGreaterThan(0);
+    expect(getUpgradeCoinCost('damage')).toBeGreaterThan(0);
   });
 
   it('returns speed cost', () => {
-    expect(getUpgradeEnergyCost('speed')).toBeGreaterThan(0);
+    expect(getUpgradeCoinCost('speed')).toBeGreaterThan(0);
   });
 });
 

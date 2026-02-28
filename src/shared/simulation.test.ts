@@ -18,7 +18,7 @@ function world(nowMs: number): GameWorld {
       worldVersion: 0,
       lastTickMs: nowMs,
       seed: 1,
-      energy: 100,
+      coins: 100,
       lives: 1,
       nextMobSeq: 1,
     },

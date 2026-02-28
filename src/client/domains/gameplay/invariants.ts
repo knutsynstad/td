@@ -6,10 +6,10 @@ import type {
 } from './types/entities';
 import type { StructureStore } from './structureStore';
 
-export const assertEnergyInBounds = (energy: number, energyCap: number) => {
-  if (energy < 0 || energy > energyCap) {
+export const assertCoinsInBounds = (coins: number, coinsCap: number) => {
+  if (coins < 0 || coins > coinsCap) {
     throw new Error(
-      `Energy invariant violated: energy=${energy}, cap=${energyCap}`
+      `Coins invariant violated: coins=${coins}, cap=${coinsCap}`
     );
   }
 };
@@ -43,7 +43,7 @@ export const assertStructureStoreConsistency = (
       collider.type === 'tower' ||
       collider.type === 'tree' ||
       collider.type === 'rock' ||
-      collider.type === 'bank'
+      collider.type === 'castleCoins'
   ).length;
   if (store.structureStates.size !== destructibleCount) {
     throw new Error(

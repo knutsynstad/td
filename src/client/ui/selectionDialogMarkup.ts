@@ -62,18 +62,18 @@ export const buildStatsMarkup = (
   </div>`;
 };
 
-export const buildBankActionsMarkup = (
-  canBankAdd1: boolean,
-  canBankAdd10: boolean,
-  canBankRemove1: boolean,
-  canBankRemove10: boolean
+export const buildCastleCoinsActionsMarkup = (
+  canCastleAdd1: boolean,
+  canCastleAdd10: boolean,
+  canCastleRemove1: boolean,
+  canCastleRemove10: boolean
 ) => {
-  const coinIcon = `<img class="coin-cost__icon selection-dialog__bank-coin-icon" src="${getCoinIconUrl()}" alt="" aria-hidden="true" />`;
-  return `<div class="selection-dialog__bank-adjust-grid">
-    <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--withdraw" data-bank-remove-1 ${canBankRemove1 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Take</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>1</span></span></button>
-    <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--deposit" data-bank-add-1 ${canBankAdd1 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Add</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>1</span></span></button>
-    <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--withdraw" data-bank-remove-10 ${canBankRemove10 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Take</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>10</span></span></button>
-    <button class="selection-dialog__bank-adjust-btn selection-dialog__bank-adjust-btn--deposit" data-bank-add-10 ${canBankAdd10 ? '' : 'disabled'}><span class="selection-dialog__bank-adjust-label">Add</span><span class="selection-dialog__bank-coin-group">${coinIcon}<span>10</span></span></button>
+  const coinIcon = `<img class="coin-cost__icon selection-dialog__castle-coins-coin-icon" src="${getCoinIconUrl()}" alt="" aria-hidden="true" />`;
+  return `<div class="selection-dialog__castle-coins-adjust-grid">
+    <button class="selection-dialog__castle-coins-adjust-btn selection-dialog__castle-coins-adjust-btn--withdraw" data-castle-remove-1 ${canCastleRemove1 ? '' : 'disabled'}><span class="selection-dialog__castle-coins-adjust-label">Take</span><span class="selection-dialog__castle-coins-coin-group">${coinIcon}<span>1</span></span></button>
+    <button class="selection-dialog__castle-coins-adjust-btn selection-dialog__castle-coins-adjust-btn--deposit" data-castle-add-1 ${canCastleAdd1 ? '' : 'disabled'}><span class="selection-dialog__castle-coins-adjust-label">Add</span><span class="selection-dialog__castle-coins-coin-group">${coinIcon}<span>1</span></span></button>
+    <button class="selection-dialog__castle-coins-adjust-btn selection-dialog__castle-coins-adjust-btn--withdraw" data-castle-remove-10 ${canCastleRemove10 ? '' : 'disabled'}><span class="selection-dialog__castle-coins-adjust-label">Take</span><span class="selection-dialog__castle-coins-coin-group">${coinIcon}<span>10</span></span></button>
+    <button class="selection-dialog__castle-coins-adjust-btn selection-dialog__castle-coins-adjust-btn--deposit" data-castle-add-10 ${canCastleAdd10 ? '' : 'disabled'}><span class="selection-dialog__castle-coins-adjust-label">Add</span><span class="selection-dialog__castle-coins-coin-group">${coinIcon}<span>10</span></span></button>
   </div>`;
 };
 

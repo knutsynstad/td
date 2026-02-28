@@ -53,7 +53,7 @@ import {
   computeFallbackBallisticVelocity,
 } from './domains/gameplay/projectiles';
 import {
-  getUpgradeEnergyCost,
+  getUpgradeCoinCost,
   getRepairCost,
   getRepairStatus,
 } from './domains/gameplay/economy';
@@ -129,13 +129,10 @@ import {
   BALLISTA_ARROW_MAX_LIFETIME,
   BALLISTA_ARROW_RADIUS,
   BALLISTA_ARROW_SPEED,
-  ENERGY_CAP,
-  ENERGY_COST_TOWER,
-  ENERGY_COST_UPGRADE_DAMAGE,
-  ENERGY_COST_UPGRADE_RANGE,
-  ENERGY_COST_UPGRADE_SPEED,
-  ENERGY_COST_WALL,
-  ENERGY_REGEN_RATE,
+  COINS_CAP,
+  COINS_COST_TOWER,
+  COINS_COST_WALL,
+  COINS_REGEN_RATE,
   GRID_SIZE,
   MAX_VISIBLE_MOB_INSTANCES,
   MOB_INSTANCE_CAP,
@@ -220,7 +217,7 @@ import {
 } from './integrations/authoritativeSync';
 import {
   createHudUpdaters,
-  type EnergyTrail,
+  type CoinTrail,
 } from './ui/hudUpdaters';
 import { createDisposeScene } from './rendering/disposeScene';
 import {
@@ -230,7 +227,7 @@ import {
 } from './integrations/castleApi';
 import { DEFAULT_PLAYER_SPAWN } from '../shared/game-state';
 import {
-  assertEnergyInBounds,
+  assertCoinsInBounds,
   assertMobSpawnerReferences,
   assertSpawnerCounts,
   assertStructureStoreConsistency,
@@ -290,11 +287,11 @@ app.innerHTML = `
       </div>
     </div>
     <div class="hud-corner hud-corner--top-right">
-      <div class="hud-energy">
-        <div class="hud-energy__icon-view">
-          <canvas id="coinHudCanvas" class="hud-energy__coin-canvas" aria-label="Coins"></canvas>
+      <div class="hud-coins">
+        <div class="hud-coins__icon-view">
+          <canvas id="coinHudCanvas" class="hud-coins__coin-canvas" aria-label="Coins"></canvas>
         </div>
-        <span id="energyCount" class="hud-energy__value">100</span>
+        <span id="coinsCount" class="hud-coins__value">100</span>
       </div>
     </div>
     <div class="hud-overlay">
@@ -312,11 +309,11 @@ app.innerHTML = `
         <div class="build-buttons">
           <button id="buildWall" class="hud-button build-button">
             <span class="button-label">Wall</span>
-            <span id="wallCount" class="hud-badge">${buildCoinCostMarkup(ENERGY_COST_WALL, 'Coin cost')}</span>
+            <span id="wallCount" class="hud-badge">${buildCoinCostMarkup(COINS_COST_WALL, 'Coin cost')}</span>
           </button>
           <button id="buildTower" class="hud-button build-button">
             <span class="button-label">Tower</span>
-            <span id="towerCount" class="hud-badge">${buildCoinCostMarkup(ENERGY_COST_TOWER, 'Coin cost')}</span>
+            <span id="towerCount" class="hud-badge">${buildCoinCostMarkup(COINS_COST_TOWER, 'Coin cost')}</span>
           </button>
         </div>
         <button id="shootButton" class="shoot-button"><span class="button-label">Shoot</span></button>
@@ -350,7 +347,7 @@ const {
   mobsSecondaryEl,
   wallCountEl,
   towerCountEl,
-  energyCountEl,
+  coinsCountEl,
   finalCountdownEl,
   nextWaveRowEl,
   nextWavePrimaryEl,
@@ -359,7 +356,7 @@ const {
   hudEl,
   hudActionsEl,
   hudStatusStackEl,
-  hudEnergyEl,
+  hudCoinsEl,
   buildWallBtn,
   buildTowerBtn,
   shootButton,
@@ -866,13 +863,13 @@ const castleCollider: StaticCollider = {
 };
 const CASTLE_FRONT_DIRECTION = new THREE.Vector2(0, 1);
 const staticColliders: StaticCollider[] = [castleCollider];
-const castleBankSelectionCollider: DestructibleCollider = {
+const castleCoinsSelectionCollider: DestructibleCollider = {
   center: castleCollider.center,
   halfSize: castleCollider.halfSize,
-  type: 'bank',
+  type: 'castleCoins',
 };
-const castleBankPiles = new THREE.Group();
-scene.add(castleBankPiles);
+const castleCoinPiles = new THREE.Group();
+scene.add(castleCoinPiles);
 
 const updateCastleColliderFromObject = (object: THREE.Object3D) => {
   object.updateMatrixWorld(true);
@@ -1360,7 +1357,7 @@ loadModelWithProgress(
     });
     replaceCastleContent(model);
     updateCastleColliderFromObject(model);
-    hudUpdaters.updateCastleBankPilesVisual();
+    hudUpdaters.updateCastleCoinPilesVisual();
     refreshAllSpawnerPathlines();
   },
   (error) => {
@@ -1377,7 +1374,7 @@ loadModelWithProgress(
     fallback.receiveShadow = true;
     replaceCastleContent(fallback);
     updateCastleColliderFromObject(fallback);
-    hudUpdaters.updateCastleBankPilesVisual();
+    hudUpdaters.updateCastleCoinPilesVisual();
     refreshAllSpawnerPathlines();
   }
 );
@@ -1973,7 +1970,7 @@ const setupAuthoritativeBridge = async () => {
         getTreeModelTemplate: () => treeModelTemplate,
         WORLD_BOUNDS,
         CASTLE_ROUTE_HALF_WIDTH_CELLS,
-        ENERGY_CAP,
+        COINS_CAP,
         SERVER_MOB_INTERPOLATION_BACKTIME_MS,
         SERVER_MOB_EXTRAPOLATION_MAX_MS,
         SERVER_MOB_EXTRAPOLATION_GAP_MAX_MS,
@@ -2021,7 +2018,7 @@ const setupAuthoritativeBridge = async () => {
         authoritativeSync.applyServerWaveDelta(delta);
       },
       onCoinBalance: (coins) => {
-        gameState.energy = Math.max(0, Math.min(ENERGY_CAP, coins));
+        gameState.coins = Math.max(0, Math.min(COINS_CAP, coins));
       },
       onResyncRequired: () => {
         if (!authoritativeBridgeRef.current) return;
@@ -2053,10 +2050,10 @@ let activePointerId: number | null = null;
 const syncSelectedStructureOutline = () => {
   const structureSelectedObjects: THREE.Object3D[] = [];
   for (const collider of selectedStructures) {
-    if (collider.type === 'bank') {
+    if (collider.type === 'castleCoins') {
       structureSelectedObjects.push(castle);
-      if (castleBankPiles.children.length > 0) {
-        structureSelectedObjects.push(castleBankPiles);
+      if (castleCoinPiles.children.length > 0) {
+        structureSelectedObjects.push(castleCoinPiles);
       }
       continue;
     }
@@ -2147,7 +2144,7 @@ const createTowerAt = (
   return tower;
 };
 
-const gameState = createGameState(ENERGY_CAP);
+const gameState = createGameState(COINS_CAP);
 let isDraggingWall = false;
 let wallDragStart: THREE.Vector3 | null = null;
 let wallDragEnd: THREE.Vector3 | null = null;
@@ -2242,7 +2239,7 @@ damageTextContainer.style.pointerEvents = 'none';
 damageTextContainer.style.zIndex = '1200';
 app.appendChild(damageTextContainer);
 
-const activeEnergyTrails: EnergyTrail[] = [];
+const activeCoinTrails: CoinTrail[] = [];
 const isMinimapExpandedRef = { current: false };
 const minimapEmbellishAlphaRef = { current: 0 };
 const activeDamageTexts: FloatingDamageText[] = [];
@@ -2262,11 +2259,11 @@ const worldToScreen = (
   return { x, y };
 };
 
-const addEnergy = (amount: number, withPop = false) => {
+const addCoins = (amount: number, withPop = false) => {
   if (isServerAuthoritative()) return;
-  gameState.energy = Math.min(ENERGY_CAP, gameState.energy + amount);
+  gameState.coins = Math.min(COINS_CAP, gameState.coins + amount);
   if (withPop) {
-    gameState.energyPopTimer = 0.2;
+    gameState.coinsPopTimer = 0.2;
   }
 };
 
@@ -2284,33 +2281,33 @@ const hudUpdaters = createHudUpdaters({
   coinTrailCamera,
   coinTrailScene,
   eventBannerEl,
-  castleBankPiles,
+  castleCoinPiles,
   castleCollider,
   camera,
   player,
   mobs,
   structureStore,
   gameState,
-  activeEnergyTrails,
+  activeCoinTrails,
   WORLD_BOUNDS,
   isMinimapExpandedRef,
   minimapEmbellishAlphaRef,
   EVENT_BANNER_DURATION,
   REPAIR_WARNING_HP_RATIO,
   REPAIR_CRITICAL_HP_RATIO,
-  addEnergy,
+  addCoins,
 });
 
-const spendEnergy = (amount: number) => {
+const spendCoins = (amount: number) => {
   if (isServerAuthoritative()) return false;
-  if (gameState.energy < amount) return false;
-  gameState.energy = Math.max(0, gameState.energy - amount);
+  if (gameState.coins < amount) return false;
+  gameState.coins = Math.max(0, gameState.coins - amount);
   return true;
 };
 
-const getSelectedBankInRange = () => {
+const getSelectedCastleInRange = () => {
   const [collider] = selectedStructures.values();
-  if (!collider || collider.type !== 'bank') return null;
+  if (!collider || collider.type !== 'castleCoins') return null;
   if (!isColliderInRange(collider, SELECTION_RADIUS)) return null;
   return collider;
 };
@@ -2318,8 +2315,8 @@ const getSelectedBankInRange = () => {
 const syncCastleCoinsFromServer = async () => {
   const castleCoins = await fetchCastleCoinsBalance();
   if (castleCoins === null) return;
-  gameState.bankEnergy = castleCoins;
-  hudUpdaters.updateCastleBankPilesVisual();
+  gameState.castleCoins = castleCoins;
+  hudUpdaters.updateCastleCoinPilesVisual();
 };
 
 const depositToCastle = async (requestedAmount: number) => {
@@ -2328,27 +2325,27 @@ const depositToCastle = async (requestedAmount: number) => {
     ? Math.max(0, Math.floor(requestedAmount))
     : Math.min(
         Math.max(0, Math.floor(requestedAmount)),
-        Math.max(0, Math.floor(gameState.energy))
+        Math.max(0, Math.floor(gameState.coins))
       );
   if (transfer <= 0) return false;
   if (!authoritative) {
-    const previousBank = gameState.bankEnergy;
-    const previousEnergy = gameState.energy;
-    gameState.bankEnergy += transfer;
-    gameState.energy = Math.max(0, gameState.energy - transfer);
-    hudUpdaters.updateCastleBankPilesVisual();
+    const previousBank = gameState.castleCoins;
+    const previousEnergy = gameState.coins;
+    gameState.castleCoins += transfer;
+    gameState.coins = Math.max(0, gameState.coins - transfer);
+    hudUpdaters.updateCastleCoinPilesVisual();
     const response = await requestCastleCoinsDeposit(transfer);
     if (response === null) {
-      gameState.bankEnergy = previousBank;
-      gameState.energy = previousEnergy;
-      hudUpdaters.updateCastleBankPilesVisual();
+      gameState.castleCoins = previousBank;
+      gameState.coins = previousEnergy;
+      hudUpdaters.updateCastleCoinPilesVisual();
       hudUpdaters.triggerEventBanner('Deposit failed');
       return false;
     }
-    gameState.bankEnergy = Number.isFinite(response.castleCoins)
+    gameState.castleCoins = Number.isFinite(response.castleCoins)
       ? Math.max(0, Math.floor(response.castleCoins))
-      : gameState.bankEnergy;
-    hudUpdaters.updateCastleBankPilesVisual();
+      : gameState.castleCoins;
+    hudUpdaters.updateCastleCoinPilesVisual();
     hudUpdaters.triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`);
     return true;
   }
@@ -2357,13 +2354,13 @@ const depositToCastle = async (requestedAmount: number) => {
     hudUpdaters.triggerEventBanner('Deposit failed');
     return false;
   }
-  gameState.bankEnergy = Number.isFinite(response.castleCoins)
+  gameState.castleCoins = Number.isFinite(response.castleCoins)
     ? Math.max(0, Math.floor(response.castleCoins))
-    : gameState.bankEnergy;
+    : gameState.castleCoins;
   if (Number.isFinite(response.coins)) {
-    gameState.energy = Math.max(0, Math.min(ENERGY_CAP, response.coins));
+    gameState.coins = Math.max(0, Math.min(COINS_CAP, response.coins));
   }
-  hudUpdaters.updateCastleBankPilesVisual();
+  hudUpdaters.updateCastleCoinPilesVisual();
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
@@ -2374,31 +2371,31 @@ const depositToCastle = async (requestedAmount: number) => {
 
 const withdrawFromCastle = async (requestedAmount: number) => {
   const authoritative = isServerAuthoritative();
-  const missing = Math.max(0, ENERGY_CAP - gameState.energy);
+  const missing = Math.max(0, COINS_CAP - gameState.coins);
   const transfer = Math.min(
     Math.max(0, Math.floor(requestedAmount)),
-    Math.max(0, Math.floor(gameState.bankEnergy)),
+    Math.max(0, Math.floor(gameState.castleCoins)),
     authoritative ? Number.POSITIVE_INFINITY : missing
   );
   if (transfer <= 0) return false;
   if (!authoritative) {
-    const previousBank = gameState.bankEnergy;
-    const previousEnergy = gameState.energy;
-    gameState.bankEnergy = Math.max(0, gameState.bankEnergy - transfer);
-    addEnergy(transfer, true);
-    hudUpdaters.updateCastleBankPilesVisual();
+    const previousBank = gameState.castleCoins;
+    const previousEnergy = gameState.coins;
+    gameState.castleCoins = Math.max(0, gameState.castleCoins - transfer);
+    addCoins(transfer, true);
+    hudUpdaters.updateCastleCoinPilesVisual();
     const response = await requestCastleCoinsWithdraw(transfer);
     if (response === null) {
-      gameState.bankEnergy = previousBank;
-      gameState.energy = previousEnergy;
-      hudUpdaters.updateCastleBankPilesVisual();
+      gameState.castleCoins = previousBank;
+      gameState.coins = previousEnergy;
+      hudUpdaters.updateCastleCoinPilesVisual();
       hudUpdaters.triggerEventBanner('Withdraw failed');
       return false;
     }
-    gameState.bankEnergy = Number.isFinite(response.castleCoins)
+    gameState.castleCoins = Number.isFinite(response.castleCoins)
       ? Math.max(0, Math.floor(response.castleCoins))
-      : gameState.bankEnergy;
-    hudUpdaters.updateCastleBankPilesVisual();
+      : gameState.castleCoins;
+    hudUpdaters.updateCastleCoinPilesVisual();
     hudUpdaters.triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
     return true;
   }
@@ -2407,13 +2404,13 @@ const withdrawFromCastle = async (requestedAmount: number) => {
     hudUpdaters.triggerEventBanner('Withdraw failed');
     return false;
   }
-  gameState.bankEnergy = Number.isFinite(response.castleCoins)
+  gameState.castleCoins = Number.isFinite(response.castleCoins)
     ? Math.max(0, Math.floor(response.castleCoins))
-    : gameState.bankEnergy;
+    : gameState.castleCoins;
   if (Number.isFinite(response.coins)) {
-    gameState.energy = Math.max(0, Math.min(ENERGY_CAP, response.coins));
+    gameState.coins = Math.max(0, Math.min(COINS_CAP, response.coins));
   }
-  hudUpdaters.updateCastleBankPilesVisual();
+  hudUpdaters.updateCastleCoinPilesVisual();
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
@@ -2669,8 +2666,8 @@ buildPreview.visible = false;
 scene.add(buildPreview);
 
 const canAffordBuildMode = (mode: BuildMode) => {
-  if (mode === 'wall') return gameState.energy >= ENERGY_COST_WALL;
-  if (mode === 'tower') return gameState.energy >= ENERGY_COST_TOWER;
+  if (mode === 'wall') return gameState.coins >= COINS_COST_WALL;
+  if (mode === 'tower') return gameState.coins >= COINS_COST_TOWER;
   return true;
 };
 
@@ -2739,7 +2736,7 @@ const setMinimapExpanded = (expanded: boolean) => {
   minimapWrapEl.classList.toggle('is-expanded', expanded);
   if (expanded) minimapWrapEl.classList.remove('is-hover');
   hudStatusStackEl.style.display = expanded ? 'none' : '';
-  updateHudEnergyVisibility();
+  updateHudCoinsVisibility();
   hudActionsEl.style.display = expanded ? 'none' : '';
   minimapToggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   minimapToggleBtn.setAttribute(
@@ -2798,14 +2795,14 @@ const selectionDialog = new SelectionDialog(
   {
     selectedCount: 0,
     inRangeCount: 0,
-    isBankSelected: false,
+    isCastleSelected: false,
     selectedTowerTypeId: null,
     selectedStructureLabel: 'Wall',
-    bankTotal: null,
-    canBankAdd1: false,
-    canBankAdd10: false,
-    canBankRemove1: false,
-    canBankRemove10: false,
+    castleTotal: null,
+    canCastleAdd1: false,
+    canCastleAdd10: false,
+    canCastleRemove1: false,
+    canCastleRemove10: false,
     showRepair: true,
     buildingCoords: null,
     buildingHealth: null,
@@ -2820,7 +2817,7 @@ const selectionDialog = new SelectionDialog(
     onDelete: () => {
       const colliders = getSelectedInRange();
       if (colliders.length === 0) return;
-      if (colliders.some((collider) => collider.type === 'bank')) return;
+      if (colliders.some((collider) => collider.type === 'castleCoins')) return;
       for (const collider of colliders) {
         if (authoritativeBridgeRef.current) {
           const structureId = getStructureIdFromCollider(collider);
@@ -2838,8 +2835,8 @@ const selectionDialog = new SelectionDialog(
       if (!tower) return;
       const [collider] = selectedStructures.values();
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return;
-      const upgradeCost = getUpgradeEnergyCost(upgradeId);
-      if (!spendEnergy(upgradeCost)) {
+      const upgradeCost = getUpgradeCoinCost(upgradeId);
+      if (!spendCoins(upgradeCost)) {
         hudUpdaters.triggerEventBanner(`Need ${upgradeCost} coins`);
         return;
       }
@@ -2847,7 +2844,7 @@ const selectionDialog = new SelectionDialog(
       const state = structureStore.structureStates.get(collider);
       if (state) {
         state.cumulativeBuildCost =
-          Math.max(0, state.cumulativeBuildCost ?? ENERGY_COST_TOWER) +
+          Math.max(0, state.cumulativeBuildCost ?? COINS_COST_TOWER) +
           upgradeCost;
       }
       hudUpdaters.triggerEventBanner('Upgraded');
@@ -2858,7 +2855,7 @@ const selectionDialog = new SelectionDialog(
       if (
         collider.type === 'tree' ||
         collider.type === 'rock' ||
-        collider.type === 'bank'
+        collider.type === 'castleCoins'
       )
         return;
       if (!isColliderInRange(collider, SELECTION_RADIUS)) return;
@@ -2866,7 +2863,7 @@ const selectionDialog = new SelectionDialog(
       if (!state) return;
       if (state.hp >= state.maxHp) return;
       const repairCost = getRepairCost(state);
-      if (!spendEnergy(repairCost)) {
+      if (!spendCoins(repairCost)) {
         hudUpdaters.triggerEventBanner(`Need ${repairCost} coins`);
         return;
       }
@@ -2875,20 +2872,20 @@ const selectionDialog = new SelectionDialog(
       state.graceUntilMs = Date.now() + DECAY_GRACE_MS;
       hudUpdaters.triggerEventBanner('Repaired');
     },
-    onBankAdd1: () => {
-      if (!getSelectedBankInRange()) return;
+    onCastleAdd1: () => {
+      if (!getSelectedCastleInRange()) return;
       void depositToCastle(1);
     },
-    onBankAdd10: () => {
-      if (!getSelectedBankInRange()) return;
+    onCastleAdd10: () => {
+      if (!getSelectedCastleInRange()) return;
       void depositToCastle(10);
     },
-    onBankRemove1: () => {
-      if (!getSelectedBankInRange()) return;
+    onCastleRemove1: () => {
+      if (!getSelectedCastleInRange()) return;
       void withdrawFromCastle(1);
     },
-    onBankRemove10: () => {
-      if (!getSelectedBankInRange()) return;
+    onCastleRemove10: () => {
+      if (!getSelectedCastleInRange()) return;
       void withdrawFromCastle(10);
     },
   }
@@ -3024,9 +3021,9 @@ const setSelectionDialogHudMode = (dialogVisible: boolean) => {
   hudEl.classList.toggle('is-dialog-mode', dialogVisible);
 };
 
-const updateHudEnergyVisibility = () => {
+const updateHudCoinsVisibility = () => {
   if (isMinimapExpandedRef.current) {
-    hudEnergyEl.style.display = 'none';
+    hudCoinsEl.style.display = 'none';
     return;
   }
   if (isSelectionDialogHudMode) {
@@ -3034,29 +3031,29 @@ const updateHudEnergyVisibility = () => {
     const type = collider?.type;
     const hideForSelection =
       type === 'tree' || type === 'rock' || type === 'wall';
-    hudEnergyEl.style.display = hideForSelection ? 'none' : '';
+    hudCoinsEl.style.display = hideForSelection ? 'none' : '';
     return;
   }
-  hudEnergyEl.style.display = '';
+  hudCoinsEl.style.display = '';
 };
 
 const updateSelectionDialog = () => {
   const selectedCount = selectedStructures.size;
   if (selectedCount === 0) {
     setSelectionDialogHudMode(false);
-    updateHudEnergyVisibility();
+    updateHudCoinsVisibility();
     hudActionsEl.style.display = isMinimapExpandedRef.current ? 'none' : '';
     selectionDialog.update({
       selectedCount: 0,
       inRangeCount: 0,
-      isBankSelected: false,
+      isCastleSelected: false,
       selectedTowerTypeId: null,
       selectedStructureLabel: 'Wall',
-      bankTotal: null,
-      canBankAdd1: false,
-      canBankAdd10: false,
-      canBankRemove1: false,
-      canBankRemove10: false,
+      castleTotal: null,
+      canCastleAdd1: false,
+      canCastleAdd10: false,
+      canCastleRemove1: false,
+      canCastleRemove10: false,
       showRepair: false,
       buildingCoords: null,
       buildingHealth: null,
@@ -3071,7 +3068,7 @@ const updateSelectionDialog = () => {
   }
   const inRange = getSelectedInRange();
   setSelectionDialogHudMode(inRange.length > 0);
-  updateHudEnergyVisibility();
+  updateHudCoinsVisibility();
   hudActionsEl.style.display = isMinimapExpandedRef.current
     ? 'none'
     : selectedCount > 0 && inRange.length > 0
@@ -3083,25 +3080,25 @@ const updateSelectionDialog = () => {
     ? (structureStore.structureStates.get(selectedCollider) ?? null)
     : null;
   const selectedType = selectedCollider?.type;
-  const isBankSelected = selectedType === 'bank';
-  const maxDepositable = Math.max(0, Math.floor(gameState.energy));
+  const isCastleSelected = selectedType === 'castleCoins';
+  const maxDepositable = Math.max(0, Math.floor(gameState.coins));
   const maxWithdrawable = Math.max(
     0,
     Math.min(
-      Math.floor(gameState.bankEnergy),
-      Math.floor(ENERGY_CAP - gameState.energy)
+      Math.floor(gameState.castleCoins),
+      Math.floor(COINS_CAP - gameState.coins)
     )
   );
-  const canDeposit = isBankSelected && inRange.length > 0 && maxDepositable > 0;
+  const canDeposit = isCastleSelected && inRange.length > 0 && maxDepositable > 0;
   const canWithdraw =
-    isBankSelected && inRange.length > 0 && maxWithdrawable > 0;
+    isCastleSelected && inRange.length > 0 && maxWithdrawable > 0;
   const isNatureSelected = selectedType === 'tree' || selectedType === 'rock';
   const selectedIsPlayerBuilt = selectedStructureState?.playerBuilt === true;
   const selectedHpRounded = selectedStructureState
     ? Math.max(0, Math.ceil(selectedStructureState.hp))
     : null;
-  const selectedBankTotalRounded = isBankSelected
-    ? Math.floor(gameState.bankEnergy)
+  const selectedCastleTotalRounded = isCastleSelected
+    ? Math.floor(gameState.castleCoins)
     : null;
   const selectedTowerTypeId = getSelectionTowerTypeId();
   const selectedStructureLabel =
@@ -3117,17 +3114,17 @@ const updateSelectionDialog = () => {
               selectedCollider.center.x * 31 + selectedCollider.center.z
             )
           )
-        : selectedType === 'bank'
+        : selectedType === 'castleCoins'
           ? 'Castle'
           : 'Wall';
   const upgradeOptions =
-    !isBankSelected && tower
+    !isCastleSelected && tower
       ? getTowerUpgradeOptions(tower).map((option) => ({
           id: option.id,
           label: option.label,
           deltaText: getTowerUpgradeDeltaText(option.id),
-          cost: getUpgradeEnergyCost(option.id),
-          canAfford: gameState.energy >= getUpgradeEnergyCost(option.id),
+          cost: getUpgradeCoinCost(option.id),
+          canAfford: gameState.coins >= getUpgradeCoinCost(option.id),
         }))
       : [];
   const repairCost =
@@ -3149,14 +3146,14 @@ const updateSelectionDialog = () => {
   selectionDialog.update({
     selectedCount,
     inRangeCount: inRange.length,
-    isBankSelected,
+    isCastleSelected,
     selectedTowerTypeId,
     selectedStructureLabel,
-    bankTotal: selectedBankTotalRounded,
-    canBankAdd1: canDeposit,
-    canBankAdd10: canDeposit && maxDepositable >= 10,
-    canBankRemove1: canWithdraw,
-    canBankRemove10: canWithdraw && maxWithdrawable >= 10,
+    castleTotal: selectedCastleTotalRounded,
+    canCastleAdd1: canDeposit,
+    canCastleAdd10: canDeposit && maxDepositable >= 10,
+    canCastleRemove1: canWithdraw,
+    canCastleRemove10: canWithdraw && maxWithdrawable >= 10,
     showRepair: !isNatureSelected,
     buildingCoords: selectedCollider
       ? {
@@ -3168,7 +3165,7 @@ const updateSelectionDialog = () => {
       selectedStructureState &&
       selectedHpRounded !== null &&
       !isNatureSelected &&
-      !isBankSelected
+      !isCastleSelected
         ? {
             hp: selectedHpRounded,
             maxHp: selectedStructureState.maxHp,
@@ -3190,14 +3187,14 @@ const updateSelectionDialog = () => {
       : null,
     canRepair:
       !isNatureSelected &&
-      !isBankSelected &&
+      !isCastleSelected &&
       selectedStructureState !== null &&
       selectedStructureState.hp < selectedStructureState.maxHp &&
       selectedIsPlayerBuilt &&
       inRange.length > 0 &&
       repairCost !== null &&
-      gameState.energy >= repairCost,
-    canDelete: !isBankSelected && inRange.length > 0,
+      gameState.coins >= repairCost,
+    canDelete: !isCastleSelected && inRange.length > 0,
     repairCost,
     repairStatus,
   });
@@ -3311,7 +3308,7 @@ const getStructureHit = (event: PointerEvent): DestructibleCollider | null => {
     }
   }
   const castleHits = raycaster.intersectObject(castle, true);
-  const pileHits = raycaster.intersectObject(castleBankPiles, true);
+  const pileHits = raycaster.intersectObject(castleCoinPiles, true);
   const closestBankDistance = Math.min(
     castleHits[0]?.distance ?? Number.POSITIVE_INFINITY,
     pileHits[0]?.distance ?? Number.POSITIVE_INFINITY
@@ -3321,7 +3318,7 @@ const getStructureHit = (event: PointerEvent): DestructibleCollider | null => {
       !closestStructureHit ||
       closestBankDistance <= closestStructureHit.distance
     ) {
-      return castleBankSelectionCollider;
+      return castleCoinsSelectionCollider;
     }
   }
   return closestStructureHit?.collider ?? null;
@@ -3347,7 +3344,7 @@ const placeBuilding = (center: THREE.Vector3) => {
   const result = placeBuildingAt(
     center,
     gameState.buildMode,
-    gameState.energy,
+    gameState.coins,
     {
       staticColliders,
       structureStore,
@@ -3357,7 +3354,7 @@ const placeBuilding = (center: THREE.Vector3) => {
       applyObstacleDelta,
     }
   );
-  gameState.energy = Math.max(0, gameState.energy - result.energySpent);
+  gameState.coins = Math.max(0, gameState.coins - result.coinsSpent);
   if (result.placed && wallModelTemplate && gameState.buildMode === 'wall') {
     for (const wallMesh of structureStore.wallMeshes) {
       applyWallVisualToMesh(wallMesh);
@@ -3382,7 +3379,7 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     const { validPositions } = getWallLinePlacement(
       start,
       end,
-      gameState.energy
+      gameState.coins
     );
     if (validPositions.length === 0) return false;
     const now = Date.now();
@@ -3395,13 +3392,13 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     );
     return true;
   }
-  const placed = placeWallSegment(start, end, gameState.energy, {
+  const placed = placeWallSegment(start, end, gameState.coins, {
     scene,
     structureStore,
     staticColliders,
     applyObstacleDelta,
   });
-  gameState.energy = Math.max(0, gameState.energy - placed * ENERGY_COST_WALL);
+  gameState.coins = Math.max(0, gameState.coins - placed * COINS_COST_WALL);
   if (placed > 0 && wallModelTemplate) {
     for (const wallMesh of structureStore.wallMeshes) {
       applyWallVisualToMesh(wallMesh);
@@ -3422,13 +3419,13 @@ const placeWallSegments = (positions: THREE.Vector3[]) => {
     );
     return true;
   }
-  const placed = placeWallSegmentsAt(positions, gameState.energy, {
+  const placed = placeWallSegmentsAt(positions, gameState.coins, {
     scene,
     structureStore,
     staticColliders,
     applyObstacleDelta,
   });
-  gameState.energy = Math.max(0, gameState.energy - placed * ENERGY_COST_WALL);
+  gameState.coins = Math.max(0, gameState.coins - placed * COINS_COST_WALL);
   if (placed > 0 && wallModelTemplate) {
     for (const wallMesh of structureStore.wallMeshes) {
       applyWallVisualToMesh(wallMesh);
@@ -3600,7 +3597,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     wallDragEnd = point.clone();
 
     // Show one continuous preview mesh for the wall segment.
-    const availableWallPreview = gameState.energy;
+    const availableWallPreview = gameState.coins;
     const { validPositions, blockedPosition } = getWallLinePlacement(
       wallDragStart,
       wallDragEnd,
@@ -3646,8 +3643,8 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     const size = getBuildSizeForMode(isTower ? 'tower' : 'wall');
     const half = size.clone().multiplyScalar(0.5);
     const snapped = snapCenterToBuildGrid(point, size);
-    const energyCost = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL;
-    const ok = canPlace(snapped, half, true) && gameState.energy >= energyCost;
+    const coinCost = isTower ? COINS_COST_TOWER : COINS_COST_WALL;
+    const ok = canPlace(snapped, half, true) && gameState.coins >= coinCost;
     buildPreview.scale.set(size.x, size.y, size.z);
     buildPreview.position.copy(snapped);
     (buildPreview.material as THREE.MeshStandardMaterial).color.setHex(
@@ -3824,16 +3821,16 @@ const tick = (now: number, delta: number) => {
     hudUpdaters.syncMinimapCanvasSize();
   }
   if (!serverAuthoritative) {
-    gameState.energy = Math.min(
-      ENERGY_CAP,
-      gameState.energy + ENERGY_REGEN_RATE * delta
+    gameState.coins = Math.min(
+      COINS_CAP,
+      gameState.coins + COINS_REGEN_RATE * delta
     );
-    if (gameState.buildMode === 'wall' && gameState.energy < ENERGY_COST_WALL) {
+    if (gameState.buildMode === 'wall' && gameState.coins < COINS_COST_WALL) {
       setBuildMode('off');
     }
     if (
       gameState.buildMode === 'tower' &&
-      gameState.energy < ENERGY_COST_TOWER
+      gameState.coins < COINS_COST_TOWER
     ) {
       setBuildMode('off');
     }
@@ -3942,7 +3939,7 @@ const tick = (now: number, delta: number) => {
   updateParticles(delta);
   smokePoofEffect.updateSmokePoofs(delta);
   updateMobDeathVisuals(delta);
-  hudUpdaters.updateEnergyTrails(delta);
+  hudUpdaters.updateCoinTrails(delta);
   updateFloatingDamageTexts(delta);
 
   const targetingStartedAtMs = performance.now();
@@ -4201,12 +4198,12 @@ const tick = (now: number, delta: number) => {
     worldGrid.update(visibleBounds);
   }
 
-  gameState.energyPopTimer = Math.max(0, gameState.energyPopTimer - delta);
+  gameState.coinsPopTimer = Math.max(0, gameState.coinsPopTimer - delta);
   updateHud(
     {
       wallCountEl,
       towerCountEl,
-      energyCountEl,
+      coinsCountEl,
       buildWallBtn,
       buildTowerBtn,
       waveEl,
@@ -4220,18 +4217,18 @@ const tick = (now: number, delta: number) => {
       shootButton,
     },
     {
-      energy: gameState.energy,
+      coins: gameState.coins,
       wave: gameState.wave,
       waveComplete,
       nextWaveAt: gameState.nextWaveAt,
       now,
       mobsCount: mobs.length,
-      energyPopTimer: gameState.energyPopTimer,
+      coinsPopTimer: gameState.coinsPopTimer,
       shootCooldown: gameState.shootCooldown,
     },
     {
-      energyCostWall: ENERGY_COST_WALL,
-      energyCostTower: ENERGY_COST_TOWER,
+      coinCostWall: COINS_COST_WALL,
+      coinCostTower: COINS_COST_TOWER,
       shootCooldownMax: SHOOT_COOLDOWN,
     }
   );
@@ -4253,10 +4250,10 @@ const tick = (now: number, delta: number) => {
 
   gameState.prevMobsCount = mobs.length;
   if (import.meta.env.DEV) {
-    assertEnergyInBounds(gameState.energy, ENERGY_CAP);
-    if (gameState.bankEnergy < 0) {
+    assertCoinsInBounds(gameState.coins, COINS_CAP);
+    if (gameState.castleCoins < 0) {
       throw new Error(
-        `Bank invariant violated: bankEnergy=${gameState.bankEnergy}`
+        `Castle coins invariant violated: castleCoins=${gameState.castleCoins}`
       );
     }
     assertSpawnerCounts(activeWaveSpawners);
@@ -4360,7 +4357,7 @@ const disposeGameScene = createDisposeScene({
   castle,
   coinHudRoot,
   coinHudRenderer,
-  activeEnergyTrails,
+  activeCoinTrails,
   coinTrailScene,
   coinTrailRenderer,
   composer,

@@ -50,7 +50,7 @@ type MobSampleEntry = {
 type GameState = {
   wave: number;
   lives: number;
-  energy: number;
+  coins: number;
   nextWaveAt: number;
 };
 
@@ -112,7 +112,7 @@ export type AuthoritativeSyncContext = {
 
   WORLD_BOUNDS: number;
   CASTLE_ROUTE_HALF_WIDTH_CELLS: number;
-  ENERGY_CAP: number;
+  COINS_CAP: number;
   SERVER_MOB_INTERPOLATION_BACKTIME_MS: number;
   SERVER_MOB_EXTRAPOLATION_MAX_MS: number;
   SERVER_MOB_EXTRAPOLATION_GAP_MAX_MS: number;
@@ -272,7 +272,7 @@ export const createAuthoritativeSync = (
   ) => {
     ctx.gameState.wave = wave.wave;
     ctx.gameState.lives = world.lives;
-    ctx.gameState.energy = Math.max(0, Math.min(ctx.ENERGY_CAP, world.energy));
+    ctx.gameState.coins = Math.max(0, Math.min(ctx.COINS_CAP, world.coins));
     ctx.serverWaveActiveRef.current = wave.active;
     ctx.gameState.nextWaveAt =
       wave.nextWaveAtMs > 0 ? toPerfTime(wave.nextWaveAtMs) : 0;

@@ -42,13 +42,13 @@ type AuthoritativeBridge = {
   sendStartWave: () => Promise<void>;
   sendBuildStructure: (payload: {
     structureId: string;
-    type: 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
+    type: 'wall' | 'tower' | 'tree' | 'rock';
     center: Vec2;
   }) => Promise<void>;
   sendBuildStructures: (
     payloads: Array<{
       structureId: string;
-      type: 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
+      type: 'wall' | 'tower' | 'tree' | 'rock';
       center: Vec2;
     }>
   ) => Promise<void>;

@@ -45,21 +45,21 @@ export const MOB_SIEGE_ATTACK_COOLDOWN = 0.8;
 export const MOB_SIEGE_RANGE_BUFFER = 0.35;
 export const MOB_SIEGE_UNREACHABLE_GRACE = 1.2;
 import {
-  ENERGY_CAP,
-  ENERGY_REGEN_PER_SECOND,
-  getStructureEnergyCost,
+  COINS_CAP,
+  COINS_REGEN_PER_SECOND,
+  getStructureCoinCost,
 } from '../../../shared/content';
-export { ENERGY_CAP, ENERGY_REGEN_PER_SECOND, getStructureEnergyCost };
-export const ENERGY_REGEN_RATE = ENERGY_REGEN_PER_SECOND;
-export const ENERGY_COST_WALL = getStructureEnergyCost('wall');
-export const ENERGY_COST_TOWER = getStructureEnergyCost('tower');
-export const ENERGY_SYMBOL = '🪙';
-export const ENERGY_PER_PLAYER_KILL = 6;
-export const ENERGY_COST_UPGRADE_RANGE = 20;
-export const ENERGY_COST_UPGRADE_DAMAGE = 20;
-export const ENERGY_COST_UPGRADE_SPEED = 20;
-export const ENERGY_COST_DELETE_WALL = 0;
-export const ENERGY_COST_DELETE_TOWER = 0;
+export { COINS_CAP, COINS_REGEN_PER_SECOND, getStructureCoinCost };
+export const COINS_REGEN_RATE = COINS_REGEN_PER_SECOND;
+export const COINS_COST_WALL = getStructureCoinCost('wall');
+export const COINS_COST_TOWER = getStructureCoinCost('tower');
+export const COINS_SYMBOL = '🪙';
+export const COINS_PER_PLAYER_KILL = 6;
+export const COINS_COST_UPGRADE_RANGE = 20;
+export const COINS_COST_UPGRADE_DAMAGE = 20;
+export const COINS_COST_UPGRADE_SPEED = 20;
+export const COINS_COST_DELETE_WALL = 0;
+export const COINS_COST_DELETE_TOWER = 0;
 export const DECAY_GRACE_MS = 1000 * 60 * 30;
 export const DECAY_HP_PER_HOUR = 1.5;
 export const REPAIR_DISCOUNT_RATE = 0.2;

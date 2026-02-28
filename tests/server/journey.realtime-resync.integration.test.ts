@@ -37,6 +37,6 @@ devvitTest(
     expect(resyncResponse.status).toBe(200);
     const resyncBody = await resyncResponse.json();
     expect(resyncBody.type).toBe('snapshot');
-    expect(typeof resyncBody.snapshot.meta.energy).toBe('number');
+    expect(typeof resyncBody.snapshot.meta.coins).toBe('number');
   }
 );

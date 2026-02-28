@@ -6,14 +6,14 @@ import {
   COIN_PILE_MAX_RADIUS,
 } from '../clientConstants';
 
-export const getCoinPileCylinderCount = (bankEnergy: number): number => {
-  const safeBank = Math.max(0, bankEnergy);
+export const getCoinPileCylinderCount = (castleCoins: number): number => {
+  const safeBank = Math.max(0, castleCoins);
   const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));
   return Math.min(COIN_PILE_CYLINDER_MAX, COIN_PILE_CYLINDER_MIN + growthLevel);
 };
 
-export const getCoinPileClusterCountPerCorner = (bankEnergy: number): number => {
-  const safeBank = Math.max(0, bankEnergy);
+export const getCoinPileClusterCountPerCorner = (castleCoins: number): number => {
+  const safeBank = Math.max(0, castleCoins);
   const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));
   return Math.min(
     COIN_PILE_CLUSTER_MAX_PER_CORNER,
@@ -21,20 +21,20 @@ export const getCoinPileClusterCountPerCorner = (bankEnergy: number): number => 
   );
 };
 
-export const getCoinPileHeightScale = (bankEnergy: number): number => {
-  const safeBank = Math.max(1, bankEnergy);
+export const getCoinPileHeightScale = (castleCoins: number): number => {
+  const safeBank = Math.max(1, castleCoins);
   return Math.min(2.6, 1 + Math.log10(safeBank) * 0.28);
 };
 
 export const buildCoinPileVisual = (
-  bankEnergy: number,
+  castleCoins: number,
   densityScale = 1,
   spreadScale = 1,
   phaseOffset = 0,
   heightScale = 1
 ): THREE.Group => {
   const group = new THREE.Group();
-  const safeBank = Math.max(0, bankEnergy);
+  const safeBank = Math.max(0, castleCoins);
   const baseCount = getCoinPileCylinderCount(safeBank);
   const cylinderCount = Math.max(1, Math.floor(baseCount * densityScale));
   const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));

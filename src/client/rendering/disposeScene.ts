@@ -5,7 +5,7 @@ import type { WorldGrid } from './overlays/worldGrid';
 import type { WorldBorder } from './overlays/worldBorder';
 import type { ArrowProjectile } from '../domains/gameplay/types/entities';
 import type { PlayerArrowProjectile } from '../gameContext';
-import type { EnergyTrail } from '../ui/hudUpdaters';
+import type { CoinTrail } from '../ui/hudUpdaters';
 
 export type DisposeSceneContext = {
   authoritativeBridgeRef: {
@@ -50,7 +50,7 @@ export type DisposeSceneContext = {
   castle: THREE.Object3D;
   coinHudRoot: THREE.Group;
   coinHudRenderer: THREE.WebGLRenderer;
-  activeEnergyTrails: EnergyTrail[];
+  activeCoinTrails: CoinTrail[];
   coinTrailScene: THREE.Scene;
   coinTrailRenderer: THREE.WebGLRenderer;
   composer: EffectComposer;
@@ -144,13 +144,13 @@ export const createDisposeScene = (
 
     ctx.coinHudRoot.clear();
     ctx.coinHudRenderer.dispose();
-    for (const trail of ctx.activeEnergyTrails) {
+    for (const trail of ctx.activeCoinTrails) {
       ctx.coinTrailScene.remove(trail.mesh);
       for (const material of trail.materials) {
         material.dispose();
       }
     }
-    ctx.activeEnergyTrails.length = 0;
+    ctx.activeCoinTrails.length = 0;
     ctx.coinTrailRenderer.dispose();
     ctx.composer.dispose();
     ctx.renderer.dispose();

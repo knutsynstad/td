@@ -7,7 +7,7 @@ export type ColliderType =
   | 'tower'
   | 'tree'
   | 'rock'
-  | 'bank';
+  | 'castleCoins';
 
 export type NavPoint = { x: number; z: number };
 

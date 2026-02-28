@@ -10,7 +10,7 @@ import {
 } from './coinPileHelpers';
 import { disposeObjectMeshes } from '../rendering/disposeUtils';
 
-export type EnergyTrail = {
+export type CoinTrail = {
   mesh: THREE.Object3D;
   materials: THREE.Material[];
   startX: number;
@@ -47,28 +47,28 @@ export type HudUpdatersContext = {
   coinTrailCamera: THREE.OrthographicCamera;
   coinTrailScene: THREE.Scene;
   eventBannerEl: HTMLDivElement;
-  castleBankPiles: THREE.Group;
+  castleCoinPiles: THREE.Group;
   castleCollider: StaticCollider;
   camera: THREE.OrthographicCamera;
   player: PlayerEntity;
   mobs: MobEntity[];
   structureStore: StructureStore;
   gameState: GameState;
-  activeEnergyTrails: EnergyTrail[];
+  activeCoinTrails: CoinTrail[];
   WORLD_BOUNDS: number;
   isMinimapExpandedRef: { current: boolean };
   minimapEmbellishAlphaRef: { current: number };
   EVENT_BANNER_DURATION: number;
   REPAIR_WARNING_HP_RATIO: number;
   REPAIR_CRITICAL_HP_RATIO: number;
-  addEnergy: (amount: number, withPop?: boolean) => void;
+  addCoins: (amount: number, withPop?: boolean) => void;
 };
 
 export type HudUpdaters = {
   updateCoinHudView: (delta: number) => void;
   syncHudCoinModel: () => void;
-  updateCastleBankPilesVisual: () => void;
-  updateEnergyTrails: (delta: number) => void;
+  updateCastleCoinPilesVisual: () => void;
+  updateCoinTrails: (delta: number) => void;
   drawMinimap: () => void;
   syncCoinTrailViewport: () => void;
   syncMinimapCanvasSize: () => void;
@@ -102,12 +102,12 @@ export const createHudUpdaters = (
     ctx.coinHudRoot.add(hudCoin);
   };
 
-  const updateCastleBankPilesVisual = () => {
-    for (const child of Array.from(ctx.castleBankPiles.children)) {
-      ctx.castleBankPiles.remove(child);
+  const updateCastleCoinPilesVisual = () => {
+    for (const child of Array.from(ctx.castleCoinPiles.children)) {
+      ctx.castleCoinPiles.remove(child);
       disposeObjectMeshes(child);
     }
-    if (ctx.gameState.bankEnergy <= 0) return;
+    if (ctx.gameState.castleCoins <= 0) return;
     const cx = ctx.castleCollider.center.x;
     const cz = ctx.castleCollider.center.z;
     const offsetX = ctx.castleCollider.halfSize.x + 0.28;
@@ -118,16 +118,16 @@ export const createHudUpdaters = (
       new THREE.Vector3(cx - offsetX, 0, cz + offsetZ),
       new THREE.Vector3(cx - offsetX, 0, cz - offsetZ),
     ];
-    const safeBank = Math.max(0, ctx.gameState.bankEnergy);
+    const safeBank = Math.max(0, ctx.gameState.castleCoins);
     const clustersPerCorner = getCoinPileClusterCountPerCorner(safeBank);
     const totalClusters = Math.max(1, corners.length * clustersPerCorner);
-    const perClusterEnergy = safeBank / totalClusters;
+    const perClusterCoins = safeBank / totalClusters;
     const heightScale = getCoinPileHeightScale(safeBank);
     for (let i = 0; i < corners.length; i += 1) {
       const corner = corners[i]!;
       for (let clusterIdx = 0; clusterIdx < clustersPerCorner; clusterIdx += 1) {
         const pile = buildCoinPileVisual(
-          perClusterEnergy,
+          perClusterCoins,
           0.78,
           0.34,
           i * 29 + clusterIdx * 7,
@@ -146,7 +146,7 @@ export const createHudUpdaters = (
             corner.z + Math.sin(angle) * ringRadius
           );
         }
-        ctx.castleBankPiles.add(pile);
+        ctx.castleCoinPiles.add(pile);
       }
     }
   };
@@ -300,9 +300,9 @@ export const createHudUpdaters = (
     ctx.gameState.eventBannerTimer = duration;
   };
 
-  const updateEnergyTrails = (delta: number) => {
-    for (let i = ctx.activeEnergyTrails.length - 1; i >= 0; i -= 1) {
-      const trail = ctx.activeEnergyTrails[i]!;
+  const updateCoinTrails = (delta: number) => {
+    for (let i = ctx.activeCoinTrails.length - 1; i >= 0; i -= 1) {
+      const trail = ctx.activeCoinTrails[i]!;
       trail.elapsed += delta;
       const t = Math.min(1, trail.elapsed / trail.duration);
       const easeT = 1 - Math.pow(1 - t, 2);
@@ -338,8 +338,8 @@ export const createHudUpdaters = (
         for (const material of trail.materials) {
           material.dispose();
         }
-        ctx.activeEnergyTrails.splice(i, 1);
-        ctx.addEnergy(trail.reward, true);
+        ctx.activeCoinTrails.splice(i, 1);
+        ctx.addCoins(trail.reward, true);
       }
     }
   };
@@ -347,8 +347,8 @@ export const createHudUpdaters = (
   return {
     updateCoinHudView,
     syncHudCoinModel,
-    updateCastleBankPilesVisual,
-    updateEnergyTrails,
+    updateCastleCoinPilesVisual,
+    updateCoinTrails,
     drawMinimap,
     syncCoinTrailViewport,
     syncMinimapCanvasSize,

@@ -1,5 +1,5 @@
 import { redis } from '@devvit/web/server';
-import { ENERGY_CAP } from '../../shared/content';
+import { COINS_CAP } from '../../shared/content';
 import type {
   MobState,
   PlayerIntent,
@@ -18,9 +18,7 @@ import { getGameRedisKeys } from './keys';
 import { parseIntent, parsePlayerState } from './players';
 
 export const parseStructureType = (value: unknown): StructureState['type'] =>
-  value === 'tower' || value === 'tree' || value === 'rock' || value === 'bank'
-    ? value
-    : 'wall';
+  value === 'tower' || value === 'tree' || value === 'rock' ? value : 'wall';
 
 const parseStructureMetadata = (raw: unknown): StructureMetadata | undefined => {
   if (!isRecord(raw)) return undefined;
@@ -74,8 +72,7 @@ export const parseStructure = (value: unknown): StructureState => {
     type:
       value.type === 'tower' ||
       value.type === 'tree' ||
-      value.type === 'rock' ||
-      value.type === 'bank'
+      value.type === 'rock'
         ? value.type
         : 'wall',
     center: parseVec2(value.center),
@@ -134,13 +131,13 @@ export const defaultWave = (): WaveState => ({
   spawners: [],
 });
 
-export const defaultMeta = (nowMs: number, energy: number): WorldMeta => ({
+export const defaultMeta = (nowMs: number, coins: number): WorldMeta => ({
   tickSeq: 0,
   worldVersion: 0,
   lastTickMs: nowMs,
   lastStructureChangeTickSeq: 0,
   seed: nowMs,
-  energy: clampCoins(energy),
+  coins: clampCoins(coins),
   lives: 1,
   nextMobSeq: 1,
 });
@@ -166,9 +163,9 @@ export const loadWorldState = async (): Promise<WorldState> => {
       metaRaw?.lastStructureChangeTickSeq ?? '0'
     ),
     seed: Number(metaRaw?.seed ?? String(now)),
-    energy: Math.max(
+    coins: Math.max(
       0,
-      Math.min(ENERGY_CAP, Number(metaRaw?.energy ?? String(ENERGY_CAP)))
+      Math.min(COINS_CAP, Number(metaRaw?.coins ?? String(COINS_CAP)))
     ),
     lives: Number(metaRaw?.lives ?? '1'),
     nextMobSeq: Number(metaRaw?.nextMobSeq ?? '1'),
@@ -236,7 +233,7 @@ export const persistWorldState = async (world: WorldState): Promise<void> => {
       world.meta.lastStructureChangeTickSeq ?? 0
     ),
     seed: String(world.meta.seed),
-    energy: String(world.meta.energy),
+    coins: String(world.meta.coins),
     lives: String(world.meta.lives),
     nextMobSeq: String(world.meta.nextMobSeq),
   };
@@ -314,7 +311,7 @@ export const resetGameState = async (nowMs: number): Promise<void> => {
         nextMeta.lastStructureChangeTickSeq ?? 0
       ),
       seed: String(nextMeta.seed),
-      energy: String(nextMeta.energy),
+      coins: String(nextMeta.coins),
       lives: String(nextMeta.lives),
     }),
     redis.set(keys.wave, JSON.stringify(defaultWave())),

@@ -12,7 +12,7 @@ devvitTest(
       worldVersion: '0',
       lastTickMs: String(now - 15_000),
       seed: '1',
-      energy: '100',
+      coins: '100',
       lives: '1',
     });
     await redis.set(

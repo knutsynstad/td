@@ -30,7 +30,12 @@ export type PlayerState = {
   lastSeenMs: number;
 };
 
-export type StructureType = 'wall' | 'tower' | 'tree' | 'rock' | 'bank';
+export type StructureType =
+  | 'wall'
+  | 'tower'
+  | 'tree'
+  | 'rock'
+  | 'castleCoins';
 
 export type StructureMetadata = {
   treeFootprint?: 1 | 2 | 3 | 4;
@@ -93,7 +98,7 @@ export type WorldMeta = {
   lastTickMs: number;
   lastStructureChangeTickSeq?: number;
   seed: number;
-  energy: number;
+  coins: number;
   lives: number;
   nextMobSeq: number;
 };

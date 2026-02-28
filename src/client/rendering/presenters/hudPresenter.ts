@@ -1,7 +1,7 @@
 type HudElements = {
   wallCountEl: HTMLSpanElement;
   towerCountEl: HTMLSpanElement;
-  energyCountEl: HTMLSpanElement;
+  coinsCountEl: HTMLSpanElement;
   buildWallBtn: HTMLButtonElement;
   buildTowerBtn: HTMLButtonElement;
   waveEl: HTMLSpanElement;
@@ -16,19 +16,19 @@ type HudElements = {
 };
 
 type HudState = {
-  energy: number;
+  coins: number;
   wave: number;
   waveComplete: boolean;
   nextWaveAt: number;
   now: number;
   mobsCount: number;
-  energyPopTimer: number;
+  coinsPopTimer: number;
   shootCooldown: number;
 };
 
 type HudOptions = {
-  energyCostWall: number;
-  energyCostTower: number;
+  coinCostWall: number;
+  coinCostTower: number;
   shootCooldownMax: number;
 };
 
@@ -37,14 +37,14 @@ export const updateHud = (
   state: HudState,
   opts: HudOptions
 ): void => {
-  elements.energyCountEl.textContent = `${Math.floor(state.energy)}`;
-  elements.buildWallBtn.disabled = state.energy < opts.energyCostWall;
-  elements.buildTowerBtn.disabled = state.energy < opts.energyCostTower;
+  elements.coinsCountEl.textContent = `${Math.floor(state.coins)}`;
+  elements.buildWallBtn.disabled = state.coins < opts.coinCostWall;
+  elements.buildTowerBtn.disabled = state.coins < opts.coinCostTower;
 
-  if (state.energyPopTimer > 0) {
-    elements.energyCountEl.classList.add('pop');
+  if (state.coinsPopTimer > 0) {
+    elements.coinsCountEl.classList.add('pop');
   } else {
-    elements.energyCountEl.classList.remove('pop');
+    elements.coinsCountEl.classList.remove('pop');
   }
 
   const isPreWaveCountdown = state.wave === 0 && state.nextWaveAt !== 0;

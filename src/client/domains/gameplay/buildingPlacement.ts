@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import {
   CASTLE_RADIUS,
   DECAY_GRACE_MS,
-  ENERGY_COST_TOWER,
-  ENERGY_COST_WALL,
+  COINS_COST_TOWER,
+  COINS_COST_WALL,
   GRID_SIZE,
   TOWER_HEIGHT,
   TOWER_HP,
@@ -103,17 +103,17 @@ export const canPlace = (
 export const placeBuilding = (
   center: THREE.Vector3,
   buildMode: BuildMode,
-  energy: number,
+  coins: number,
   context: PlaceContext
 ) => {
   const isTower = buildMode === 'tower';
   const size = getBuildSize(isTower ? 'tower' : 'wall');
   const half = size.clone().multiplyScalar(0.5);
   const snapped = snapCenterToBuildGrid(center, size);
-  const requiredEnergy = isTower ? ENERGY_COST_TOWER : ENERGY_COST_WALL;
+  const requiredCoins = isTower ? COINS_COST_TOWER : COINS_COST_WALL;
   if (!canPlace(snapped, half, context.staticColliders, true))
-    return { placed: false, energySpent: 0 };
-  if (energy < requiredEnergy) return { placed: false, energySpent: 0 };
+    return { placed: false, coinsSpent: 0 };
+  if (coins < requiredCoins) return { placed: false, coinsSpent: 0 };
 
   let addedCollider: DestructibleCollider;
   const nowMs = Date.now();
@@ -133,11 +133,11 @@ export const placeBuilding = (
       TOWER_HP,
       {
         ...lifecycleMetadata,
-        cumulativeBuildCost: ENERGY_COST_TOWER,
+        cumulativeBuildCost: COINS_COST_TOWER,
       }
     );
     context.applyObstacleDelta([addedCollider]);
-    return { placed: true, energySpent: ENERGY_COST_TOWER };
+    return { placed: true, coinsSpent: COINS_COST_TOWER };
   }
 
   const mesh = new THREE.Mesh(
@@ -153,11 +153,11 @@ export const placeBuilding = (
     WALL_HP,
     {
       ...lifecycleMetadata,
-      cumulativeBuildCost: ENERGY_COST_WALL,
+      cumulativeBuildCost: COINS_COST_WALL,
     }
   );
   context.applyObstacleDelta([addedCollider]);
-  return { placed: true, energySpent: ENERGY_COST_WALL };
+  return { placed: true, coinsSpent: COINS_COST_WALL };
 };
 
 export const getCardinalWallLine = (
@@ -211,10 +211,10 @@ const WALL_LINE_HALF = WALL_LINE_SIZE.clone().multiplyScalar(0.5);
 export const getWallLinePlacement = (
   start: THREE.Vector3,
   end: THREE.Vector3,
-  energy: number,
+  coins: number,
   staticColliders: StaticCollider[]
 ) => {
-  const availableWallSegments = Math.floor(energy / ENERGY_COST_WALL);
+  const availableWallSegments = Math.floor(coins / COINS_COST_WALL);
   const positions = getCardinalWallLine(start, end);
   const validPositions: THREE.Vector3[] = [];
   const seenKeys = new Set<string>();
@@ -249,33 +249,33 @@ export const getWallLinePlacement = (
 export const placeWallLine = (
   start: THREE.Vector3,
   end: THREE.Vector3,
-  energy: number,
+  coins: number,
   context: Pick<
     PlaceContext,
     'scene' | 'structureStore' | 'staticColliders' | 'applyObstacleDelta'
   >
 ) => {
-  const availableWallSegments = Math.floor(energy / ENERGY_COST_WALL);
+  const availableWallSegments = Math.floor(coins / COINS_COST_WALL);
   if (availableWallSegments <= 0) return 0;
   const { validPositions } = getWallLinePlacement(
     start,
     end,
-    energy,
+    coins,
     context.staticColliders
   );
 
-  return placeWallSegments(validPositions, energy, context);
+  return placeWallSegments(validPositions, coins, context);
 };
 
 export const placeWallSegments = (
   positions: THREE.Vector3[],
-  energy: number,
+  coins: number,
   context: Pick<
     PlaceContext,
     'scene' | 'structureStore' | 'staticColliders' | 'applyObstacleDelta'
   >
 ) => {
-  const availableWallSegments = Math.floor(energy / ENERGY_COST_WALL);
+  const availableWallSegments = Math.floor(coins / COINS_COST_WALL);
   if (availableWallSegments <= 0 || positions.length === 0) return 0;
 
   let placed = 0;
@@ -298,7 +298,7 @@ export const placeWallSegments = (
       createdAtMs: nowMs,
       lastDecayTickMs: nowMs,
       graceUntilMs: nowMs + DECAY_GRACE_MS,
-      cumulativeBuildCost: ENERGY_COST_WALL,
+      cumulativeBuildCost: COINS_COST_WALL,
     });
     placed += 1;
   }
@@ -308,5 +308,5 @@ export const placeWallSegments = (
       .slice(-placed);
     context.applyObstacleDelta(added);
   }
-  return placed * ENERGY_COST_WALL;
+  return placed * COINS_COST_WALL;
 };

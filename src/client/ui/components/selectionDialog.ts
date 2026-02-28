@@ -6,21 +6,21 @@ import type {
 import {
   buildInfoListMarkup,
   buildStatsMarkup,
-  buildBankActionsMarkup,
+  buildCastleCoinsActionsMarkup,
   buildRepairMarkup,
 } from '../selectionDialogMarkup';
 
 type SelectionDialogState = {
   selectedCount: number;
   inRangeCount: number;
-  isBankSelected: boolean;
+  isCastleSelected: boolean;
   selectedTowerTypeId: TowerTypeId | null;
   selectedStructureLabel: string;
-  bankTotal: number | null;
-  canBankAdd1: boolean;
-  canBankAdd10: boolean;
-  canBankRemove1: boolean;
-  canBankRemove10: boolean;
+  castleTotal: number | null;
+  canCastleAdd1: boolean;
+  canCastleAdd10: boolean;
+  canCastleRemove1: boolean;
+  canCastleRemove10: boolean;
   showRepair: boolean;
   buildingCoords: { x: number; z: number } | null;
   buildingHealth: {
@@ -55,10 +55,10 @@ type SelectionDialogActions = {
   onUpgrade: (upgradeId: TowerUpgradeId) => void;
   onRepair: () => void;
   onDelete: () => void;
-  onBankAdd1: () => void;
-  onBankAdd10: () => void;
-  onBankRemove1: () => void;
-  onBankRemove10: () => void;
+  onCastleAdd1: () => void;
+  onCastleAdd10: () => void;
+  onCastleRemove1: () => void;
+  onCastleRemove10: () => void;
 };
 
 export class SelectionDialog {
@@ -119,20 +119,20 @@ export class SelectionDialog {
       this.actions.onDelete();
       return;
     }
-    if (button.hasAttribute('data-bank-add-1')) {
-      this.actions.onBankAdd1();
+    if (button.hasAttribute('data-castle-add-1')) {
+      this.actions.onCastleAdd1();
       return;
     }
-    if (button.hasAttribute('data-bank-add-10')) {
-      this.actions.onBankAdd10();
+    if (button.hasAttribute('data-castle-add-10')) {
+      this.actions.onCastleAdd10();
       return;
     }
-    if (button.hasAttribute('data-bank-remove-1')) {
-      this.actions.onBankRemove1();
+    if (button.hasAttribute('data-castle-remove-1')) {
+      this.actions.onCastleRemove1();
       return;
     }
-    if (button.hasAttribute('data-bank-remove-10')) {
-      this.actions.onBankRemove10();
+    if (button.hasAttribute('data-castle-remove-10')) {
+      this.actions.onCastleRemove10();
     }
   };
 
@@ -165,14 +165,14 @@ export class SelectionDialog {
     const {
       selectedCount,
       inRangeCount,
-      isBankSelected,
+      isCastleSelected,
       selectedTowerTypeId,
       selectedStructureLabel,
-      bankTotal,
-      canBankAdd1,
-      canBankAdd10,
-      canBankRemove1,
-      canBankRemove10,
+      castleTotal,
+      canCastleAdd1,
+      canCastleAdd10,
+      canCastleRemove1,
+      canCastleRemove10,
       showRepair,
       buildingCoords,
       buildingHealth,
@@ -201,10 +201,10 @@ export class SelectionDialog {
         value: `${buildingCoords.x},${buildingCoords.z}`,
       });
     }
-    if (isBankSelected && bankTotal !== null) {
+    if (isCastleSelected && castleTotal !== null) {
       infoItems.push({
         label: 'Coin Balance',
-        value: `${Math.floor(bankTotal)}`,
+        value: `${Math.floor(castleTotal)}`,
       });
     }
     if (buildingHealth) {
@@ -230,26 +230,26 @@ export class SelectionDialog {
     }
     const infoListMarkup = buildInfoListMarkup(infoItems);
     const statsMarkup =
-      !isBankSelected && towerDetails
+      !isCastleSelected && towerDetails
         ? buildStatsMarkup(towerDetails, upgradeOptions, upgradesDisabled)
         : '';
     const noUpgradesLeftMarkup =
-      !isBankSelected && towerDetails && upgradeOptions.length === 0
+      !isCastleSelected && towerDetails && upgradeOptions.length === 0
         ? '<div class="selection-dialog__hint">All stats maxed</div>'
         : '';
     const statusMarkup = noUpgradesLeftMarkup
       ? `<div class="selection-dialog__group selection-dialog__group--status">${noUpgradesLeftMarkup}</div>`
       : '';
-    const bankActionsMarkup = isBankSelected
-      ? buildBankActionsMarkup(
-          canBankAdd1,
-          canBankAdd10,
-          canBankRemove1,
-          canBankRemove10
+    const castleCoinsActionsMarkup = isCastleSelected
+      ? buildCastleCoinsActionsMarkup(
+          canCastleAdd1,
+          canCastleAdd10,
+          canCastleRemove1,
+          canCastleRemove10
         )
       : '';
 
-    const deleteBtnMarkup = !isBankSelected
+    const deleteBtnMarkup = !isCastleSelected
       ? `<button class="selection-dialog__delete-btn" data-delete ${canDelete ? '' : 'disabled'} aria-label="Delete"><svg class="selection-dialog__delete-icon" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm80-160h80v-360h-80v360Zm160 0h80v-360h-80v360Z"/></svg></button>`
       : '';
 
@@ -262,8 +262,8 @@ export class SelectionDialog {
       ${statsMarkup}
       ${statusMarkup}
       ${
-        isBankSelected
-          ? bankActionsMarkup
+        isCastleSelected
+          ? castleCoinsActionsMarkup
           : showRepair
             ? buildRepairMarkup(canRepair, repairCost)
             : ''

@@ -6,7 +6,7 @@ export const createWorld = (nowMs = Date.now()): WorldState => ({
     worldVersion: 0,
     lastTickMs: nowMs,
     seed: 1,
-    energy: 100,
+    coins: 100,
     lives: 1,
   },
   players: {},
