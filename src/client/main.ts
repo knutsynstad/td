@@ -38,15 +38,12 @@ import {
   cornerTileYawOffset,
   snapYawToQuarterTurn,
   parseGridKey,
-  type PathTileVariant,
-  type PathTileClassification,
 } from './rendering/overlays/pathTileClassification';
 import {
   getVisibleGroundBounds,
   buildCoastlineLandKeys,
   buildWaterDistanceField,
   buildWaterSurfaceGeometry,
-  type WaterDistanceField,
 } from './rendering/terrain';
 import {
   solveBallisticIntercept,
@@ -57,7 +54,11 @@ import {
   getRepairCost,
   getRepairStatus,
 } from './domains/gameplay/economy';
-import type { GroundBounds, DebugViewState, PlayerArrowProjectile } from './gameContext';
+import type {
+  GroundBounds,
+  DebugViewState,
+  PlayerArrowProjectile,
+} from './gameContext';
 import {
   getTowerType,
   getTowerUpgradeDeltaText,
@@ -149,7 +150,6 @@ import {
   PLAYER_HEIGHT,
   PLAYER_SPEED,
   REPAIR_CRITICAL_HP_RATIO,
-  REPAIR_DISCOUNT_RATE,
   REPAIR_WARNING_HP_RATIO,
   SELECTION_RADIUS,
   SHOOT_COOLDOWN,
@@ -215,10 +215,7 @@ import {
   createAuthoritativeSync,
   type AuthoritativeSync,
 } from './integrations/authoritativeSync';
-import {
-  createHudUpdaters,
-  type CoinTrail,
-} from './ui/hudUpdaters';
+import { createHudUpdaters, type CoinTrail } from './ui/hudUpdaters';
 import { createDisposeScene } from './rendering/disposeScene';
 import {
   fetchCastleCoinsBalance,
@@ -510,14 +507,6 @@ dir.shadow.camera.updateProjectionMatrix();
 scene.add(dir);
 scene.add(dir.target);
 
-
-
-
-
-
-
-
-
 const worldGrid = new WorldGrid(scene, GRID_SIZE, WORLD_BOUNDS);
 const worldBorder = new WorldBorder(scene, WORLD_BOUNDS);
 const spawnContainerOverlay = new SpawnContainerOverlay(scene);
@@ -746,8 +735,16 @@ ground.receiveShadow = true;
 scene.add(ground);
 const waterOuterEdge = WORLD_BOUNDS + WATER_RING_OUTER_PADDING;
 
-const initialWaterLandKeys = buildCoastlineLandKeys(WORLD_BOUNDS, GRID_SIZE, stagingIslandsOverlay.getLandTileKeys());
-let waterDistanceField = buildWaterDistanceField(initialWaterLandKeys, waterOuterEdge, GRID_SIZE);
+const initialWaterLandKeys = buildCoastlineLandKeys(
+  WORLD_BOUNDS,
+  GRID_SIZE,
+  stagingIslandsOverlay.getLandTileKeys()
+);
+let waterDistanceField = buildWaterDistanceField(
+  initialWaterLandKeys,
+  waterOuterEdge,
+  GRID_SIZE
+);
 const waterMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
@@ -817,7 +814,11 @@ const waterMaterial = new THREE.ShaderMaterial({
   `,
 });
 const waterMesh = new THREE.Mesh(
-  buildWaterSurfaceGeometry(initialWaterLandKeys, waterDistanceField, GRID_SIZE),
+  buildWaterSurfaceGeometry(
+    initialWaterLandKeys,
+    waterDistanceField,
+    GRID_SIZE
+  ),
   waterMaterial
 );
 waterMesh.position.set(0, WATER_LEVEL - 0.01, 0);
@@ -827,7 +828,11 @@ scene.add(waterMesh);
 const updateWaterFromBounds = (_bounds: GroundBounds) => {};
 
 const rebuildWaterDistanceField = () => {
-  const nextLandKeys = buildCoastlineLandKeys(WORLD_BOUNDS, GRID_SIZE, stagingIslandsOverlay.getLandTileKeys());
+  const nextLandKeys = buildCoastlineLandKeys(
+    WORLD_BOUNDS,
+    GRID_SIZE,
+    stagingIslandsOverlay.getLandTileKeys()
+  );
   const next = buildWaterDistanceField(nextLandKeys, waterOuterEdge, GRID_SIZE);
   const nextGeometry = buildWaterSurfaceGeometry(nextLandKeys, next, GRID_SIZE);
   waterMesh.geometry.dispose();
@@ -1910,8 +1915,7 @@ const SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS = 45_000;
 const SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS = 7_500;
 let nextServerStructureResyncAtMs =
   performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
-let nextCoinsRefreshAtMs =
-  performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
+let nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
 let authoritativeSync: AuthoritativeSync;
 
 const setupAuthoritativeBridge = async () => {
@@ -2032,8 +2036,7 @@ const setupAuthoritativeBridge = async () => {
     });
     nextServerStructureResyncAtMs =
       performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
-    nextCoinsRefreshAtMs =
-      performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
+    nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
     serverStructureResyncInFlightRef.current = false;
     void syncCastleCoinsFromServer();
   } catch (error) {
@@ -2175,8 +2178,6 @@ type GrowingTree = {
   startedAtMs: number;
 };
 
-
-
 const getStructureIdFromCollider = (
   collider: DestructibleCollider
 ): string | null => {
@@ -2188,7 +2189,6 @@ const getStructureIdFromCollider = (
 
 const treeRegrowQueue: TreeRegrowCandidate[] = [];
 const growingTrees: GrowingTree[] = [];
-
 
 const queueTreeRegrow = (collider: DestructibleCollider) => {
   if (collider.type !== 'tree') return;
@@ -2246,7 +2246,12 @@ const activeDamageTexts: FloatingDamageText[] = [];
 const mobDeathVisuals = createMobDeathVisualSystem(scene);
 const clearMobDeathVisuals = mobDeathVisuals.clear;
 const spawnMobDeathVisual = (mob: MobEntity) =>
-  mobDeathVisuals.spawn(mob, mobDeathVisualTemplate, mobInstanceGroundOffsetY, mobInstanceHeadingOffset);
+  mobDeathVisuals.spawn(
+    mob,
+    mobDeathVisualTemplate,
+    mobInstanceGroundOffsetY,
+    mobInstanceHeadingOffset
+  );
 const updateMobDeathVisuals = mobDeathVisuals.update;
 
 const worldToScreen = (
@@ -2365,7 +2370,9 @@ const depositToCastle = async (requestedAmount: number) => {
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
-  hudUpdaters.triggerEventBanner(`Deposited ${Math.floor(response.deposited)} coins`);
+  hudUpdaters.triggerEventBanner(
+    `Deposited ${Math.floor(response.deposited)} coins`
+  );
   return true;
 };
 
@@ -2396,7 +2403,9 @@ const withdrawFromCastle = async (requestedAmount: number) => {
       ? Math.max(0, Math.floor(response.castleCoins))
       : gameState.castleCoins;
     hudUpdaters.updateCastleCoinPilesVisual();
-    hudUpdaters.triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
+    hudUpdaters.triggerEventBanner(
+      `Withdrew ${Math.floor(response.withdrawn)} coins`
+    );
     return true;
   }
   const response = await requestCastleCoinsWithdraw(transfer);
@@ -2415,7 +2424,9 @@ const withdrawFromCastle = async (requestedAmount: number) => {
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
-  hudUpdaters.triggerEventBanner(`Withdrew ${Math.floor(response.withdrawn)} coins`);
+  hudUpdaters.triggerEventBanner(
+    `Withdrew ${Math.floor(response.withdrawn)} coins`
+  );
   return true;
 };
 
@@ -2459,7 +2470,6 @@ const setMobLastHitDirection = (
 const markMobHitFlash = (mob: MobEntity) => {
   mob.hitFlashUntilMs = performance.now() + MOB_HIT_FLASH_MS;
 };
-
 
 const spawnFloatingDamageText = (
   mob: Entity,
@@ -2756,7 +2766,10 @@ const updateMinimapEmbellishAlpha = (delta: number) => {
   const blend = Math.min(1, delta * MINIMAP_EMBELLISH_FADE_SPEED);
   minimapEmbellishAlphaRef.current +=
     (minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) * blend;
-  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) <= 0.002) {
+  if (
+    Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) <=
+    0.002
+  ) {
     minimapEmbellishAlphaRef.current = minimapEmbellishTargetAlpha;
   }
   minimapWrapEl.style.setProperty(
@@ -2822,7 +2835,9 @@ const selectionDialog = new SelectionDialog(
         if (authoritativeBridgeRef.current) {
           const structureId = getStructureIdFromCollider(collider);
           if (structureId) {
-            void authoritativeBridgeRef.current.sendRemoveStructure(structureId);
+            void authoritativeBridgeRef.current.sendRemoveStructure(
+              structureId
+            );
           }
         }
         queueTreeRegrow(collider);
@@ -3089,7 +3104,8 @@ const updateSelectionDialog = () => {
       Math.floor(COINS_CAP - gameState.coins)
     )
   );
-  const canDeposit = isCastleSelected && inRange.length > 0 && maxDepositable > 0;
+  const canDeposit =
+    isCastleSelected && inRange.length > 0 && maxDepositable > 0;
   const canWithdraw =
     isCastleSelected && inRange.length > 0 && maxWithdrawable > 0;
   const isNatureSelected = selectedType === 'tree' || selectedType === 'rock';
@@ -3341,19 +3357,14 @@ const placeBuilding = (center: THREE.Vector3) => {
     });
     return true;
   }
-  const result = placeBuildingAt(
-    center,
-    gameState.buildMode,
-    gameState.coins,
-    {
-      staticColliders,
-      structureStore,
-      scene,
-      createTowerAt: (snapped) =>
-        createTowerAt(snapped, 'base', player.username ?? 'Player'),
-      applyObstacleDelta,
-    }
-  );
+  const result = placeBuildingAt(center, gameState.buildMode, gameState.coins, {
+    staticColliders,
+    structureStore,
+    scene,
+    createTowerAt: (snapped) =>
+      createTowerAt(snapped, 'base', player.username ?? 'Player'),
+    applyObstacleDelta,
+  });
   gameState.coins = Math.max(0, gameState.coins - result.coinsSpent);
   if (result.placed && wallModelTemplate && gameState.buildMode === 'wall') {
     for (const wallMesh of structureStore.wallMeshes) {
@@ -3817,7 +3828,10 @@ const tick = (now: number, delta: number) => {
   waterMaterial.uniforms.uTime.value = waterTime;
 
   updateMinimapEmbellishAlpha(delta);
-  if (Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) > 0.001) {
+  if (
+    Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) >
+    0.001
+  ) {
     hudUpdaters.syncMinimapCanvasSize();
   }
   if (!serverAuthoritative) {
@@ -3828,10 +3842,7 @@ const tick = (now: number, delta: number) => {
     if (gameState.buildMode === 'wall' && gameState.coins < COINS_COST_WALL) {
       setBuildMode('off');
     }
-    if (
-      gameState.buildMode === 'tower' &&
-      gameState.coins < COINS_COST_TOWER
-    ) {
+    if (gameState.buildMode === 'tower' && gameState.coins < COINS_COST_TOWER) {
       setBuildMode('off');
     }
   }
@@ -3875,10 +3886,7 @@ const tick = (now: number, delta: number) => {
       z: player.mesh.position.z,
     });
   }
-  if (
-    authoritativeBridgeRef.current &&
-    now >= nextCoinsRefreshAtMs
-  ) {
+  if (authoritativeBridgeRef.current && now >= nextCoinsRefreshAtMs) {
     nextCoinsRefreshAtMs = now + SERVER_COINS_REFRESH_INTERVAL_MS;
     void authoritativeBridgeRef.current.refreshCoinBalance();
   }

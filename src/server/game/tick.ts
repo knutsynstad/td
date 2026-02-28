@@ -63,7 +63,10 @@ export const runTickLoop = async <TState>(
     };
   }
 
-  console.info('Game loop started', { ownerToken, channel: config.channelName });
+  console.info('Game loop started', {
+    ownerToken,
+    channel: config.channelName,
+  });
 
   const state = await handlers.onInit();
 

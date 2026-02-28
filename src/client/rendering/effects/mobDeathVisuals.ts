@@ -141,8 +141,10 @@ export const createMobDeathVisualSystem = (scene: THREE.Scene) => {
       const knockbackT = clamp(visual.age / KNOCKBACK_DURATION, 0, 1);
       const knockbackEase =
         1 - (1 - knockbackT) * (1 - knockbackT) * (1 - knockbackT);
-      visual.root.position.x = visual.startX + visual.knockbackX * knockbackEase;
-      visual.root.position.z = visual.startZ + visual.knockbackZ * knockbackEase;
+      visual.root.position.x =
+        visual.startX + visual.knockbackX * knockbackEase;
+      visual.root.position.z =
+        visual.startZ + visual.knockbackZ * knockbackEase;
       visual.root.rotation.set(0, visual.heading, 0);
       visual.root.rotateX(visual.fallSign * MAX_FALL_ANGLE * easedFall);
       const hitFlashStrength =

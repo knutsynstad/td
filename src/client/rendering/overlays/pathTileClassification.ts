@@ -1,4 +1,8 @@
-export type PathTileVariant = 'center' | 'edge' | 'inner-corner' | 'outer-corner';
+export type PathTileVariant =
+  | 'center'
+  | 'edge'
+  | 'inner-corner'
+  | 'outer-corner';
 
 export type PathTileClassification = {
   variant: PathTileVariant;

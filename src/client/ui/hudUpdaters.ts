@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { clamp } from '../domains/world/collision';
-import type { MobEntity, PlayerEntity, StaticCollider } from '../domains/gameplay/types/entities';
+import type {
+  MobEntity,
+  PlayerEntity,
+  StaticCollider,
+} from '../domains/gameplay/types/entities';
 import type { StructureStore } from '../domains/gameplay/structureStore';
 import type { GameState } from '../domains/gameplay/gameState';
 import {
@@ -75,9 +79,7 @@ export type HudUpdaters = {
   triggerEventBanner: (text: string, duration?: number) => void;
 };
 
-export const createHudUpdaters = (
-  ctx: HudUpdatersContext
-): HudUpdaters => {
+export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
   const updateCoinHudView = (delta: number) => {
     const rect = ctx.coinHudCanvasEl.getBoundingClientRect();
     const width = Math.max(1, Math.round(rect.width));
@@ -125,7 +127,11 @@ export const createHudUpdaters = (
     const heightScale = getCoinPileHeightScale(safeBank);
     for (let i = 0; i < corners.length; i += 1) {
       const corner = corners[i]!;
-      for (let clusterIdx = 0; clusterIdx < clustersPerCorner; clusterIdx += 1) {
+      for (
+        let clusterIdx = 0;
+        clusterIdx < clustersPerCorner;
+        clusterIdx += 1
+      ) {
         const pile = buildCoinPileVisual(
           perClusterCoins,
           0.78,
@@ -153,11 +159,7 @@ export const createHudUpdaters = (
 
   const syncCoinTrailViewport = () => {
     ctx.coinTrailRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    ctx.coinTrailRenderer.setSize(
-      window.innerWidth,
-      window.innerHeight,
-      false
-    );
+    ctx.coinTrailRenderer.setSize(window.innerWidth, window.innerHeight, false);
     ctx.coinTrailCamera.left = 0;
     ctx.coinTrailCamera.right = window.innerWidth;
     ctx.coinTrailCamera.top = window.innerHeight;
@@ -168,7 +170,8 @@ export const createHudUpdaters = (
   const syncMinimapCanvasSize = () => {
     const rect = ctx.minimapCanvasEl.getBoundingClientRect();
     const pixelRatioCap =
-      ctx.isMinimapExpandedRef.current || ctx.minimapEmbellishAlphaRef.current > 0.02
+      ctx.isMinimapExpandedRef.current ||
+      ctx.minimapEmbellishAlphaRef.current > 0.02
         ? 3.5
         : 2;
     const pixelRatio = Math.max(
@@ -177,7 +180,10 @@ export const createHudUpdaters = (
     );
     const width = Math.max(1, Math.round(rect.width * pixelRatio));
     const height = Math.max(1, Math.round(rect.height * pixelRatio));
-    if (ctx.minimapCanvasEl.width !== width || ctx.minimapCanvasEl.height !== height) {
+    if (
+      ctx.minimapCanvasEl.width !== width ||
+      ctx.minimapCanvasEl.height !== height
+    ) {
       ctx.minimapCanvasEl.width = width;
       ctx.minimapCanvasEl.height = height;
     }
@@ -215,7 +221,10 @@ export const createHudUpdaters = (
 
     const center = worldToMap(0, 0);
     const castleIconSize = Math.max(10, 10 * markerScale);
-    if (ctx.minimapCastleIcon.complete && ctx.minimapCastleIcon.naturalWidth > 0) {
+    if (
+      ctx.minimapCastleIcon.complete &&
+      ctx.minimapCastleIcon.naturalWidth > 0
+    ) {
       ctx.minimapCtx.drawImage(
         ctx.minimapCastleIcon,
         center.x - castleIconSize * 0.5,
@@ -262,7 +271,10 @@ export const createHudUpdaters = (
       ctx.minimapCtx.fill();
     }
 
-    for (const [collider, state] of ctx.structureStore.structureStates.entries()) {
+    for (const [
+      collider,
+      state,
+    ] of ctx.structureStore.structureStates.entries()) {
       if (collider.type !== 'wall' && collider.type !== 'tower') continue;
       if (state.playerBuilt !== true) continue;
       const hpRatio = state.maxHp <= 0 ? 1 : state.hp / state.maxHp;

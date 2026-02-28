@@ -83,7 +83,8 @@ export const createVisualAppliers = (
   };
 
   const applyRockVisualToMesh = (mesh: THREE.Mesh, forceRefresh = false) => {
-    const modelIndex = (mesh.userData.rockModelIndex as number | undefined) ?? 0;
+    const modelIndex =
+      (mesh.userData.rockModelIndex as number | undefined) ?? 0;
     const rockEntry = ctx.getRockTemplateForPlacement(modelIndex);
     if (!rockEntry) return;
     const template = rockEntry.template;
@@ -156,7 +157,9 @@ export const createVisualAppliers = (
 
   const setStructureVisualScale = (mesh: THREE.Mesh, scale: number) => {
     mesh.scale.setScalar(scale);
-    const linkedVisual = mesh.userData.linkedVisual as THREE.Object3D | undefined;
+    const linkedVisual = mesh.userData.linkedVisual as
+      | THREE.Object3D
+      | undefined;
     if (linkedVisual) {
       linkedVisual.scale.setScalar(scale);
     }

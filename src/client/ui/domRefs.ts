@@ -39,15 +39,23 @@ export const createDomRefs = (root: HTMLElement): DomRefs => {
   return {
     waveEl: root.querySelector<HTMLSpanElement>('#wave')!,
     mobsRowEl,
-    mobsPrimaryEl: mobsRowEl.querySelector<HTMLDivElement>('.hud-status__primary')!,
-    mobsSecondaryEl: mobsRowEl.querySelector<HTMLDivElement>('.hud-status__secondary')!,
+    mobsPrimaryEl: mobsRowEl.querySelector<HTMLDivElement>(
+      '.hud-status__primary'
+    )!,
+    mobsSecondaryEl: mobsRowEl.querySelector<HTMLDivElement>(
+      '.hud-status__secondary'
+    )!,
     wallCountEl: root.querySelector<HTMLSpanElement>('#wallCount')!,
     towerCountEl: root.querySelector<HTMLSpanElement>('#towerCount')!,
     coinsCountEl: root.querySelector<HTMLSpanElement>('#coinsCount')!,
     finalCountdownEl: root.querySelector<HTMLDivElement>('#finalCountdown')!,
     nextWaveRowEl,
-    nextWavePrimaryEl: nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__primary')!,
-    nextWaveSecondaryEl: nextWaveRowEl.querySelector<HTMLDivElement>('.hud-status__secondary')!,
+    nextWavePrimaryEl: nextWaveRowEl.querySelector<HTMLDivElement>(
+      '.hud-status__primary'
+    )!,
+    nextWaveSecondaryEl: nextWaveRowEl.querySelector<HTMLDivElement>(
+      '.hud-status__secondary'
+    )!,
     eventBannerEl: root.querySelector<HTMLDivElement>('#eventBanner')!,
     hudEl: root.querySelector<HTMLElement>('#hud')!,
     hudActionsEl: root.querySelector<HTMLDivElement>('.hud-actions')!,
@@ -57,15 +65,21 @@ export const createDomRefs = (root: HTMLElement): DomRefs => {
     buildTowerBtn: root.querySelector<HTMLButtonElement>('#buildTower')!,
     shootButton: root.querySelector<HTMLButtonElement>('#shootButton')!,
     minimapWrapEl: root.querySelector<HTMLDivElement>('#hudMinimapWrap')!,
-    minimapToggleBtn: root.querySelector<HTMLButtonElement>('#hudMinimapToggle')!,
+    minimapToggleBtn:
+      root.querySelector<HTMLButtonElement>('#hudMinimapToggle')!,
     coinHudCanvasEl: root.querySelector<HTMLCanvasElement>('#coinHudCanvas')!,
     minimapCanvasEl,
     buildModeTitleEl: root.querySelector<HTMLSpanElement>('#buildModeTitle')!,
     buildModeHintEl: root.querySelector<HTMLSpanElement>('#buildModeHint')!,
-    buildModeCancelBtn: root.querySelector<HTMLButtonElement>('#buildModeCancel')!,
+    buildModeCancelBtn:
+      root.querySelector<HTMLButtonElement>('#buildModeCancel')!,
     loadingScreenEl: root.querySelector<HTMLDivElement>('#loadingScreen')!,
-    loadingProgressFillEl: root.querySelector<HTMLDivElement>('#loadingProgressFill')!,
-    loadingProgressLabelEl: root.querySelector<HTMLDivElement>('#loadingProgressLabel')!,
+    loadingProgressFillEl: root.querySelector<HTMLDivElement>(
+      '#loadingProgressFill'
+    )!,
+    loadingProgressLabelEl: root.querySelector<HTMLDivElement>(
+      '#loadingProgressLabel'
+    )!,
     minimapCtx: minimapCanvasEl.getContext('2d'),
   };
 };

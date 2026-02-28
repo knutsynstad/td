@@ -18,15 +18,12 @@ export function distance2d(
   ax: number,
   az: number,
   bx: number,
-  bz: number,
+  bz: number
 ): number {
   return Math.hypot(bx - ax, bz - az);
 }
 
-export function normalize2d(
-  x: number,
-  z: number,
-): { x: number; z: number } {
+export function normalize2d(x: number, z: number): { x: number; z: number } {
   const len = Math.hypot(x, z);
   if (len <= 0.0001) return { x: 0, z: 0 };
   return { x: x / len, z: z / len };

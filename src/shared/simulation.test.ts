@@ -41,10 +41,10 @@ describe('runSimulation', () => {
     const nowMs = Date.now();
     const result = runSimulation(world(nowMs), nowMs, [], 1);
     expect(result.world.wave.nextWaveAtMs).toBe(
-      nowMs + AUTO_WAVE_INITIAL_DELAY_MS,
+      nowMs + AUTO_WAVE_INITIAL_DELAY_MS
     );
     expect(result.deltas.some((delta) => delta.type === 'waveDelta')).toBe(
-      true,
+      true
     );
   });
 
@@ -121,12 +121,12 @@ describe('runSimulation', () => {
     expect(result.world.structures.get('wall-b')?.type).toBe('wall');
 
     const structureDelta = result.deltas.find(
-      (delta) => delta.type === 'structureDelta',
+      (delta) => delta.type === 'structureDelta'
     );
     expect(structureDelta?.type).toBe('structureDelta');
     if (structureDelta?.type === 'structureDelta') {
       expect(structureDelta.upserts.map((entry) => entry.structureId)).toEqual(
-        expect.arrayContaining(['wall-a', 'wall-b']),
+        expect.arrayContaining(['wall-a', 'wall-b'])
       );
       expect(structureDelta.upserts).toHaveLength(2);
       expect(structureDelta.requiresPathRefresh).toBe(true);
@@ -168,7 +168,7 @@ describe('runSimulation', () => {
 
     expect(result.world.mobs.get('99999')).toBeUndefined();
     const entityDelta = result.deltas.find(
-      (delta) => delta.type === 'entityDelta',
+      (delta) => delta.type === 'entityDelta'
     );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
@@ -266,7 +266,7 @@ describe('runSimulation', () => {
     expect(result.world.structures.get('map-nonblocker')).toBeDefined();
     expect(result.world.wave.spawners[0]?.routeState).toBe('reachable');
     const structureDelta = result.deltas.find(
-      (delta) => delta.type === 'structureDelta',
+      (delta) => delta.type === 'structureDelta'
     );
     expect(structureDelta?.type).toBe('structureDelta');
     if (structureDelta?.type === 'structureDelta') {
@@ -318,7 +318,7 @@ describe('runSimulation', () => {
     expect(result.world.structures.get('map-blocker')).toBeUndefined();
     expect(result.world.wave.spawners[0]?.routeState).toBe('reachable');
     const structureDelta = result.deltas.find(
-      (delta) => delta.type === 'structureDelta',
+      (delta) => delta.type === 'structureDelta'
     );
     expect(structureDelta?.type).toBe('structureDelta');
     if (structureDelta?.type === 'structureDelta') {
@@ -368,7 +368,7 @@ describe('runSimulation', () => {
     }
     const result = runSimulation(gameWorld, nowMs + 100, [], 1);
     const entityDelta = result.deltas.find(
-      (delta) => delta.type === 'entityDelta',
+      (delta) => delta.type === 'entityDelta'
     );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
@@ -417,7 +417,7 @@ describe('runSimulation', () => {
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
     const entityDelta = result.deltas.find(
-      (delta) => delta.type === 'entityDelta',
+      (delta) => delta.type === 'entityDelta'
     );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
@@ -432,7 +432,7 @@ describe('runSimulation', () => {
     const gameWorld = world(nowMs);
     const intervalTicks = Math.max(
       1,
-      Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS),
+      Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
     );
     gameWorld.meta.tickSeq = intervalTicks - 1;
     gameWorld.meta.lastStructureChangeTickSeq = 0;
@@ -467,7 +467,7 @@ describe('runSimulation', () => {
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
     const entityDeltas = result.deltas.filter(
-      (delta) => delta.type === 'entityDelta',
+      (delta) => delta.type === 'entityDelta'
     );
     expect(entityDeltas.length).toBe(2);
     for (let i = 0; i < entityDeltas.length; i += 1) {
@@ -490,7 +490,7 @@ describe('runSimulation', () => {
       }
     }
     const allMobIds = new Set(
-      entityDeltas.flatMap((delta) => delta.mobPool?.ids ?? []),
+      entityDeltas.flatMap((delta) => delta.mobPool?.ids ?? [])
     );
     expect(allMobIds.size).toBe(FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25);
     expect(entityDeltas[0]?.despawnedMobIds).toHaveLength(0);
@@ -546,7 +546,7 @@ describe('runSimulation', () => {
     ];
     const first = runSimulation(gameWorld, nowMs + SIM_TICK_MS, commandNow, 1);
     const firstEntity = first.deltas.find(
-      (delta) => delta.type === 'entityDelta',
+      (delta) => delta.type === 'entityDelta'
     );
     expect(firstEntity?.type).toBe('entityDelta');
     if (firstEntity?.type === 'entityDelta') {

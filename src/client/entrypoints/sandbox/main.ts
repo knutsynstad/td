@@ -1117,9 +1117,7 @@ Promise.all([
       const selectionTargetScratch = new THREE.Vector3();
       installPointerHandler((event) => {
         if (
-          (event.target as HTMLElement).closest(
-            '.selection-dialog, .hud-coins'
-          )
+          (event.target as HTMLElement).closest('.selection-dialog, .hud-coins')
         )
           return;
         updatePointer(event);

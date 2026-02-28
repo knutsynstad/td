@@ -186,16 +186,8 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     const boundsPadding = context.constants.mobStagingBoundsPadding;
     const minBound = -context.constants.worldBounds - boundsPadding;
     const maxBound = context.constants.worldBounds + boundsPadding;
-    entity.mesh.position.x = clamp(
-      entity.mesh.position.x,
-      minBound,
-      maxBound
-    );
-    entity.mesh.position.z = clamp(
-      entity.mesh.position.z,
-      minBound,
-      maxBound
-    );
+    entity.mesh.position.x = clamp(entity.mesh.position.x, minBound, maxBound);
+    entity.mesh.position.z = clamp(entity.mesh.position.z, minBound, maxBound);
     entity.mesh.position.y = entity.baseY;
   };
 
@@ -218,8 +210,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
       let waypointIdx = entity.waypointIndex!;
       if (waypointIdx < waypoints.length) {
         const targetWaypoint = waypoints[waypointIdx]!;
-        const distToWaypoint =
-          entity.mesh.position.distanceTo(targetWaypoint);
+        const distToWaypoint = entity.mesh.position.distanceTo(targetWaypoint);
         const nearbyForProgress = Math.max(
           0,
           context.spatialGrid.getNearbyInto(
@@ -269,8 +260,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
           }
         }
         const isFinalApproachWaypoint = waypointIdx >= waypoints.length - 3;
-        const applyStrictTurnGate =
-          isTurnWaypoint && !isFinalApproachWaypoint;
+        const applyStrictTurnGate = isTurnWaypoint && !isFinalApproachWaypoint;
         const requiredProgress = applyStrictTurnGate
           ? 0.97
           : isFinalApproachWaypoint

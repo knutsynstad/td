@@ -12,7 +12,9 @@ export const getCoinPileCylinderCount = (castleCoins: number): number => {
   return Math.min(COIN_PILE_CYLINDER_MAX, COIN_PILE_CYLINDER_MIN + growthLevel);
 };
 
-export const getCoinPileClusterCountPerCorner = (castleCoins: number): number => {
+export const getCoinPileClusterCountPerCorner = (
+  castleCoins: number
+): number => {
   const safeBank = Math.max(0, castleCoins);
   const growthLevel = Math.max(0, Math.floor(Math.log2(safeBank + 1)));
   return Math.min(

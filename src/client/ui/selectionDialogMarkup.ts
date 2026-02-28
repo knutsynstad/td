@@ -6,7 +6,9 @@ const formatStatNumber = (value: number, maxDecimals = 2): string => {
   return String(rounded);
 };
 
-export const buildInfoListMarkup = (items: Array<{ label: string; value: string }>) =>
+export const buildInfoListMarkup = (
+  items: Array<{ label: string; value: string }>
+) =>
   items.length > 0
     ? `<ul class="selection-dialog__info-list">
         ${items
@@ -40,8 +42,7 @@ export const buildStatsMarkup = (
     value: string
   ) => {
     const upgrade = upgradesById.get(upgradeId);
-    const disabled =
-      !upgrade || upgradesDisabled || !upgrade.canAfford;
+    const disabled = !upgrade || upgradesDisabled || !upgrade.canAfford;
     const upgradeContent = upgrade
       ? `<span class="selection-dialog__stat-upgrade-line">Upgrade</span><span class="selection-dialog__stat-upgrade-cost">${buildCoinCostMarkup(upgrade.cost, 'Coin cost')}</span>`
       : '<span class="selection-dialog__stat-upgrade-line">Max</span>';

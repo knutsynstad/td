@@ -1,7 +1,4 @@
-import type {
-  DeltaBatch,
-  GameDelta,
-} from '../../shared/game-protocol';
+import type { DeltaBatch, GameDelta } from '../../shared/game-protocol';
 import type { GameWorld, StructureState } from '../../shared/game-state';
 import {
   LEADER_BROADCAST_WINDOW_MS,
@@ -90,8 +87,7 @@ const onGameTick = async (
   const deltas: GameDelta[] = [];
 
   const isMaintenanceTick =
-    ticksProcessed > 0 &&
-    ticksProcessed % PERSIST_INTERVAL_TICKS === 0;
+    ticksProcessed > 0 && ticksProcessed % PERSIST_INTERVAL_TICKS === 0;
 
   if (isMaintenanceTick) {
     await flushGameWorld(world);

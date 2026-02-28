@@ -31,7 +31,9 @@ export type SpawnerHelpers = {
   getSpawnContainerCorners: (spawnerPos: THREE.Vector3) => THREE.Vector3[];
 };
 
-export const createSpawnerHelpers = (config: SpawnerHelpersConfig): SpawnerHelpers => {
+export const createSpawnerHelpers = (
+  config: SpawnerHelpersConfig
+): SpawnerHelpers => {
   const {
     gridSize,
     worldBounds,
@@ -136,7 +138,10 @@ export const createSpawnerHelpers = (config: SpawnerHelpersConfig): SpawnerHelpe
         .clone()
         .addScaledVector(tangent, half)
         .addScaledVector(normal, -half),
-      center.clone().addScaledVector(tangent, half).addScaledVector(normal, half),
+      center
+        .clone()
+        .addScaledVector(tangent, half)
+        .addScaledVector(normal, half),
       center
         .clone()
         .addScaledVector(tangent, -half)

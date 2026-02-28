@@ -20,7 +20,9 @@ import { parseIntent, parsePlayerState } from './players';
 export const parseStructureType = (value: unknown): StructureState['type'] =>
   value === 'tower' || value === 'tree' || value === 'rock' ? value : 'wall';
 
-const parseStructureMetadata = (raw: unknown): StructureMetadata | undefined => {
+const parseStructureMetadata = (
+  raw: unknown
+): StructureMetadata | undefined => {
   if (!isRecord(raw)) return undefined;
   const out: StructureMetadata = {};
   const treeFootprint = Number(raw.treeFootprint ?? 0);
@@ -70,9 +72,7 @@ export const parseStructure = (value: unknown): StructureState => {
     structureId: String(value.structureId ?? ''),
     ownerId: String(value.ownerId ?? ''),
     type:
-      value.type === 'tower' ||
-      value.type === 'tree' ||
-      value.type === 'rock'
+      value.type === 'tower' || value.type === 'tree' || value.type === 'rock'
         ? value.type
         : 'wall',
     center: parseVec2(value.center),

@@ -1,9 +1,6 @@
 import type { StructureState } from '../game-state';
 import { aabbFromCenter, intersectsAabb, type Aabb2d } from '../utils';
-import {
-  generateSeededWorldFeatures,
-  type RockPlacement,
-} from './seededWorld';
+import { generateSeededWorldFeatures, type RockPlacement } from './seededWorld';
 import { hashSeed } from './rng';
 
 const WORLD_BOUNDS = 64;
@@ -42,7 +39,7 @@ function intersectsSpawnerClearance(
   x: number,
   z: number,
   halfX: number,
-  halfZ: number,
+  halfZ: number
 ): boolean {
   const obstacleAabb = aabbFromCenter(x, z, halfX, halfZ);
   for (const clearance of getSpawnerClearanceZones()) {
@@ -55,11 +52,11 @@ function intersectsCastleTreeClearance(
   x: number,
   z: number,
   halfX: number,
-  halfZ: number,
+  halfZ: number
 ): boolean {
   return intersectsAabb(
     aabbFromCenter(x, z, halfX, halfZ),
-    CASTLE_TREE_CLEARANCE_ZONE,
+    CASTLE_TREE_CLEARANCE_ZONE
   );
 }
 
@@ -72,13 +69,13 @@ function isDisallowedStaticStructure(structure: StructureState): boolean {
         structure.center.x,
         structure.center.z,
         half,
-        half,
+        half
       ) ||
       intersectsCastleTreeClearance(
         structure.center.x,
         structure.center.z,
         half,
-        half,
+        half
       )
     );
   }
@@ -89,14 +86,14 @@ function isDisallowedStaticStructure(structure: StructureState): boolean {
       structure.center.x,
       structure.center.z,
       halfX,
-      halfZ,
+      halfZ
     );
   }
   return false;
 }
 
 export function sanitizeStaticMapStructures(
-  structures: Map<string, StructureState>,
+  structures: Map<string, StructureState>
 ): string[] {
   const removed: string[] = [];
   for (const [structureId, structure] of structures) {
@@ -137,7 +134,7 @@ function createMapTowerStructures(createdAtMs: number): StructureState[] {
 
 function createMapTreeStructure(
   tree: { x: number; z: number; footprint: 1 | 2 | 3 | 4 },
-  createdAtMs: number,
+  createdAtMs: number
 ): StructureState {
   return {
     structureId: toStructureId('map-tree', tree.x, tree.z),
@@ -155,7 +152,7 @@ function createMapTreeStructure(
 
 function createMapRockStructure(
   rock: RockPlacement,
-  createdAtMs: number,
+  createdAtMs: number
 ): StructureState {
   return {
     structureId: toStructureId('map-rock', rock.x, rock.z),
@@ -180,7 +177,7 @@ function createMapRockStructure(
 }
 
 export function buildStaticMapStructures(
-  createdAtMs: number,
+  createdAtMs: number
 ): Record<string, StructureState> {
   const structures: Record<string, StructureState> = {};
   for (const tower of createMapTowerStructures(createdAtMs)) {
@@ -209,7 +206,7 @@ export function buildStaticMapStructures(
 }
 
 export function hasStaticMapStructures(
-  structures: ReadonlyMap<string, StructureState>,
+  structures: ReadonlyMap<string, StructureState>
 ): boolean {
   for (const structure of structures.values()) {
     if (structure.ownerId === 'Map') return true;

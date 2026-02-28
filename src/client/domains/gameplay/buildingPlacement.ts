@@ -33,8 +33,7 @@ type PlaceContext = {
   ) => void;
 };
 
-export const snapToGrid = (value: number) =>
-  snapToGridUtil(value, GRID_SIZE);
+export const snapToGrid = (value: number) => snapToGridUtil(value, GRID_SIZE);
 
 const snapForFootprint = (value: number, sizeAxis: number) => {
   const tileCount = Math.max(1, Math.round(sizeAxis / GRID_SIZE));

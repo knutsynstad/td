@@ -52,16 +52,14 @@ export class WorldGrid {
     }
 
     const minX =
-      Math.ceil((clampedMinX - this.halfGrid) / this.gridSize) *
-        this.gridSize +
+      Math.ceil((clampedMinX - this.halfGrid) / this.gridSize) * this.gridSize +
       this.halfGrid;
     const maxX =
       Math.floor((clampedMaxX - this.halfGrid) / this.gridSize) *
         this.gridSize +
       this.halfGrid;
     const minZ =
-      Math.ceil((clampedMinZ - this.halfGrid) / this.gridSize) *
-        this.gridSize +
+      Math.ceil((clampedMinZ - this.halfGrid) / this.gridSize) * this.gridSize +
       this.halfGrid;
     const maxZ =
       Math.floor((clampedMaxZ - this.halfGrid) / this.gridSize) *

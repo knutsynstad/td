@@ -21,7 +21,17 @@ describe('parseGridKey', () => {
 });
 
 describe('classifyPathTile', () => {
-  const grid = new Set(['0,0', '1,0', '2,0', '0,1', '1,1', '2,1', '0,2', '1,2', '2,2']);
+  const grid = new Set([
+    '0,0',
+    '1,0',
+    '2,0',
+    '0,1',
+    '1,1',
+    '2,1',
+    '0,2',
+    '1,2',
+    '2,2',
+  ]);
   const hasPathAt = (x: number, z: number) => grid.has(`${x},${z}`);
 
   it('classifies center tiles (all neighbors are path)', () => {

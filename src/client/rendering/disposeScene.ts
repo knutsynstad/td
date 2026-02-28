@@ -57,9 +57,7 @@ export type DisposeSceneContext = {
   renderer: THREE.WebGLRenderer;
 };
 
-export const createDisposeScene = (
-  ctx: DisposeSceneContext
-): (() => void) => {
+export const createDisposeScene = (ctx: DisposeSceneContext): (() => void) => {
   let disposed = false;
   return () => {
     if (disposed) return;

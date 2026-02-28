@@ -17,7 +17,9 @@ describe('getUpgradeCoinCost', () => {
 
 describe('getRepairCost', () => {
   it('returns 0 for fully healthy structures', () => {
-    expect(getRepairCost({ hp: 100, maxHp: 100, cumulativeBuildCost: 10 })).toBe(0);
+    expect(
+      getRepairCost({ hp: 100, maxHp: 100, cumulativeBuildCost: 10 })
+    ).toBe(0);
   });
 
   it('returns 0 when maxHp is 0', () => {
@@ -25,12 +27,22 @@ describe('getRepairCost', () => {
   });
 
   it('returns positive cost for damaged structures', () => {
-    expect(getRepairCost({ hp: 50, maxHp: 100, cumulativeBuildCost: 20 })).toBeGreaterThan(0);
+    expect(
+      getRepairCost({ hp: 50, maxHp: 100, cumulativeBuildCost: 20 })
+    ).toBeGreaterThan(0);
   });
 
   it('increases cost with more damage', () => {
-    const lightDamage = getRepairCost({ hp: 90, maxHp: 100, cumulativeBuildCost: 20 });
-    const heavyDamage = getRepairCost({ hp: 10, maxHp: 100, cumulativeBuildCost: 20 });
+    const lightDamage = getRepairCost({
+      hp: 90,
+      maxHp: 100,
+      cumulativeBuildCost: 20,
+    });
+    const heavyDamage = getRepairCost({
+      hp: 10,
+      maxHp: 100,
+      cumulativeBuildCost: 20,
+    });
     expect(heavyDamage).toBeGreaterThanOrEqual(lightDamage);
   });
 });

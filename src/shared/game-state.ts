@@ -30,12 +30,7 @@ export type PlayerState = {
   lastSeenMs: number;
 };
 
-export type StructureType =
-  | 'wall'
-  | 'tower'
-  | 'tree'
-  | 'rock'
-  | 'castleCoins';
+export type StructureType = 'wall' | 'tower' | 'tree' | 'rock' | 'castleCoins';
 
 export type StructureMetadata = {
   treeFootprint?: 1 | 2 | 3 | 4;

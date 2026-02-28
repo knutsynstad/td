@@ -13,7 +13,15 @@ describe('solveBallisticIntercept', () => {
     const targetVel = new THREE.Vector3(0, 0, 0);
     const gravity = new THREE.Vector3(0, -9.8, 0);
 
-    const result = solveBallisticIntercept(start, target, targetVel, 20, gravity, 0.1, 5);
+    const result = solveBallisticIntercept(
+      start,
+      target,
+      targetVel,
+      20,
+      gravity,
+      0.1,
+      5
+    );
 
     expect(result).not.toBeNull();
     expect(result!.hitTime).toBeGreaterThan(0);
@@ -26,7 +34,15 @@ describe('solveBallisticIntercept', () => {
     const targetVel = new THREE.Vector3(100, 0, 0);
     const gravity = new THREE.Vector3(0, -50, 0);
 
-    const result = solveBallisticIntercept(start, target, targetVel, 1, gravity, 0, 0.5);
+    const result = solveBallisticIntercept(
+      start,
+      target,
+      targetVel,
+      1,
+      gravity,
+      0,
+      0.5
+    );
 
     expect(result).toBeNull();
   });
@@ -37,7 +53,15 @@ describe('solveBallisticIntercept', () => {
     const targetVel = new THREE.Vector3(2, 0, 0);
     const gravity = new THREE.Vector3(0, -9.8, 0);
 
-    const result = solveBallisticIntercept(start, target, targetVel, 20, gravity, 0.05, 5);
+    const result = solveBallisticIntercept(
+      start,
+      target,
+      targetVel,
+      20,
+      gravity,
+      0.05,
+      5
+    );
 
     expect(result).not.toBeNull();
     expect(result!.interceptPoint.x).toBeGreaterThan(target.x);
@@ -50,7 +74,14 @@ describe('computeFallbackBallisticVelocity', () => {
     const target = new THREE.Vector3(5, 1, 0);
     const gravity = new THREE.Vector3(0, -9.8, 0);
 
-    const vel = computeFallbackBallisticVelocity(start, target, gravity, 0.05, 20, 5);
+    const vel = computeFallbackBallisticVelocity(
+      start,
+      target,
+      gravity,
+      0.05,
+      20,
+      5
+    );
 
     expect(vel.length()).toBeGreaterThan(0);
     expect(vel.x).toBeGreaterThan(0);

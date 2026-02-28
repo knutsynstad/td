@@ -232,12 +232,24 @@ export const buildWaterSurfaceGeometry = (
       const z0 = z - gridSize * 0.5;
       const z1 = z + gridSize * 0.5;
       positions.push(
-        x0, 0, z0,
-        x1, 0, z1,
-        x1, 0, z0,
-        x0, 0, z0,
-        x0, 0, z1,
-        x1, 0, z1
+        x0,
+        0,
+        z0,
+        x1,
+        0,
+        z1,
+        x1,
+        0,
+        z0,
+        x0,
+        0,
+        z0,
+        x0,
+        0,
+        z1,
+        x1,
+        0,
+        z1
       );
       normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
     }

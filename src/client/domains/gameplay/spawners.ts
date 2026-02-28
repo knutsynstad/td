@@ -14,11 +14,7 @@ export const createWaveSpawners = (opts: SpawnerOptions): WaveSpawner[] => {
   const random = opts.random ?? Math.random;
   const spawnerCount = opts.doorPositions.length;
   if (spawnerCount === 0) return [];
-  const split = weightedSplit(
-    opts.totalMobCount,
-    spawnerCount,
-    random,
-  );
+  const split = weightedSplit(opts.totalMobCount, spawnerCount, random);
 
   return split.map((count, index) => {
     const position = opts.doorPositions[index]!.clone();

@@ -15,11 +15,7 @@ import { isRecord, safeParseJson } from '../../shared/utils';
 import { TrackedMap } from '../../shared/utils/trackedMap';
 import { getGameRedisKeys } from './keys';
 import { parseIntent, parsePlayerState } from './players';
-import {
-  defaultWave,
-  parseMob,
-  parseStructure,
-} from './world';
+import { defaultWave, parseMob, parseStructure } from './world';
 
 const parseTrackedMapFromHash = <T>(
   raw: Record<string, string> | undefined,
@@ -162,7 +158,10 @@ export const flushGameWorld = async (world: GameWorld): Promise<void> => {
   };
 
   flushCollection(keys.mobs, world.mobs as TrackedMap<MobState>);
-  flushCollection(keys.structures, world.structures as TrackedMap<StructureState>);
+  flushCollection(
+    keys.structures,
+    world.structures as TrackedMap<StructureState>
+  );
   flushCollection(keys.players, world.players as TrackedMap<PlayerState>);
   flushCollection(keys.intents, world.intents as TrackedMap<PlayerIntent>);
 
@@ -209,7 +208,10 @@ export const mergePlayersFromRedis = async (
       if (!existing) {
         world.players.set(playerId, redisPlayer);
       } else {
-        existing.lastSeenMs = Math.max(existing.lastSeenMs, redisPlayer.lastSeenMs);
+        existing.lastSeenMs = Math.max(
+          existing.lastSeenMs,
+          redisPlayer.lastSeenMs
+        );
       }
     }
   }

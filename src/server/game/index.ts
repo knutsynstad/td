@@ -1,11 +1,7 @@
 export { getGameRedisKeys, getGameChannelName } from './keys';
 export type { GameRedisKeys } from './keys';
 
-export {
-  loadWorldState,
-  persistWorldState,
-  resetGameState,
-} from './world';
+export { loadWorldState, persistWorldState, resetGameState } from './world';
 
 export {
   touchPlayerPresence,
@@ -15,17 +11,9 @@ export {
   createDefaultPlayer,
 } from './players';
 
-export {
-  enqueueCommand,
-  popPendingCommands,
-  trimCommandQueue,
-} from './queue';
+export { enqueueCommand, popPendingCommands, trimCommandQueue } from './queue';
 
-export {
-  runGameLoop,
-  broadcast,
-  ensureStaticMap,
-} from './gameLoop';
+export { runGameLoop, broadcast, ensureStaticMap } from './gameLoop';
 export type { GameLoopResult } from './gameLoop';
 
 export {

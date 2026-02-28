@@ -93,7 +93,11 @@ const findClosestHit = (
   prevPos: THREE.Vector3,
   currPos: THREE.Vector3,
   projectileRadius: number,
-  getCandidates: (from: THREE.Vector3, to: THREE.Vector3, radius: number) => Entity[],
+  getCandidates: (
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    radius: number
+  ) => Entity[],
   outHitMob: { current: MobEntity | null },
   outHitPoint: THREE.Vector3
 ): boolean => {
@@ -117,9 +121,7 @@ const findClosestHit = (
         1
       );
     }
-    closestPointScratch
-      .copy(prevPos)
-      .addScaledVector(stepScratch, t);
+    closestPointScratch.copy(prevPos).addScaledVector(stepScratch, t);
     if (
       closestPointScratch.distanceToSquared(mobCenterScratch) >
       combinedRadius * combinedRadius
@@ -153,11 +155,7 @@ export const createArrowProjectileSystem = (
     midpointScratch.copy(from).add(to).multiplyScalar(0.5);
     const segmentLength = from.distanceTo(to);
     const queryRadius = segmentLength * 0.5 + radius + ctx.mobWidth;
-    return ctx.spatialGrid.getNearbyInto(
-      midpointScratch,
-      queryRadius,
-      out
-    );
+    return ctx.spatialGrid.getNearbyInto(midpointScratch, queryRadius, out);
   };
 
   const getCandidatesForHitTest = (
@@ -263,7 +261,18 @@ export const createArrowProjectileSystem = (
     });
   };
 
-  const updateArrowProjectiles = <P extends { mesh: THREE.Object3D; position: THREE.Vector3; velocity: THREE.Vector3; gravity: THREE.Vector3; gravityDelay: number; radius: number; ttl: number; damage: number }>(
+  const updateArrowProjectiles = <
+    P extends {
+      mesh: THREE.Object3D;
+      position: THREE.Vector3;
+      velocity: THREE.Vector3;
+      gravity: THREE.Vector3;
+      gravityDelay: number;
+      radius: number;
+      ttl: number;
+      damage: number;
+    },
+  >(
     projectiles: P[],
     delta: number,
     arrowFacing: ArrowFacing | null,
@@ -302,7 +311,7 @@ export const createArrowProjectileSystem = (
         );
       }
       const hitResult = { current: null as MobEntity | null };
-      const didHit =       findClosestHit(
+      const didHit = findClosestHit(
         prevPosScratch,
         projectile.position,
         projectile.radius,

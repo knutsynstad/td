@@ -87,7 +87,7 @@ describe('buildStaticMapStructures', () => {
       expect.arrayContaining([
         'map-tree-castle-camper',
         'map-rock-spawn-camper',
-      ]),
+      ])
     );
     expect(structures.get('map-tree-castle-camper')).toBeUndefined();
     expect(structures.get('map-rock-spawn-camper')).toBeUndefined();

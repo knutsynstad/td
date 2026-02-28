@@ -9,7 +9,7 @@ export function aabbFromCenter(
   x: number,
   z: number,
   halfX: number,
-  halfZ: number,
+  halfZ: number
 ): Aabb2d {
   return {
     minX: x - halfX,
@@ -21,9 +21,6 @@ export function aabbFromCenter(
 
 export function intersectsAabb(a: Aabb2d, b: Aabb2d): boolean {
   return (
-    a.minX <= b.maxX &&
-    a.maxX >= b.minX &&
-    a.minZ <= b.maxZ &&
-    a.maxZ >= b.minZ
+    a.minX <= b.maxX && a.maxX >= b.minX && a.minZ <= b.maxZ && a.maxZ >= b.minZ
   );
 }

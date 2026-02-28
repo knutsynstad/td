@@ -1,12 +1,22 @@
 import * as THREE from 'three';
-import type { EntityDelta, StructureDelta, WaveDelta } from '../../shared/game-protocol';
+import type {
+  EntityDelta,
+  StructureDelta,
+  WaveDelta,
+} from '../../shared/game-protocol';
 import type {
   MobState as SharedMobState,
   StructureState as SharedStructureState,
   WaveState as SharedWaveState,
   WorldState as SharedWorldState,
 } from '../../shared/game-state';
-import type { DestructibleCollider, MobEntity, NpcEntity, StaticCollider, WaveSpawner } from '../domains/gameplay/types/entities';
+import type {
+  DestructibleCollider,
+  MobEntity,
+  NpcEntity,
+  StaticCollider,
+  WaveSpawner,
+} from '../domains/gameplay/types/entities';
 import type { StructureStore } from '../domains/gameplay/structureStore';
 import type { LanePathResult } from '../domains/world/pathfinding/laneAStar';
 import type { SpawnerHelpers } from '../rendering/spawnerHelpers';
@@ -80,7 +90,11 @@ export type AuthoritativeSyncContext = {
   MOB_WIDTH: number;
   MOB_SPEED: number;
 
-  createTowerAt: (center: Vector3, typeId: TowerTypeId, ownerId: string) => Tower;
+  createTowerAt: (
+    center: Vector3,
+    typeId: TowerTypeId,
+    ownerId: string
+  ) => Tower;
   applyWallVisualToMesh: (mesh: THREE.Mesh) => void;
   applyTreeVisualToMesh: (mesh: THREE.Mesh) => void;
   applyRockVisualToMesh: (mesh: THREE.Mesh) => void;
@@ -146,7 +160,11 @@ export type AuthoritativeSync = {
   upsertServerMobFromSnapshot: (mobState: SharedMobState) => void;
   applyServerMobDelta: (delta: EntityDelta) => void;
   applyServerWaveDelta: (delta: WaveDelta) => void;
-  applyServerWaveTiming: (wave: number, active: boolean, nextWaveAtMs: number) => void;
+  applyServerWaveTiming: (
+    wave: number,
+    active: boolean,
+    nextWaveAtMs: number
+  ) => void;
   applyServerSnapshot: (snapshot: SharedWorldState) => void;
   updateServerMobInterpolation: (now: number) => void;
   serverWaveActiveRef: { current: boolean };
@@ -351,7 +369,11 @@ export const createAuthoritativeSync = (
       const size = ctx.getBuildSizeForMode('tower');
       const half = size.clone().multiplyScalar(0.5);
       const center = ctx.snapCenterToBuildGrid(targetCenter, size);
-      const tower = ctx.createTowerAt(center, 'base', entry.ownerId || 'Server');
+      const tower = ctx.createTowerAt(
+        center,
+        'base',
+        entry.ownerId || 'Server'
+      );
       const collider = ctx.structureStore.addTowerCollider(
         center,
         half,
@@ -557,9 +579,7 @@ export const createAuthoritativeSync = (
     delta: EntityDelta
   ) => {
     const resolvedMaxHp =
-      maxHp ??
-      ctx.serverMobMaxHpCache.get(mobId) ??
-      DEFAULT_MOB_MAX_HP;
+      maxHp ?? ctx.serverMobMaxHpCache.get(mobId) ?? DEFAULT_MOB_MAX_HP;
     if (maxHp !== undefined) {
       ctx.serverMobMaxHpCache.set(mobId, maxHp);
     }
@@ -783,8 +803,7 @@ export const createAuthoritativeSync = (
   ) => {
     ctx.gameState.wave = wave;
     ctx.serverWaveActiveRef.current = active;
-    ctx.gameState.nextWaveAt =
-      nextWaveAtMs > 0 ? toPerfTime(nextWaveAtMs) : 0;
+    ctx.gameState.nextWaveAt = nextWaveAtMs > 0 ? toPerfTime(nextWaveAtMs) : 0;
   };
 
   const applyServerSnapshot = (snapshot: SharedWorldState) => {
@@ -852,10 +871,7 @@ export const createAuthoritativeSync = (
         staleMobIds.push(mobId);
         continue;
       }
-      if (
-        (mob.hp ?? 1) <= 0 &&
-        staleMs > ctx.SERVER_MOB_DEAD_STALE_REMOVE_MS
-      ) {
+      if ((mob.hp ?? 1) <= 0 && staleMs > ctx.SERVER_MOB_DEAD_STALE_REMOVE_MS) {
         staleMobIds.push(mobId);
         continue;
       }
@@ -882,17 +898,16 @@ export const createAuthoritativeSync = (
       const mob = ctx.serverMobsById.get(mobId);
       if (!mob) continue;
       const duration = Math.max(1, entry.t1 - entry.t0);
-      const t = THREE.MathUtils.clamp(
-        (renderNow - entry.t0) / duration,
-        0,
-        1
-      );
+      const t = THREE.MathUtils.clamp((renderNow - entry.t0) / duration, 0, 1);
       mob.mesh.position.lerpVectors(entry.from, entry.to, t);
       if (renderNow > entry.t1) {
         const maxExtrapolation = connectionAlive
           ? ctx.SERVER_MOB_EXTRAPOLATION_MAX_MS
           : ctx.SERVER_MOB_EXTRAPOLATION_GAP_MAX_MS;
-        const extrapolationMs = Math.min(maxExtrapolation, renderNow - entry.t1);
+        const extrapolationMs = Math.min(
+          maxExtrapolation,
+          renderNow - entry.t1
+        );
         if (extrapolationMs > 0) {
           mob.mesh.position.x += entry.velocity.x * (extrapolationMs / 1000);
           mob.mesh.position.z += entry.velocity.z * (extrapolationMs / 1000);

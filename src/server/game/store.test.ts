@@ -1,10 +1,6 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import {
-  acquireLock,
-  releaseLock,
-  verifyLock,
-} from '../core/lock';
+import { acquireLock, releaseLock, verifyLock } from '../core/lock';
 import { getGameRedisKeys } from './keys';
 
 const test = createDevvitTest();
@@ -20,4 +16,3 @@ test('acquire and release leader lock', async () => {
   const afterRelease = await verifyLock(keys.leaderLock, 'owner-a');
   expect(afterRelease).toBe(false);
 });
-

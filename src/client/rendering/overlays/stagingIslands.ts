@@ -213,14 +213,8 @@ export class StagingIslandsOverlay {
     const unique = new Set<string>();
     const tangent = new THREE.Vector3(-towardMap.z, 0, towardMap.x);
     const islandHalf = this.config.islandSize * 0.5;
-    const bridgeHalf = Math.max(
-      0,
-      Math.floor(this.config.bridgeWidth * 0.5)
-    );
-    const pathHalf = Math.max(
-      0,
-      Math.floor(this.config.bridgePathWidth * 0.5)
-    );
+    const bridgeHalf = Math.max(0, Math.floor(this.config.bridgeWidth * 0.5));
+    const pathHalf = Math.max(0, Math.floor(this.config.bridgePathWidth * 0.5));
     for (let along = 0; along < this.config.bridgeLength; along += 1) {
       const anchor = center
         .clone()
@@ -257,10 +251,7 @@ export class StagingIslandsOverlay {
     const tangent = new THREE.Vector3(-towardMap.z, 0, towardMap.x);
     const islandHalf = this.config.islandSize * 0.5;
     const islandCenterRun = Math.floor(islandHalf);
-    const pathHalf = Math.max(
-      0,
-      Math.floor(this.config.bridgePathWidth * 0.5)
-    );
+    const pathHalf = Math.max(0, Math.floor(this.config.bridgePathWidth * 0.5));
     const pathWidth = Math.max(1, this.config.bridgePathWidth);
     for (
       let along = -islandCenterRun;
