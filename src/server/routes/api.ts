@@ -18,19 +18,21 @@ import type {
   GamePreviewResponse,
 } from '../../shared/api';
 import { isRecord, parsePositiveInt } from '../../shared/utils';
+import type { T2 } from '@devvit/web/shared';
 import {
   applyCommand,
   getCoinBalance,
   getGamePreview,
+  getPlayerId,
   heartbeatGame,
   joinGame,
   resetGame,
   resyncGame,
 } from '../game/handlers';
 import {
-  depositToCastle,
-  getCastleBalance,
-  withdrawFromCastle,
+  addCoinsToCastle,
+  getCastleCoinBalance,
+  takeCoinsFromCastle,
 } from '../game/economy';
 
 type ErrorResponse = {
@@ -39,6 +41,12 @@ type ErrorResponse = {
 };
 
 export const api = new Hono();
+
+const resolvePlayerId = async (c: Context): Promise<string> => {
+  const testUserId = c.req.header('x-test-user-id');
+  if (testUserId) return testUserId;
+  return getPlayerId();
+};
 
 const requireObjectBody = async (
   c: Context
@@ -56,7 +64,8 @@ api.post('/game/join', async (c) => {
   try {
     // Request body currently optional; reserved for future join options.
     await c.req.json<JoinRequest>().catch(() => undefined);
-    const response = await joinGame();
+    const playerId = await resolvePlayerId(c);
+    const response = await joinGame(playerId);
     return c.json<JoinResponse>(response);
   } catch (error) {
     return c.json<ErrorResponse>(
@@ -78,7 +87,8 @@ api.post('/game/command', async (c) => {
     );
   }
 
-  const response = await applyCommand(body.envelope);
+  const playerId = await resolvePlayerId(c);
+  const response = await applyCommand(body.envelope, playerId);
   return c.json<CommandResponse>(response, response.accepted ? 200 : 429);
 });
 
@@ -108,7 +118,8 @@ api.post('/game/heartbeat', async (c) => {
 });
 
 api.get('/game/coins', async (c) => {
-  const coins = await getCoinBalance();
+  const playerId = await resolvePlayerId(c);
+  const coins = await getCoinBalance(playerId);
   return c.json<CoinBalanceResponse>({
     type: 'coinBalance',
     coins,
@@ -133,14 +144,16 @@ api.post('/game/resync', async (c) => {
     tickSeq: Number(body?.tickSeq ?? 0),
     playerId: body?.playerId ? String(body.playerId) : undefined,
   };
-  const response = await resyncGame(request.playerId);
+  const playerId = request.playerId ?? (await resolvePlayerId(c));
+  const response = await resyncGame(playerId);
   return c.json<ResyncResponse>(response);
 });
 
 api.post('/game/reset', async (c) => {
   try {
     await c.req.json().catch(() => undefined);
-    await resetGame();
+    const playerId = await resolvePlayerId(c);
+    await resetGame(playerId);
     return c.json({
       showToast: 'Game reset',
     });
@@ -157,7 +170,7 @@ api.post('/game/reset', async (c) => {
 });
 
 api.get('/castle/coins', async (c) => {
-  const castleBalance = await getCastleBalance();
+  const castleBalance = await getCastleCoinBalance();
   return c.json<CastleCoinsBalanceResponse>({
     type: 'castleCoinsBalance',
     castleCoins: castleBalance,
@@ -175,7 +188,8 @@ api.post('/castle/coins/deposit', async (c) => {
       400
     );
   }
-  const result = await depositToCastle(amount);
+  const playerId = (await resolvePlayerId(c)) as T2;
+  const result = await addCoinsToCastle(playerId, amount);
   if (result.deposited === 0) {
     return c.json<ErrorResponse>(
       { status: 'error', message: 'insufficient coins' },
@@ -201,7 +215,8 @@ api.post('/castle/coins/withdraw', async (c) => {
       400
     );
   }
-  const result = await withdrawFromCastle(requested);
+  const playerId = (await resolvePlayerId(c)) as T2;
+  const result = await takeCoinsFromCastle(playerId, requested);
   return c.json<CastleCoinsWithdrawResponse>({
     type: 'castleCoinsWithdraw',
     withdrawn: result.withdrawn,

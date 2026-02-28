@@ -43,12 +43,10 @@ export function parseIntent(value: unknown): PlayerIntent {
   return parsed;
 }
 
-export async function touchPlayerPresence(
-  player: PlayerState
-): Promise<void> {
+export async function touchPlayerPresence(player: PlayerState): Promise<void> {
   await Promise.all([
-    redis.hSet(KEYS.players, { [player.playerId]: JSON.stringify(player) }),
-    redis.zAdd(KEYS.seen, {
+    redis.hSet(KEYS.PLAYERS, { [player.playerId]: JSON.stringify(player) }),
+    redis.zAdd(KEYS.SEEN, {
       member: player.playerId,
       score: player.lastSeenMs,
     }),
@@ -58,9 +56,9 @@ export async function touchPlayerPresence(
 export async function removePlayers(playerIds: string[]): Promise<void> {
   if (playerIds.length === 0) return;
   await Promise.all([
-    redis.hDel(KEYS.players, playerIds),
-    redis.hDel(KEYS.intents, playerIds),
-    redis.zRem(KEYS.seen, playerIds),
+    redis.hDel(KEYS.PLAYERS, playerIds),
+    redis.hDel(KEYS.INTENTS, playerIds),
+    redis.zRem(KEYS.SEEN, playerIds),
   ]);
 }
 
@@ -68,7 +66,7 @@ export async function removeOldPlayersByLastSeen(
   cutoffMs: number,
   limit = 250
 ): Promise<string[]> {
-  const stale = await redis.zRange(KEYS.seen, 0, cutoffMs, {
+  const stale = await redis.zRange(KEYS.SEEN, 0, cutoffMs, {
     by: 'score',
     limit: { offset: 0, count: limit },
   });
@@ -78,10 +76,8 @@ export async function removeOldPlayersByLastSeen(
   return playerIds;
 }
 
-export async function enforceStructureCap(
-  incomingCount = 1
-): Promise<boolean> {
-  const count = await redis.hLen(KEYS.structures);
+export async function enforceStructureCap(incomingCount = 1): Promise<boolean> {
+  const count = await redis.hLen(KEYS.STRUCTURES);
   const safeIncoming = Math.max(0, Math.floor(incomingCount));
   return count + safeIncoming <= MAX_STRUCTURES;
 }
@@ -92,11 +88,11 @@ export function createDefaultPlayer(
   nowMs: number
 ): PlayerState {
   return {
-  playerId,
-  username,
-  position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
-  velocity: { x: 0, z: 0 },
-  speed: PLAYER_SPEED,
-  lastSeenMs: nowMs,
-};
+    playerId,
+    username,
+    position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
+    velocity: { x: 0, z: 0 },
+    speed: PLAYER_SPEED,
+    lastSeenMs: nowMs,
+  };
 }

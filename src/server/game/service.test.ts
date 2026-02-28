@@ -2,6 +2,8 @@ import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import type { StructureState } from '../../shared/game-state';
+
+const TEST_USER_ID = 'test-user';
 import {
   applyCommand,
   getCoinBalance,
@@ -15,7 +17,7 @@ import { loadWorldState, persistWorldState } from './world';
 const test = createDevvitTest();
 
 test('runGameLoop returns result fields', async () => {
-  await joinGame();
+  await joinGame(TEST_USER_ID);
   const result = await runGameLoop(500);
   expect(typeof result.ownerToken).toBe('string');
   expect(typeof result.durationMs).toBe('number');
@@ -23,9 +25,9 @@ test('runGameLoop returns result fields', async () => {
 });
 
 test('resetGame resets wave progression without economy tax', async () => {
-  await joinGame();
-  await resetGame();
-  const snapshot = await resyncGame();
+  await joinGame(TEST_USER_ID);
+  await resetGame(TEST_USER_ID);
+  const snapshot = await resyncGame(TEST_USER_ID);
   expect(snapshot.snapshot.wave.wave).toBe(0);
   expect(snapshot.snapshot.wave.active).toBe(false);
   expect(snapshot.snapshot.wave.nextWaveAtMs).toBe(0);
@@ -38,9 +40,9 @@ test('resetGame resets wave progression without economy tax', async () => {
 });
 
 test('applyCommand charges total cost for batched buildStructures', async () => {
-  await resetGame();
-  const joined = await joinGame();
-  const beforeCoins = await getCoinBalance();
+  await resetGame(TEST_USER_ID);
+  const joined = await joinGame(TEST_USER_ID);
+  const beforeCoins = await getCoinBalance(TEST_USER_ID);
   const envelope: CommandEnvelope = {
     seq: 1,
     sentAtMs: Date.now(),
@@ -61,8 +63,8 @@ test('applyCommand charges total cost for batched buildStructures', async () => 
       ],
     },
   };
-  const response = await applyCommand(envelope);
-  const afterCoins = await getCoinBalance();
+  const response = await applyCommand(envelope, TEST_USER_ID);
+  const afterCoins = await getCoinBalance(TEST_USER_ID);
   const spent = beforeCoins - afterCoins;
 
   expect(response.accepted).toBe(true);
@@ -71,9 +73,9 @@ test('applyCommand charges total cost for batched buildStructures', async () => 
 });
 
 test('applyCommand rejects empty buildStructures payloads', async () => {
-  await resetGame();
-  const joined = await joinGame();
-  const beforeCoins = await getCoinBalance();
+  await resetGame(TEST_USER_ID);
+  const joined = await joinGame(TEST_USER_ID);
+  const beforeCoins = await getCoinBalance(TEST_USER_ID);
   const envelope: CommandEnvelope = {
     seq: 2,
     sentAtMs: Date.now(),
@@ -83,8 +85,8 @@ test('applyCommand rejects empty buildStructures payloads', async () => {
       structures: [],
     },
   };
-  const response = await applyCommand(envelope);
-  const afterCoins = await getCoinBalance();
+  const response = await applyCommand(envelope, TEST_USER_ID);
+  const afterCoins = await getCoinBalance(TEST_USER_ID);
 
   expect(response.accepted).toBe(false);
   expect(response.reason).toBe('no structures requested');
@@ -92,8 +94,8 @@ test('applyCommand rejects empty buildStructures payloads', async () => {
 });
 
 test('resync heals invalid map trees near castle and spawn entry lanes', async () => {
-  await resetGame();
-  const seeded = await resyncGame();
+  await resetGame(TEST_USER_ID);
+  const seeded = await resyncGame(TEST_USER_ID);
   const world = seeded.snapshot;
   world.structures['map-tree-castle-camper'] = {
     structureId: 'map-tree-castle-camper',
@@ -117,7 +119,7 @@ test('resync heals invalid map trees near castle and spawn entry lanes', async (
   };
   await persistWorldState(world);
 
-  const healed = await resyncGame();
+  const healed = await resyncGame(TEST_USER_ID);
   expect(healed.snapshot.structures['map-tree-castle-camper']).toBeUndefined();
   expect(healed.snapshot.structures['map-tree-spawn-camper']).toBeUndefined();
 

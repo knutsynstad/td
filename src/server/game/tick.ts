@@ -128,4 +128,4 @@ export async function runTickLoop<TState>(
   const durationMs = Date.now() - startedAt;
   console.info('Game loop ended', { ownerToken, durationMs, ticksProcessed });
   return { ownerToken, durationMs, ticksProcessed };
-};
+}

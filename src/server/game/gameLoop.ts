@@ -131,13 +131,11 @@ export type GameLoopResult = {
 export function runGameLoop(
   windowMs: number = LEADER_BROADCAST_WINDOW_MS
 ): Promise<GameLoopResult> {
-  const { leaderLock } = KEYS;
-
   return runTickLoop<GameWorld>(
     {
       windowMs,
       tickIntervalMs: SIM_TICK_MS,
-      lockKey: leaderLock,
+      lockKey: KEYS.LEADER_LOCK,
       lockTtlSeconds: LEADER_LOCK_TTL_SECONDS,
       lockRefreshIntervalTicks: LOCK_REFRESH_INTERVAL_TICKS,
       channelName: CHANNELS.game,
@@ -155,4 +153,4 @@ export function runGameLoop(
       },
     }
   );
-};
+}

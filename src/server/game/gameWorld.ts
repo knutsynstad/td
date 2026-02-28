@@ -33,16 +33,16 @@ function parseWaveState(waveRaw: string | undefined): WaveState {
   const parsed = safeParseJson(waveRaw);
   function makeDefaultSpawner(): WaveState['spawners'][number] {
     return {
-    spawnerId: '',
-    totalCount: 0,
-    spawnedCount: 0,
-    aliveCount: 0,
-    spawnRatePerSecond: 0,
-    spawnAccumulator: 0,
-    gateOpen: false,
-    routeState: 'blocked',
-    route: [],
-  };
+      spawnerId: '',
+      totalCount: 0,
+      spawnedCount: 0,
+      aliveCount: 0,
+      spawnRatePerSecond: 0,
+      spawnAccumulator: 0,
+      gateOpen: false,
+      routeState: 'blocked',
+      route: [],
+    };
   }
   if (!isRecord(parsed)) return defaultWave();
   return {
@@ -76,12 +76,12 @@ function parseWaveState(waveRaw: string | undefined): WaveState {
 export async function loadGameWorld(): Promise<GameWorld> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
-      redis.hGetAll(KEYS.meta),
-      redis.hGetAll(KEYS.players),
-      redis.hGetAll(KEYS.intents),
-      redis.hGetAll(KEYS.structures),
-      redis.hGetAll(KEYS.mobs),
-      redis.get(KEYS.wave),
+      redis.hGetAll(KEYS.META),
+      redis.hGetAll(KEYS.PLAYERS),
+      redis.hGetAll(KEYS.INTENTS),
+      redis.hGetAll(KEYS.STRUCTURES),
+      redis.hGetAll(KEYS.MOBS),
+      redis.get(KEYS.WAVE),
     ]);
 
   const now = Date.now();
@@ -119,7 +119,7 @@ export async function flushGameWorld(world: GameWorld): Promise<void> {
   const ops: Promise<unknown>[] = [];
 
   ops.push(
-    redis.hSet(KEYS.meta, {
+    redis.hSet(KEYS.META, {
       tickSeq: String(world.meta.tickSeq),
       worldVersion: String(world.meta.worldVersion),
       lastTickMs: String(world.meta.lastTickMs),
@@ -157,16 +157,16 @@ export async function flushGameWorld(world: GameWorld): Promise<void> {
     map.resetTracking();
   }
 
-  flushCollection(KEYS.mobs, world.mobs as TrackedMap<MobState>);
+  flushCollection(KEYS.MOBS, world.mobs as TrackedMap<MobState>);
   flushCollection(
-    KEYS.structures,
+    KEYS.STRUCTURES,
     world.structures as TrackedMap<StructureState>
   );
-  flushCollection(KEYS.players, world.players as TrackedMap<PlayerState>);
-  flushCollection(KEYS.intents, world.intents as TrackedMap<PlayerIntent>);
+  flushCollection(KEYS.PLAYERS, world.players as TrackedMap<PlayerState>);
+  flushCollection(KEYS.INTENTS, world.intents as TrackedMap<PlayerIntent>);
 
   if (world.waveDirty) {
-    ops.push(redis.set(KEYS.wave, JSON.stringify(world.wave)));
+    ops.push(redis.set(KEYS.WAVE, JSON.stringify(world.wave)));
     world.waveDirty = false;
   }
 
@@ -194,8 +194,8 @@ export function gameWorldToSnapshot(world: GameWorld): WorldState {
 
 export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
   const [playersRaw, intentsRaw] = await Promise.all([
-    redis.hGetAll(KEYS.players),
-    redis.hGetAll(KEYS.intents),
+    redis.hGetAll(KEYS.PLAYERS),
+    redis.hGetAll(KEYS.INTENTS),
   ]);
 
   if (playersRaw) {

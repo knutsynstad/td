@@ -1,202 +1,204 @@
 import { redis } from '@devvit/web/server';
-import { KEYS } from '../core/redis';
-import { COINS_CAP, COINS_REGEN_PER_SECOND } from '../../shared/content';
+import type { T2 } from '@devvit/web/shared';
+import { KEYS, FIELDS } from '../core/redis';
+import {
+  CASTLE_COINS_MIN,
+  USER_COINS_ACCRUED_PER_SECOND,
+  USER_COINS_MIN,
+  USER_COINS_MAX,
+} from '../../shared/content';
 import { clamp } from '../../shared/utils';
 
-const MAX_TX_RETRIES = 5;
-const PLAYER_COINS_FIELD_COINS = 'coins';
-const PLAYER_COINS_FIELD_LAST_ACCRUED_MS = 'lastAccruedMs';
-
-// --- Player coins (personal balance with regen) ---
-
-type PlayerCoinsState = {
-  coins: number;
-  lastAccruedMs: number;
-};
-
 /**
- * Compute the accrued coins.
+ * Get the coin balance for a given player. Returns the current coin balance with any accrued coins applied. If the player does not exist, it will be created with the initial balance.
  */
-function computeAccrued(state: PlayerCoinsState, nowMs: number): number {
-  const elapsedMs = Math.max(0, nowMs - state.lastAccruedMs);
-  const regenerated = (elapsedMs / 1000) * COINS_REGEN_PER_SECOND;
-  return Math.floor(clamp(state.coins + regenerated, 0, COINS_CAP));
-}
+export async function getUserCoinBalance(userId: T2): Promise<number> {
+  // Get the current time
+  const now = Date.now();
 
-/**
- * Read the player coins state from the database.
- * If raw is provided, skips fetch and parses it (for use inside watch blocks).
- */
-async function readPlayerCoinsState(
-  raw?: Record<string, string>,
-  nowMs = Date.now()
-): Promise<PlayerCoinsState> {
-  const data = raw ?? (await redis.hGetAll(KEYS.coins)) ?? undefined;
-  if (!data || typeof data[PLAYER_COINS_FIELD_COINS] === 'undefined') {
-    return { coins: COINS_CAP, lastAccruedMs: nowMs };
-  }
-  return {
-    coins: clamp(
-      Number(data[PLAYER_COINS_FIELD_COINS] ?? COINS_CAP),
-      0,
-      COINS_CAP
-    ),
-    lastAccruedMs: Number(data[PLAYER_COINS_FIELD_LAST_ACCRUED_MS] ?? nowMs),
-  };
-}
+  // Get the current balance and last accrued time
+  let [balance, lastAccruedMs]: (string | number | null)[] = await redis.hMGet(
+    KEYS.PLAYER(userId),
+    [FIELDS.USER_COIN_BALANCE, FIELDS.USER_COIN_LAST_ACCRUED_MS]
+  );
 
-async function getPlayerBalanceFromRaw(
-  raw: Record<string, string> | undefined,
-  nowMs: number
-): Promise<number> {
-  const state = await readPlayerCoinsState(raw, nowMs);
-  return computeAccrued(state, nowMs);
-}
-
-/**
- * Get the player coins.
- */
-export async function getPlayerCoins(nowMs: number): Promise<number> {
-  const raw = await redis.hGetAll(KEYS.coins);
-  return await getPlayerBalanceFromRaw(raw ?? undefined, nowMs);
-}
-
-/**
- * Spend coins from the player's wallet.
- */
-export async function spendPlayerCoins(
-  amount: number,
-  nowMs: number
-): Promise<{ ok: boolean; coins: number }> {
-  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(KEYS.coins);
-    const balance = await getPlayerBalanceFromRaw(
-      (await redis.hGetAll(KEYS.coins)) ?? undefined,
-      nowMs
-    );
-    if (balance < amount) {
-      await tx.unwatch();
-      return { ok: false, coins: balance };
-    }
-    const nextCoins = Math.floor(clamp(balance - amount, 0, COINS_CAP));
-    await tx.multi();
-    await tx.hSet(KEYS.coins, {
-      [PLAYER_COINS_FIELD_COINS]: String(nextCoins),
-      [PLAYER_COINS_FIELD_LAST_ACCRUED_MS]: String(nowMs),
+  // Initialize the player's coins if they don't exist
+  if (balance === null || lastAccruedMs === null) {
+    await redis.hSet(KEYS.PLAYER(userId), {
+      [FIELDS.USER_COIN_BALANCE]: String(USER_COINS_MAX),
+      [FIELDS.USER_COIN_LAST_ACCRUED_MS]: String(now),
     });
-    const result = await tx.exec();
-    if (result !== null) return { ok: true, coins: nextCoins };
+    return USER_COINS_MAX;
   }
-  return { ok: false, coins: await getPlayerCoins(nowMs) };
+
+  // Parse the balance and last accrued time
+  balance = Number(balance);
+  lastAccruedMs = Number(lastAccruedMs);
+
+  // Calculate how many coins have been earned since the last accrual
+  const elapsedMs = now - lastAccruedMs;
+  const accrued = Math.floor(elapsedMs * 1_000 * USER_COINS_ACCRUED_PER_SECOND);
+
+  // Add the accrued coins to the balance
+  balance += accrued;
+
+  // Ensure the balance is within the valid range
+  balance = Math.floor(balance);
+  balance = clamp(balance + accrued, USER_COINS_MIN, USER_COINS_MAX);
+
+  // Update the player balance and last accrued time
+  await redis.hSet(KEYS.PLAYER(userId), {
+    [FIELDS.USER_COIN_BALANCE]: String(balance),
+    [FIELDS.USER_COIN_LAST_ACCRUED_MS]: String(now),
+  });
+
+  // Return the new balance
+  return balance;
 }
 
 /**
- * Add coins to the player's wallet.
+ * Spend coins from a given user's coin balance.
  */
-export async function addPlayerCoins(
-  amount: number,
-  nowMs: number
-): Promise<{ added: number; coins: number }> {
-  for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(KEYS.coins);
-    const balance = await getPlayerBalanceFromRaw(
-      (await redis.hGetAll(KEYS.coins)) ?? undefined,
-      nowMs
-    );
-    const nextCoins = Math.floor(clamp(balance + amount, 0, COINS_CAP));
-    const added = Math.max(0, nextCoins - balance);
-    await tx.multi();
-    await tx.hSet(KEYS.coins, {
-      [PLAYER_COINS_FIELD_COINS]: String(nextCoins),
-      [PLAYER_COINS_FIELD_LAST_ACCRUED_MS]: String(nowMs),
-    });
-    const result = await tx.exec();
-    if (result !== null) return { added, coins: nextCoins };
+export async function spendUserCoins(
+  userId: T2,
+  amount: number
+): Promise<{ success: boolean; balance: number }> {
+  // Get the current balance
+  let balance = await getUserCoinBalance(userId);
+
+  // Insufficient funds
+  if (balance < amount) {
+    return { success: false, balance };
   }
-  return { added: 0, coins: await getPlayerCoins(nowMs) };
+
+  // Calculate the new balance
+  balance -= amount;
+
+  // Ensure the balance is a whole number and within the valid range
+  balance = Math.floor(balance);
+  balance = clamp(balance, USER_COINS_MIN, USER_COINS_MAX);
+
+  // Save the updated balance. Deliberately not updating the last accrued time here since the balance is being updated by calling getUserCoinBalance.
+  await redis.hSet(KEYS.PLAYER(userId), {
+    [FIELDS.USER_COIN_BALANCE]: String(balance),
+  });
+
+  return { success: true, balance };
+}
+
+/**
+ * Add coins to a user's balance (e.g. refund). Clamps to valid range.
+ */
+export async function addUserCoins(
+  userId: T2,
+  amount: number
+): Promise<{ added: number; balance: number }> {
+  const current = await getUserCoinBalance(userId);
+  const next = Math.floor(
+    clamp(current + amount, USER_COINS_MIN, USER_COINS_MAX)
+  );
+  const added = next - current;
+  if (added <= 0) return { added: 0, balance: current };
+  await redis.hSet(KEYS.PLAYER(userId), {
+    [FIELDS.USER_COIN_BALANCE]: String(next),
+    [FIELDS.USER_COIN_LAST_ACCRUED_MS]: String(Date.now()),
+  });
+  return { added, balance: next };
 }
 
 /**
  * Get the current castle coin balance.
  */
-export async function getCastleBalance(): Promise<number> {
-  const data = await redis.get(KEYS.castle);
-  return data ? Number(data) : 0;
+export async function getCastleCoinBalance(): Promise<number> {
+  const data = await redis.get(KEYS.CASTLE_COIN_BALANCE);
+  return Number(data ?? CASTLE_COINS_MIN);
 }
 
 /**
- * Deposit coins into the castle.
+ * Deposit coins into the castle. Returns the amount deposited, the new user balance, and the new castle balance.
  */
-export async function depositToCastle(amount: number): Promise<{
+export async function addCoinsToCastle(
+  userId: T2,
+  amount: number
+): Promise<{
   deposited: number;
   userBalance: number;
   castleBalance: number;
 }> {
-  const now = Date.now();
-  const [userBalance, castleBalance] = await Promise.all([
-    getPlayerCoins(now),
-    getCastleBalance(),
+  // Get the current user and castle coin balances
+  let [userBalance, castleBalance] = await Promise.all([
+    getUserCoinBalance(userId),
+    getCastleCoinBalance(),
   ]);
 
+  // Parse the amount for deposit
+  let deposited = Math.floor(amount);
+  deposited = Math.max(deposited, CASTLE_COINS_MIN);
+
   // Insufficient funds
-  if (userBalance < amount) {
+  if (userBalance < deposited) {
     return { deposited: 0, userBalance, castleBalance };
   }
 
-  const nextUserBalance = Math.floor(clamp(userBalance - amount, 0, COINS_CAP));
-  const nextCastleBalance = castleBalance + amount;
+  // Calculate the new user balance
+  userBalance -= deposited;
+  castleBalance += deposited;
 
+  // Ensure the balances are within the valid range
+  userBalance = clamp(userBalance, USER_COINS_MIN, USER_COINS_MAX);
+
+  // Update the user and castle balances
   await Promise.all([
-    redis.hSet(KEYS.coins, {
-      [PLAYER_COINS_FIELD_COINS]: String(nextUserBalance),
-      [PLAYER_COINS_FIELD_LAST_ACCRUED_MS]: String(now),
-    }),
-    redis.incrBy(KEYS.castle, amount),
+    redis.hIncrBy(KEYS.PLAYER(userId), FIELDS.USER_COIN_BALANCE, -deposited),
+    redis.incrBy(KEYS.CASTLE_COIN_BALANCE, deposited),
   ]);
 
-  return {
-    deposited: amount,
-    userBalance: nextUserBalance,
-    castleBalance: nextCastleBalance,
-  };
+  return { deposited, userBalance, castleBalance };
 }
 
 /**
- * Withdraw coins from the castle.
+ * Withdraw coins from the castle. Returns the amount withdrawn, the new user balance, and the new castle balance.
  */
-export async function withdrawFromCastle(amount: number): Promise<{
+export async function takeCoinsFromCastle(
+  userId: T2,
+  amount: number
+): Promise<{
   withdrawn: number;
   userBalance: number;
   castleBalance: number;
 }> {
-  const now = Date.now();
+  // Get the current user and castle coin balances
   const [userBalance, castleBalance] = await Promise.all([
-    getPlayerCoins(now),
-    getCastleBalance(),
+    getUserCoinBalance(userId),
+    getCastleCoinBalance(),
   ]);
 
-  // Insufficient funds
-  if (castleBalance < amount) {
-    return { withdrawn: 0, userBalance, castleBalance };
-  }
+  // Initialize an empty outcome object
+  const outcome = { withdrawn: 0, userBalance, castleBalance };
 
-  const maxAddable = Math.max(0, COINS_CAP - userBalance);
-  const withdrawn = Math.min(amount, castleBalance, Math.floor(maxAddable));
-  const nextUserBalance = Math.floor(
-    clamp(userBalance + withdrawn, 0, COINS_CAP)
-  );
+  // Insufficient funds -> return early
+  if (castleBalance < amount) return outcome;
 
+  // Calculate the maximum amount that can be added to the user's balance
+  const maxAddable = Math.max(0, USER_COINS_MAX - userBalance);
+
+  // User unable to hold the requested amount of coins -> return early
+  if (amount > maxAddable) return outcome;
+
+  // Update the outcome
+  outcome.withdrawn = Math.floor(amount);
+  outcome.userBalance = userBalance + outcome.withdrawn;
+  outcome.castleBalance = castleBalance - outcome.withdrawn;
+
+  // Update the user and castle balances
   await Promise.all([
-    redis.hSet(KEYS.coins, {
-      [PLAYER_COINS_FIELD_COINS]: String(nextUserBalance),
-      [PLAYER_COINS_FIELD_LAST_ACCRUED_MS]: String(now),
-    }),
-    redis.incrBy(KEYS.castle, -withdrawn),
+    redis.hIncrBy(
+      KEYS.PLAYER(userId),
+      FIELDS.USER_COIN_BALANCE,
+      outcome.withdrawn
+    ),
+    redis.incrBy(KEYS.CASTLE_COIN_BALANCE, -outcome.withdrawn),
   ]);
 
-  return {
-    withdrawn,
-    userBalance: nextUserBalance,
-    castleBalance: castleBalance - withdrawn,
-  };
+  return outcome;
 }

@@ -133,7 +133,7 @@ import {
   COINS_CAP,
   COINS_COST_TOWER,
   COINS_COST_WALL,
-  COINS_REGEN_RATE,
+  USER_COINS_ACCRUED_PER_SECOND,
   GRID_SIZE,
   MAX_VISIBLE_MOB_INSTANCES,
   MOB_INSTANCE_CAP,
@@ -3837,7 +3837,7 @@ const tick = (now: number, delta: number) => {
   if (!serverAuthoritative) {
     gameState.coins = Math.min(
       COINS_CAP,
-      gameState.coins + COINS_REGEN_RATE * delta
+      gameState.coins + USER_COINS_ACCRUED_PER_SECOND * delta
     );
     if (gameState.buildMode === 'wall' && gameState.coins < COINS_COST_WALL) {
       setBuildMode('off');

@@ -1,4 +1,5 @@
 import { redis } from '@devvit/web/server';
+import type { T2 } from '@devvit/web/shared';
 import { COINS_CAP } from '../../shared/content';
 import type {
   MobState,
@@ -13,7 +14,7 @@ import type {
 import { parseVec2 } from '../../shared/game-state';
 import { clamp, isRecord, safeParseJson } from '../../shared/utils';
 import { buildStaticMapStructures } from '../../shared/world/staticStructures';
-import { getPlayerCoins } from './economy';
+import { getUserCoinBalance } from './economy';
 import { KEYS } from '../core/redis';
 import { parseIntent, parsePlayerState } from './players';
 
@@ -23,9 +24,7 @@ export function parseStructureType(value: unknown): StructureState['type'] {
     : 'wall';
 }
 
-function parseStructureMetadata(
-  raw: unknown
-): StructureMetadata | undefined {
+function parseStructureMetadata(raw: unknown): StructureMetadata | undefined {
   if (!isRecord(raw)) return undefined;
   const out: StructureMetadata = {};
   const treeFootprint = Number(raw.treeFootprint ?? 0);
@@ -129,35 +128,35 @@ export function parseMapFromHash<T>(
 
 export function defaultWave(): WaveState {
   return {
-  wave: 0,
-  active: false,
-  nextWaveAtMs: 0,
-  spawners: [],
-};
+    wave: 0,
+    active: false,
+    nextWaveAtMs: 0,
+    spawners: [],
+  };
 }
 
 export function defaultMeta(nowMs: number, coins: number): WorldMeta {
   return {
-  tickSeq: 0,
-  worldVersion: 0,
-  lastTickMs: nowMs,
-  lastStructureChangeTickSeq: 0,
-  seed: nowMs,
-  coins: clamp(coins, 0, COINS_CAP),
-  lives: 1,
-  nextMobSeq: 1,
-};
+    tickSeq: 0,
+    worldVersion: 0,
+    lastTickMs: nowMs,
+    lastStructureChangeTickSeq: 0,
+    seed: nowMs,
+    coins: clamp(coins, 0, COINS_CAP),
+    lives: 1,
+    nextMobSeq: 1,
+  };
 }
 
 export async function loadWorldState(): Promise<WorldState> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
-      redis.hGetAll(KEYS.meta),
-      redis.hGetAll(KEYS.players),
-      redis.hGetAll(KEYS.intents),
-      redis.hGetAll(KEYS.structures),
-      redis.hGetAll(KEYS.mobs),
-      redis.get(KEYS.wave),
+      redis.hGetAll(KEYS.META),
+      redis.hGetAll(KEYS.PLAYERS),
+      redis.hGetAll(KEYS.INTENTS),
+      redis.hGetAll(KEYS.STRUCTURES),
+      redis.hGetAll(KEYS.MOBS),
+      redis.get(KEYS.WAVE),
     ]);
 
   const now = Date.now();
@@ -187,16 +186,16 @@ export async function loadWorldState(): Promise<WorldState> {
   const parsedWave = safeParseJson(waveRaw ?? undefined);
   function makeDefaultSpawner(): WaveState['spawners'][number] {
     return {
-    spawnerId: '',
-    totalCount: 0,
-    spawnedCount: 0,
-    aliveCount: 0,
-    spawnRatePerSecond: 0,
-    spawnAccumulator: 0,
-    gateOpen: false,
-    routeState: 'blocked',
-    route: [],
-  };
+      spawnerId: '',
+      totalCount: 0,
+      spawnedCount: 0,
+      aliveCount: 0,
+      spawnRatePerSecond: 0,
+      spawnAccumulator: 0,
+      gateOpen: false,
+      routeState: 'blocked',
+      route: [],
+    };
   }
   const wave: WaveState = isRecord(parsedWave)
     ? {
@@ -266,26 +265,26 @@ export async function persistWorldState(world: WorldState): Promise<void> {
   }
 
   await Promise.all([
-    redis.hSet(KEYS.meta, metaWrites),
-    redis.del(KEYS.players),
-    redis.del(KEYS.intents),
-    redis.del(KEYS.structures),
-    redis.del(KEYS.mobs),
-    redis.set(KEYS.wave, JSON.stringify(world.wave)),
+    redis.hSet(KEYS.META, metaWrites),
+    redis.del(KEYS.PLAYERS),
+    redis.del(KEYS.INTENTS),
+    redis.del(KEYS.STRUCTURES),
+    redis.del(KEYS.MOBS),
+    redis.set(KEYS.WAVE, JSON.stringify(world.wave)),
   ]);
 
   await Promise.all([
     Object.keys(playersWrites).length > 0
-      ? redis.hSet(KEYS.players, playersWrites)
+      ? redis.hSet(KEYS.PLAYERS, playersWrites)
       : Promise.resolve(),
     Object.keys(intentsWrites).length > 0
-      ? redis.hSet(KEYS.intents, intentsWrites)
+      ? redis.hSet(KEYS.INTENTS, intentsWrites)
       : Promise.resolve(),
     Object.keys(structureWrites).length > 0
-      ? redis.hSet(KEYS.structures, structureWrites)
+      ? redis.hSet(KEYS.STRUCTURES, structureWrites)
       : Promise.resolve(),
     Object.keys(mobWrites).length > 0
-      ? redis.hSet(KEYS.mobs, mobWrites)
+      ? redis.hSet(KEYS.MOBS, mobWrites)
       : Promise.resolve(),
   ]);
 }
@@ -294,11 +293,11 @@ export async function cleanupStalePlayersSeen(
   playerIds: string[]
 ): Promise<void> {
   if (playerIds.length === 0) return;
-  await redis.zRem(KEYS.seen, playerIds);
+  await redis.zRem(KEYS.SEEN, playerIds);
 }
 
-export async function resetGameState(nowMs: number): Promise<void> {
-  const preservedCoins = await getPlayerCoins(nowMs);
+export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
+  const preservedCoins = await getUserCoinBalance(userId);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
 
   const staticStructures = buildStaticMapStructures(nowMs);
@@ -308,7 +307,7 @@ export async function resetGameState(nowMs: number): Promise<void> {
   }
 
   await Promise.all([
-    redis.hSet(KEYS.meta, {
+    redis.hSet(KEYS.META, {
       tickSeq: String(nextMeta.tickSeq),
       worldVersion: String(nextMeta.worldVersion),
       lastTickMs: String(nextMeta.lastTickMs),
@@ -319,17 +318,17 @@ export async function resetGameState(nowMs: number): Promise<void> {
       coins: String(nextMeta.coins),
       lives: String(nextMeta.lives),
     }),
-    redis.set(KEYS.wave, JSON.stringify(defaultWave())),
-    redis.del(KEYS.players),
-    redis.del(KEYS.intents),
-    redis.del(KEYS.structures),
-    redis.del(KEYS.mobs),
-    redis.del(KEYS.queue),
-    redis.del(KEYS.seen),
-    redis.del(KEYS.snaps),
-    redis.del(KEYS.leaderLock),
+    redis.set(KEYS.WAVE, JSON.stringify(defaultWave())),
+    redis.del(KEYS.PLAYERS),
+    redis.del(KEYS.INTENTS),
+    redis.del(KEYS.STRUCTURES),
+    redis.del(KEYS.MOBS),
+    redis.del(KEYS.QUEUE),
+    redis.del(KEYS.SEEN),
+    redis.del(KEYS.SNAPS),
+    redis.del(KEYS.LEADER_LOCK),
   ]);
   if (Object.keys(structureWrites).length > 0) {
-    await redis.hSet(KEYS.structures, structureWrites);
+    await redis.hSet(KEYS.STRUCTURES, structureWrites);
   }
 }

@@ -1,21 +1,30 @@
 import { redis } from '@devvit/web/server';
+import { T2 } from '@devvit/web/shared';
 
 /**
  * The keys used for the Redis database.
  */
 export const KEYS = {
-  meta: 'meta',
-  players: 'players',
-  intents: 'intents',
-  structures: 'structures',
-  mobs: 'mobs',
-  wave: 'wave',
-  queue: 'queue',
-  seen: 'seen',
-  snaps: 'snaps',
-  leaderLock: 'leaderLock',
-  coins: 'coins',
-  castle: 'castle',
+  META: 'meta',
+  PLAYERS: 'players',
+  INTENTS: 'intents',
+  STRUCTURES: 'structures',
+  MOBS: 'mobs',
+  WAVE: 'wave',
+  QUEUE: 'queue',
+  SEEN: 'seen',
+  SNAPS: 'snaps',
+  LEADER_LOCK: 'leaderLock',
+  CASTLE_COIN_BALANCE: 'castle:coins',
+  PLAYER: (userId: T2) => `player:${userId}`, // Hash
+} as const;
+
+/**
+ * Field names for Redis hashes.
+ */
+export const FIELDS = {
+  USER_COIN_BALANCE: 'balance',
+  USER_COIN_LAST_ACCRUED_MS: 'lastAccruedMs',
 } as const;
 
 /**

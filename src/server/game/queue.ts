@@ -9,9 +9,7 @@ import { parseStructureType } from './world';
 
 const MAX_TX_RETRIES = 5;
 
-function parseCommandEnvelope(
-  value: unknown
-): CommandEnvelope | undefined {
+function parseCommandEnvelope(value: unknown): CommandEnvelope | undefined {
   if (!isRecord(value)) return undefined;
   const seq = Number(value.seq ?? -1);
   const sentAtMs = Number(value.sentAtMs ?? 0);
@@ -112,14 +110,14 @@ export async function enqueueCommand(
   envelope: CommandEnvelope
 ): Promise<{ accepted: boolean; reason?: string }> {
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(KEYS.queue);
-    const queueSize = await redis.zCard(KEYS.queue);
+    const tx = await redis.watch(KEYS.QUEUE);
+    const queueSize = await redis.zCard(KEYS.QUEUE);
     if (queueSize >= MAX_QUEUE_COMMANDS) {
       await tx.unwatch();
       return { accepted: false, reason: 'command queue is full' };
     }
     await tx.multi();
-    await tx.zAdd(KEYS.queue, {
+    await tx.zAdd(KEYS.QUEUE, {
       member: JSON.stringify(envelope),
       score: nowMs,
     });
@@ -135,8 +133,8 @@ export async function popPendingCommands(
   upToMs: number
 ): Promise<CommandEnvelope[]> {
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
-    const tx = await redis.watch(KEYS.queue);
-    const items = await redis.zRange(KEYS.queue, 0, upToMs, {
+    const tx = await redis.watch(KEYS.QUEUE);
+    const items = await redis.zRange(KEYS.QUEUE, 0, upToMs, {
       by: 'score',
       limit: { offset: 0, count: MAX_COMMANDS_PER_BATCH },
     });
@@ -162,7 +160,7 @@ export async function popPendingCommands(
     }
 
     await tx.multi();
-    await tx.zRem(KEYS.queue, membersToRemove);
+    await tx.zRem(KEYS.QUEUE, membersToRemove);
     const result = await tx.exec();
     if (result !== null) {
       return envelopes;
@@ -172,8 +170,8 @@ export async function popPendingCommands(
 }
 
 export async function trimCommandQueue(): Promise<void> {
-  const count = await redis.zCard(KEYS.queue);
+  const count = await redis.zCard(KEYS.QUEUE);
   if (count <= MAX_QUEUE_COMMANDS) return;
   const overflow = count - MAX_QUEUE_COMMANDS;
-  await redis.zRemRangeByRank(KEYS.queue, 0, overflow - 1);
+  await redis.zRemRangeByRank(KEYS.QUEUE, 0, overflow - 1);
 }

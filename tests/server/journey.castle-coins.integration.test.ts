@@ -8,7 +8,7 @@ devvitTest('castle coin deposit and withdraw journey', async () => {
     amount: 10,
   });
   expect(depositResponse.status).toBe(200);
-  const depositBody = await depositResponse.json();
+  const depositBody = (await depositResponse.json()) as Record<string, unknown>;
   expect(depositBody.type).toBe('castleCoinsDeposit');
   expect(Number(depositBody.castleCoins)).toBe(10);
 

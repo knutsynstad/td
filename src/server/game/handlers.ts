@@ -1,4 +1,5 @@
 import { reddit } from '@devvit/web/server';
+import type { T2 } from '@devvit/web/shared';
 import type {
   CommandEnvelope,
   CommandResponse,
@@ -14,11 +15,7 @@ import {
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
 import { CHANNELS } from '../core/realtime';
-import {
-  addPlayerCoins,
-  getPlayerCoins,
-  spendPlayerCoins,
-} from './economy';
+import { addUserCoins, getUserCoinBalance, spendUserCoins } from './economy';
 import {
   createDefaultPlayer,
   enforceStructureCap,
@@ -34,13 +31,15 @@ import {
 } from './gameWorld';
 import { broadcast, ensureStaticMap } from './gameLoop';
 
-async function getPlayerId(): Promise<string> {
+export async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();
   if (!username) return `anon-${Date.now()}`;
   return username.toLowerCase();
 }
 
-export async function joinGame(): Promise<JoinResponse> {
+export async function joinGame(
+  playerIdOverride?: string
+): Promise<JoinResponse> {
   const nowMs = Date.now();
   await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
   const world = await loadGameWorld();
@@ -50,7 +49,7 @@ export async function joinGame(): Promise<JoinResponse> {
   }
 
   const username = (await reddit.getCurrentUsername()) ?? 'anonymous';
-  const playerId = await getPlayerId();
+  const playerId = playerIdOverride ?? (await getPlayerId());
   const existing = world.players.get(playerId);
   const player: PlayerState =
     existing ?? createDefaultPlayer(playerId, username, nowMs);
@@ -60,7 +59,7 @@ export async function joinGame(): Promise<JoinResponse> {
   player.lastSeenMs = nowMs;
   world.players.set(playerId, player);
   await touchPlayerPresence(player);
-  const coins = await getPlayerCoins(nowMs);
+  const coins = await getUserCoinBalance(playerId as T2);
   world.meta.coins = coins;
 
   const joinDelta: GameDelta = {
@@ -83,10 +82,13 @@ export async function joinGame(): Promise<JoinResponse> {
 }
 
 export async function applyCommand(
-  envelope: CommandEnvelope
+  envelope: CommandEnvelope,
+  playerIdOverride?: string
 ): Promise<CommandResponse> {
   const nowMs = Date.now();
   let spentBuildCoins = 0;
+
+  const resolvePlayerId = async () => playerIdOverride ?? getPlayerId();
 
   if (
     envelope.command.type === 'buildStructure' ||
@@ -122,8 +124,9 @@ export async function applyCommand(
       (total, structure) => total + getStructureCoinCost(structure.type),
       0
     );
-    const spendResult = await spendPlayerCoins(coinCost, nowMs);
-    if (!spendResult.ok) {
+    const playerId = (await resolvePlayerId()) as T2;
+    const spendResult = await spendUserCoins(playerId, coinCost);
+    if (!spendResult.success) {
       const world = await loadWorldState();
       return {
         type: 'commandAck',
@@ -139,7 +142,8 @@ export async function applyCommand(
   const enqueueResult = await enqueueCommand(nowMs, envelope);
   if (!enqueueResult.accepted) {
     if (spentBuildCoins > 0) {
-      await addPlayerCoins(spentBuildCoins, nowMs);
+      const playerId = (await resolvePlayerId()) as T2;
+      await addUserCoins(playerId, spentBuildCoins);
     }
     const world = await loadWorldState();
     return {
@@ -185,8 +189,11 @@ export async function heartbeatGame(
   };
 }
 
-export async function getCoinBalance(): Promise<number> {
-  return getPlayerCoins(Date.now());
+export async function getCoinBalance(
+  playerIdOverride?: string
+): Promise<number> {
+  const playerId = (playerIdOverride ?? (await getPlayerId())) as T2;
+  return getUserCoinBalance(playerId);
 }
 
 export type GamePreview = {
@@ -205,26 +212,28 @@ export async function getGamePreview(): Promise<GamePreview> {
 }
 
 export async function resyncGame(
-  _playerId?: string
+  playerIdOverride?: string
 ): Promise<ResyncResponse> {
   const world = await loadGameWorld();
   const staticSync = ensureStaticMap(world);
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
     await flushGameWorld(world);
   }
-  world.meta.coins = await getPlayerCoins(Date.now());
+  const playerId = (playerIdOverride ?? (await getPlayerId())) as T2;
+  world.meta.coins = await getUserCoinBalance(playerId);
   return {
     type: 'snapshot',
     snapshot: gameWorldToSnapshot(world),
   };
 }
 
-export async function resetGame(): Promise<{
+export async function resetGame(playerIdOverride?: string): Promise<{
   tickSeq: number;
   worldVersion: number;
 }> {
   const nowMs = Date.now();
-  await resetGameState(nowMs);
+  const playerId = (playerIdOverride ?? (await getPlayerId())) as T2;
+  await resetGameState(nowMs, playerId);
   const world = await loadWorldState();
   await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
     {
