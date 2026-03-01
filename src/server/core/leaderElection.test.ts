@@ -107,6 +107,34 @@ test('pollForLeadership returns false on timeout', async () => {
   await releaseLock(k, 'owner-a');
 });
 
+test('pollForLeadership uses leaderWindowMs for expected release timing', async () => {
+  const { redis } = await import('@devvit/web/server');
+  const k = key('poll-leader-window');
+  const leaderStart = Date.now();
+  await redis.set(k, `leader:${leaderStart}:abc123`, {
+    expiration: new Date(Date.now() + 60_000),
+  });
+
+  const releaser = (async () => {
+    await new Promise((r) => setTimeout(r, 80));
+    await releaseLock(k, `leader:${leaderStart}:abc123`);
+  })();
+
+  const acquired = await pollForLeadership({
+    lockKey: k,
+    candidateToken: 'candidate-a',
+    lockTtlSeconds: 70,
+    waitMs: 200,
+    pollIntervalMs: 20,
+    leaderWindowMs: 50,
+    aggressivePoll: { windowMs: 40, intervalMs: 10 },
+  });
+  await releaser;
+  expect(acquired).toBe(true);
+  expect(await verifyLock(k, 'candidate-a')).toBe(true);
+  await releaseLock(k, 'candidate-a');
+});
+
 test('pollForLeadership aborts when shouldContinue returns false', async () => {
   const k = key('poll-abort');
   await acquireLock(k, 'owner-a', 300);

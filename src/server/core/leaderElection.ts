@@ -17,6 +17,7 @@ export type PollForLeadershipOptions = {
   lockTtlSeconds: number;
   waitMs: number;
   pollIntervalMs: number;
+  leaderWindowMs?: number;
   aggressivePoll?: AggressivePoll;
   heartbeat?: LeaderHeartbeat;
   shouldContinue?: () => Promise<boolean>;
@@ -109,6 +110,7 @@ export async function pollForLeadership(
     lockTtlSeconds,
     waitMs,
     pollIntervalMs,
+    leaderWindowMs,
     aggressivePoll,
     heartbeat,
     shouldContinue,
@@ -119,7 +121,10 @@ export async function pollForLeadership(
   if (aggressivePoll) {
     const leaderStart = await parseLeaderStartTimeMs(lockKey);
     if (leaderStart !== null) {
-      const expectedRelease = leaderStart + (waitMs - aggressivePoll.windowMs);
+      const expectedRelease =
+        leaderWindowMs != null
+          ? leaderStart + leaderWindowMs
+          : leaderStart + (waitMs - aggressivePoll.windowMs);
       const coarseSleepTarget = Math.max(
         0,
         Math.min(

@@ -28,6 +28,7 @@ export type TickLoopConfig = {
   followerPollIntervalMs?: number;
   followerAggressivePollWindowMs?: number;
   followerAggressivePollIntervalMs?: number;
+  followerLeaderWindowMs?: number;
   heartbeatKey?: string;
   heartbeatStaleMs?: number;
   followerGateKey?: string;
@@ -103,6 +104,7 @@ export async function runTickLoop<TState>(
       lockTtlSeconds: config.lockTtlSeconds,
       waitMs: config.followerPollMs,
       pollIntervalMs: config.followerPollIntervalMs,
+      leaderWindowMs: config.followerLeaderWindowMs,
       aggressivePoll:
         config.followerAggressivePollWindowMs != null &&
         config.followerAggressivePollIntervalMs != null

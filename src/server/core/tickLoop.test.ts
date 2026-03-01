@@ -247,6 +247,68 @@ describe('runTickLoop', () => {
     );
   });
 
+  it('forwards followerLeaderWindowMs as leaderWindowMs to pollForLeadership', async () => {
+    vi.mocked(acquireLock).mockResolvedValue(false);
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
+      vi.advanceTimersByTime(50);
+      return true;
+    });
+
+    const config: TickLoopConfig = {
+      ...baseConfig,
+      followerPollMs: 80,
+      followerPollIntervalMs: 500,
+      followerAggressivePollWindowMs: 2_000,
+      followerAggressivePollIntervalMs: 50,
+      followerLeaderWindowMs: 20_000,
+    };
+
+    const onInit = vi.fn().mockResolvedValue(null);
+    const onTick = vi.fn().mockImplementation(async () => {
+      vi.advanceTimersByTime(config.tickIntervalMs);
+      return TICK_RESULT;
+    });
+    const onTeardown = vi.fn().mockResolvedValue(undefined);
+
+    await runTickLoop(config, { onInit, onTick, onTeardown });
+
+    expect(pollForLeadership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        leaderWindowMs: 20_000,
+        aggressivePoll: { windowMs: 2_000, intervalMs: 50 },
+      })
+    );
+  });
+
+  it('omits leaderWindowMs when followerLeaderWindowMs is not set', async () => {
+    vi.mocked(acquireLock).mockResolvedValue(false);
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
+      vi.advanceTimersByTime(50);
+      return true;
+    });
+
+    const config: TickLoopConfig = {
+      ...baseConfig,
+      followerPollMs: 80,
+      followerPollIntervalMs: 500,
+    };
+
+    const onInit = vi.fn().mockResolvedValue(null);
+    const onTick = vi.fn().mockImplementation(async () => {
+      vi.advanceTimersByTime(config.tickIntervalMs);
+      return TICK_RESULT;
+    });
+    const onTeardown = vi.fn().mockResolvedValue(undefined);
+
+    await runTickLoop(config, { onInit, onTick, onTeardown });
+
+    expect(pollForLeadership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        leaderWindowMs: undefined,
+      })
+    );
+  });
+
   it('caps tick window by time spent as follower', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
     vi.mocked(pollForLeadership).mockImplementation(async () => {

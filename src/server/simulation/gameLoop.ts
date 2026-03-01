@@ -166,6 +166,7 @@ export function runGameLoop(
       followerPollIntervalMs: FOLLOWER_POLL_INTERVAL_MS,
       followerAggressivePollWindowMs: FOLLOWER_AGGRESSIVE_POLL_WINDOW_MS,
       followerAggressivePollIntervalMs: FOLLOWER_AGGRESSIVE_POLL_INTERVAL_MS,
+      followerLeaderWindowMs: LEADER_BROADCAST_WINDOW_MS,
       heartbeatKey: KEYS.LEADER_HEARTBEAT,
       heartbeatStaleMs: LEADER_HEARTBEAT_STALE_MS,
       followerGateKey: KEYS.FOLLOWER_GATE,
