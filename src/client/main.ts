@@ -2063,7 +2063,7 @@ const setupAuthoritativeBridge = async () => {
         const RESYNC_ATTEMPTS = 3;
         const RESYNC_INITIAL_DELAY_MS = 300;
         const attemptResync = (attempt: number) => {
-          hudUpdaters.triggerEventBanner?.('Reconnecting…', 30);
+          console.log('Resyncing…');
           const delayMs =
             attempt === 0
               ? RESYNC_INITIAL_DELAY_MS
@@ -2081,15 +2081,12 @@ const setupAuthoritativeBridge = async () => {
                   attemptResync(attempt + 1);
                 } else {
                   resyncInProgressRef.current = false;
-                  hudUpdaters.triggerEventBanner?.(
-                    'Reconnect failed - refresh to try again',
-                    6
-                  );
+                  console.warn('Resync failed - refresh to try again');
                 }
               })
               .then(() => {
                 resyncInProgressRef.current = false;
-                hudUpdaters.clearEventBanner?.();
+                console.log('Resynced');
               });
           }, delayMs);
         };
