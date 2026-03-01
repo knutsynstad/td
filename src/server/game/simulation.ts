@@ -13,7 +13,10 @@ import type {
   StructureState,
   WorldMeta,
 } from '../../shared/game-state';
-import { getStructureFootprint, STRUCTURE_DEFS } from '../../shared/content/structures';
+import {
+  getStructureFootprint,
+  STRUCTURE_DEFS,
+} from '../../shared/content/structures';
 import { getTowerDef, getTowerDps } from '../../shared/content/towers';
 import { MOB_DEFS, DEFAULT_MOB_TYPE } from '../../shared/content/mobs';
 import {
@@ -22,7 +25,11 @@ import {
   WAVE_MIN_SPAWNERS,
   WAVE_MAX_SPAWNERS,
 } from '../../shared/content/waves';
-import { WORLD_BOUNDS, GRID_SIZE, CASTLE_HALF_EXTENT } from '../../shared/content/world';
+import {
+  WORLD_BOUNDS,
+  GRID_SIZE,
+  CASTLE_HALF_EXTENT,
+} from '../../shared/content/world';
 import {
   clamp,
   distance2d,

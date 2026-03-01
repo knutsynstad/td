@@ -37,10 +37,7 @@ export async function loadWorldState(): Promise<WorldState> {
     meta: parseMeta(metaRaw),
     players: parseMapFromHash<PlayerState>(playersRaw, parsePlayerState),
     intents: parseMapFromHash<PlayerIntent>(intentsRaw, parseIntent),
-    structures: parseMapFromHash<StructureState>(
-      structuresRaw,
-      parseStructure
-    ),
+    structures: parseMapFromHash<StructureState>(structuresRaw, parseStructure),
     mobs: parseMapFromHash<MobState>(mobsRaw, parseMob),
     wave: parseWaveState(waveRaw ?? undefined),
   };
@@ -112,10 +109,7 @@ export async function cleanupStalePlayersSeen(
   await redis.zRem(KEYS.SEEN, playerIds);
 }
 
-export async function resetGameState(
-  nowMs: number,
-  userId: T2
-): Promise<void> {
+export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
   const preservedCoins = await getUserCoinBalance(userId);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
 

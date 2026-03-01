@@ -1,6 +1,13 @@
 import type { StructureState } from '../../shared/game-state';
-import { aabbFromCenter, intersectsAabb, type Aabb2d } from '../../shared/utils';
-import { generateSeededWorldFeatures, type RockPlacement } from '../../shared/world/seededWorld';
+import {
+  aabbFromCenter,
+  intersectsAabb,
+  type Aabb2d,
+} from '../../shared/utils';
+import {
+  generateSeededWorldFeatures,
+  type RockPlacement,
+} from '../../shared/world/seededWorld';
 import { hashSeed } from '../../shared/world/rng';
 
 const WORLD_BOUNDS = 64;
