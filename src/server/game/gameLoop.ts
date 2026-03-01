@@ -11,15 +11,12 @@ import {
   FOLLOWER_POLL_MS,
   LOCK_REFRESH_INTERVAL_TICKS,
   PLAYER_POSITION_BROADCAST_INTERVAL_TICKS,
+  SIM_TICK_MS,
 } from '../config';
 import { KEYS } from '../core/keys';
 import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
 import { runTickLoop, type TickContext } from '../core/tickLoop';
-import {
-  buildPresenceLeaveDelta,
-  runSimulation,
-  SIM_TICK_MS,
-} from './simulation';
+import { buildPresenceLeaveDelta, runSimulation } from './simulation';
 import { ensureStaticMap } from './staticMap';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {

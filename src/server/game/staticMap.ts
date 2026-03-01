@@ -4,16 +4,15 @@ import {
   intersectsAabb,
   type Aabb2d,
 } from '../../shared/utils';
+import { WORLD_BOUNDS, CASTLE_HALF_EXTENT } from '../../shared/content/world';
 import {
   generateSeededWorldFeatures,
   type RockPlacement,
 } from '../../shared/world/seededWorld';
 import { hashSeed } from '../../shared/world/rng';
 
-const WORLD_BOUNDS = 64;
 const WORLD_SEED_INPUT: string | number = 'alpha valley 01';
 const WORLD_SEED = hashSeed(WORLD_SEED_INPUT);
-const CASTLE_HALF_EXTENT = 4;
 const SPAWNER_ENTRY_INSET_CELLS = 3;
 const SPAWNER_CLEARANCE_LENGTH_CELLS = 18;
 const SPAWNER_CLEARANCE_HALF_WIDTH_CELLS = 4;

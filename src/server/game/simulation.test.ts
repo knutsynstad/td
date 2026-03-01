@@ -7,9 +7,9 @@ import {
   FULL_MOB_DELTA_INTERVAL_MS,
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
   MAX_DELTA_MOBS,
-  runSimulation,
   SIM_TICK_MS,
-} from './simulation';
+} from '../config';
+import { runSimulation } from './simulation';
 
 function world(nowMs: number): GameWorld {
   return {

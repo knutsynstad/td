@@ -1,11 +1,13 @@
 import { redis } from '@devvit/web/server';
 import type { CommandEnvelope } from '../../shared/game-protocol';
 import { safeParseJson } from '../../shared/utils';
-import { MAX_COMMANDS_PER_BATCH, MAX_QUEUE_COMMANDS } from '../config';
+import {
+  MAX_COMMANDS_PER_BATCH,
+  MAX_QUEUE_COMMANDS,
+  MAX_TX_RETRIES,
+} from '../config';
 import { KEYS } from '../core/keys';
 import { parseCommandEnvelope } from './parse';
-
-const MAX_TX_RETRIES = 5;
 
 export async function enqueueCommand(
   nowMs: number,
