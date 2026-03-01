@@ -1,5 +1,5 @@
 import type { GameDelta } from '../../shared/game-protocol';
-import type { GameWorld, StructureState } from '../../shared/game-state';
+import type { GameWorld } from '../../shared/game-state';
 import {
   LEADER_BROADCAST_WINDOW_MS,
   LEADER_HEARTBEAT_STALE_MS,
@@ -22,11 +22,7 @@ import {
   runSimulation,
   SIM_TICK_MS,
 } from './simulation';
-import {
-  buildStaticMapStructures,
-  hasStaticMapStructures,
-  sanitizeStaticMapStructures,
-} from './staticMap';
+import { ensureStaticMap } from './staticMap';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {
   flushGameWorld,
@@ -35,25 +31,6 @@ import {
   findAndRemoveStalePlayersInMemory,
 } from './trackedState';
 import { cleanupStalePlayersSeen } from './persistence';
-
-export function ensureStaticMap(world: {
-  structures: Map<string, StructureState>;
-  meta: { lastTickMs: number; worldVersion: number };
-}): { upserts: StructureState[]; removes: string[] } {
-  const removes = sanitizeStaticMapStructures(world.structures);
-  if (hasStaticMapStructures(world.structures)) {
-    if (removes.length > 0) world.meta.worldVersion += 1;
-    return { upserts: [], removes };
-  }
-  const statics = buildStaticMapStructures(world.meta.lastTickMs);
-  const upserts: StructureState[] = [];
-  for (const [id, structure] of Object.entries(statics)) {
-    world.structures.set(id, structure);
-    upserts.push(structure);
-  }
-  if (upserts.length > 0 || removes.length > 0) world.meta.worldVersion += 1;
-  return { upserts, removes };
-}
 
 async function onGameTick(
   world: GameWorld,

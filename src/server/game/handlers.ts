@@ -29,7 +29,7 @@ import {
   gameWorldToSnapshot,
   loadGameWorld,
 } from './trackedState';
-import { ensureStaticMap } from './gameLoop';
+import { ensureStaticMap } from './staticMap';
 
 export async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();

@@ -220,3 +220,22 @@ export function hasStaticMapStructures(
   }
   return false;
 }
+
+export function ensureStaticMap(world: {
+  structures: Map<string, StructureState>;
+  meta: { lastTickMs: number; worldVersion: number };
+}): { upserts: StructureState[]; removes: string[] } {
+  const removes = sanitizeStaticMapStructures(world.structures);
+  if (hasStaticMapStructures(world.structures)) {
+    if (removes.length > 0) world.meta.worldVersion += 1;
+    return { upserts: [], removes };
+  }
+  const statics = buildStaticMapStructures(world.meta.lastTickMs);
+  const upserts: StructureState[] = [];
+  for (const [id, structure] of Object.entries(statics)) {
+    world.structures.set(id, structure);
+    upserts.push(structure);
+  }
+  if (upserts.length > 0 || removes.length > 0) world.meta.worldVersion += 1;
+  return { upserts, removes };
+}
