@@ -1,9 +1,6 @@
 import type { GameWorld, MobState, WorldMeta } from '../../shared/game-state';
 import { MOB_DEFS, DEFAULT_MOB_TYPE } from '../../shared/content/mobs';
-import {
-  getWaveMobCount,
-  getWaveSpawnRate,
-} from '../../shared/content/waves';
+import { getWaveMobCount, getWaveSpawnRate } from '../../shared/content/waves';
 import { weightedSplit } from '../../shared/utils';
 import {
   MAX_MOBS,

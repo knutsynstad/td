@@ -81,7 +81,9 @@ export const toSideDef = (spawnerId: string): SideDef => {
   return SIDE_DEFS[0]!;
 };
 
-export const getSpawnerEntryPoint = (side: SideDef): { x: number; z: number } => {
+export const getSpawnerEntryPoint = (
+  side: SideDef
+): { x: number; z: number } => {
   const inset = GRID_SIZE * SPAWNER_ENTRY_INSET_CELLS;
   const x = Math.round(side.door.x - side.outward.x * inset);
   const z = Math.round(side.door.z - side.outward.z * inset);
@@ -91,7 +93,9 @@ export const getSpawnerEntryPoint = (side: SideDef): { x: number; z: number } =>
   };
 };
 
-export const getSpawnerSpawnPoint = (side: SideDef): { x: number; z: number } => {
+export const getSpawnerSpawnPoint = (
+  side: SideDef
+): { x: number; z: number } => {
   const lateralJitter = (Math.random() - 0.5) * 2.8;
   const alongBridgeJitter = Math.random() * 1.8;
   const towardMapX = -side.outward.x;

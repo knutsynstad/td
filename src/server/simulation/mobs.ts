@@ -1,4 +1,8 @@
-import type { GameWorld, MobState, StructureState } from '../../shared/game-state';
+import type {
+  GameWorld,
+  MobState,
+  StructureState,
+} from '../../shared/game-state';
 import { getTowerDef, getTowerDps } from '../../shared/content/towers';
 import { WORLD_BOUNDS } from '../../shared/content/world';
 import { distance2d, hashString01, normalize2d } from '../../shared/utils';
