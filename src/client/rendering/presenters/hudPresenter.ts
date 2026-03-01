@@ -19,11 +19,12 @@ type HudState = {
   coins: number;
   wave: number;
   waveComplete: boolean;
-  nextWaveAt: number;
+  nextWaveAtMs: number;
   now: number;
   mobsCount: number;
   coinsPopTimer: number;
   shootCooldown: number;
+  toPerfTime: (serverEpochMs: number) => number;
 };
 
 type HudOptions = {
@@ -47,11 +48,15 @@ export const updateHud = (
     elements.coinsCountEl.classList.remove('pop');
   }
 
-  const isPreWaveCountdown = state.wave === 0 && state.nextWaveAt !== 0;
+  const isPreWaveCountdown = state.wave === 0 && state.nextWaveAtMs !== 0;
   const showNextWave =
-    state.nextWaveAt !== 0 && (state.waveComplete || isPreWaveCountdown);
+    state.nextWaveAtMs !== 0 && (state.waveComplete || isPreWaveCountdown);
+  const nextWaveAtPerf =
+    showNextWave && state.nextWaveAtMs > 0
+      ? state.toPerfTime(state.nextWaveAtMs)
+      : 0;
   const nextWaveIn = showNextWave
-    ? Math.max(0, Math.ceil((state.nextWaveAt - state.now) / 1000))
+    ? Math.max(0, Math.ceil((nextWaveAtPerf - state.now) / 1000))
     : 0;
   elements.waveEl.textContent = String(
     showNextWave ? state.wave + 1 : state.wave

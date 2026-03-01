@@ -4239,11 +4239,12 @@ const tick = (now: number, delta: number) => {
       coins: gameState.coins,
       wave: gameState.wave,
       waveComplete,
-      nextWaveAt: gameState.nextWaveAt,
+      nextWaveAtMs: gameState.nextWaveAtMs,
       now,
       mobsCount: mobs.length,
       coinsPopTimer: gameState.coinsPopTimer,
       shootCooldown: gameState.shootCooldown,
+      toPerfTime: authoritativeSync.toPerfTime,
     },
     {
       coinCostWall: COINS_COST_WALL,
@@ -4256,11 +4257,16 @@ const tick = (now: number, delta: number) => {
     hudUpdaters.triggerEventBanner('Wave cleared');
   }
 
-  const isPreWaveCountdown = gameState.wave === 0 && gameState.nextWaveAt !== 0;
+  const isPreWaveCountdown =
+    gameState.wave === 0 && gameState.nextWaveAtMs !== 0;
   const showNextWave =
-    gameState.nextWaveAt !== 0 && (waveComplete || isPreWaveCountdown);
+    gameState.nextWaveAtMs !== 0 && (waveComplete || isPreWaveCountdown);
+  const nextWaveAtPerf =
+    showNextWave && gameState.nextWaveAtMs > 0
+      ? authoritativeSync.toPerfTime(gameState.nextWaveAtMs)
+      : 0;
   const nextWaveIn = showNextWave
-    ? Math.max(0, Math.ceil((gameState.nextWaveAt - now) / 1000))
+    ? Math.max(0, Math.ceil((nextWaveAtPerf - now) / 1000))
     : 0;
   if (showNextWave && nextWaveIn >= 1 && nextWaveIn <= 5) {
     if (nextWaveIn !== gameState.lastCountdownBannerSecond) {

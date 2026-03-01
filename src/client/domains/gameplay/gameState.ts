@@ -6,7 +6,7 @@ export type GameState = {
   shootCooldown: number;
   wave: number;
   lives: number;
-  nextWaveAt: number;
+  nextWaveAtMs: number;
   coins: number;
   castleCoins: number;
   eventBannerTimer: number;
@@ -21,7 +21,7 @@ export const createGameState = (coinsCap: number): GameState => ({
   shootCooldown: 0,
   wave: 0,
   lives: 1,
-  nextWaveAt: 0,
+  nextWaveAtMs: 0,
   coins: coinsCap,
   castleCoins: 0,
   eventBannerTimer: 0,

@@ -61,7 +61,7 @@ type GameState = {
   wave: number;
   lives: number;
   coins: number;
-  nextWaveAt: number;
+  nextWaveAtMs: number;
 };
 
 export type AuthoritativeSyncContext = {
@@ -327,8 +327,7 @@ export const createAuthoritativeSync = (
     ctx.gameState.lives = world.lives;
     ctx.gameState.coins = Math.max(0, Math.min(ctx.COINS_CAP, world.coins));
     ctx.serverWaveActiveRef.current = wave.active;
-    ctx.gameState.nextWaveAt =
-      wave.nextWaveAtMs > 0 ? toPerfTime(wave.nextWaveAtMs) : 0;
+    ctx.gameState.nextWaveAtMs = wave.nextWaveAtMs > 0 ? wave.nextWaveAtMs : 0;
     syncServerWaveSpawners(wave);
   };
 
@@ -929,8 +928,8 @@ export const createAuthoritativeSync = (
   const applyServerWaveDelta = (delta: WaveDelta) => {
     ctx.gameState.wave = delta.wave.wave;
     ctx.serverWaveActiveRef.current = delta.wave.active;
-    ctx.gameState.nextWaveAt =
-      delta.wave.nextWaveAtMs > 0 ? toPerfTime(delta.wave.nextWaveAtMs) : 0;
+    ctx.gameState.nextWaveAtMs =
+      delta.wave.nextWaveAtMs > 0 ? delta.wave.nextWaveAtMs : 0;
     if (delta.lives !== undefined) {
       ctx.gameState.lives = delta.lives;
     }
@@ -944,7 +943,7 @@ export const createAuthoritativeSync = (
   ) => {
     ctx.gameState.wave = wave;
     ctx.serverWaveActiveRef.current = active;
-    ctx.gameState.nextWaveAt = nextWaveAtMs > 0 ? toPerfTime(nextWaveAtMs) : 0;
+    ctx.gameState.nextWaveAtMs = nextWaveAtMs > 0 ? nextWaveAtMs : 0;
   };
 
   const applyServerSnapshot = (snapshot: SharedWorldState) => {
