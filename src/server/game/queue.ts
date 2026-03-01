@@ -105,6 +105,9 @@ function parseCommandEnvelope(value: unknown): CommandEnvelope | undefined {
   return undefined;
 }
 
+/**
+ * Atomically enqueue a command into the sorted-set queue, retrying on contention.
+ */
 export async function enqueueCommand(
   nowMs: number,
   envelope: CommandEnvelope
@@ -129,6 +132,9 @@ export async function enqueueCommand(
   return { accepted: false, reason: 'queue contention' };
 }
 
+/**
+ * Atomically pop and return all pending commands scored up to upToMs, retrying on contention.
+ */
 export async function popPendingCommands(
   upToMs: number
 ): Promise<CommandEnvelope[]> {
@@ -169,6 +175,9 @@ export async function popPendingCommands(
   return [];
 }
 
+/**
+ * Trim the command queue to MAX_QUEUE_COMMANDS by removing the oldest entries.
+ */
 export async function trimCommandQueue(): Promise<void> {
   const count = await redis.zCard(KEYS.QUEUE);
   if (count <= MAX_QUEUE_COMMANDS) return;

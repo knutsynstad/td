@@ -1,12 +1,12 @@
 import { redis } from '@devvit/web/server';
-import { T2 } from '@devvit/web/shared';
+import type { T2 } from '@devvit/web/shared';
 
 /**
  * The keys used for the Redis database.
  */
 export const KEYS = {
   META: 'meta',
-  PLAYERS: 'players',
+  PLAYERS: 'p:all',
   INTENTS: 'intents',
   STRUCTURES: 'structures',
   MOBS: 'mobs',
@@ -16,88 +16,73 @@ export const KEYS = {
   SNAPS: 'snaps',
   LEADER_LOCK: 'leaderLock',
   CASTLE_COIN_BALANCE: 'castle:coins',
-  PLAYER: (userId: T2) => `player:${userId}`, // Hash
+  PLAYER: (userId: T2) => `p:${userId}`, // Hash
 } as const;
 
 /**
  * Field names for Redis hashes.
  */
 export const FIELDS = {
-  USER_COIN_BALANCE: 'balance',
+  USER_COIN_BALANCE: 'coins',
   USER_COIN_LAST_ACCRUED_MS: 'lastAccruedMs',
 } as const;
 
 /**
  * Sleep for a given number of milliseconds.
- * @param ms - The number of milliseconds to sleep.
- * @returns A promise that resolves when the sleep is complete.
  */
-export const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
 
 /**
- * Acquire a lock on a given key.
- * @param key - The key to acquire the lock on.
- * @param ownerToken - The token of the owner of the lock.
- * @param ttlSeconds - The time to live for the lock in seconds.
- * @returns A promise that resolves to true if the lock was acquired, false otherwise.
+ * Acquire a lock on a given key using SET NX with expiration.
  */
-export const acquireLock = async (
+export async function acquireLock(
   key: string,
   ownerToken: string,
   ttlSeconds: number
-): Promise<boolean> => {
+): Promise<boolean> {
   const result = await redis.set(key, ownerToken, {
     expiration: new Date(Date.now() + ttlSeconds * 1000),
     nx: true,
   });
   return Boolean(result);
-};
+}
 
 /**
- * Verify that the given token is the owner of the lock on the given key.
- * @param key - The key to verify the lock on.
- * @param ownerToken - The token of the owner of the lock.
- * @returns A promise that resolves to true if the token is the owner of the lock, false otherwise.
+ * Verify that the given token is the owner of the lock on a key.
  */
-export const verifyLock = async (
+export async function verifyLock(
   key: string,
   ownerToken: string
-): Promise<boolean> => {
+): Promise<boolean> {
   const current = await redis.get(key);
   return current === ownerToken;
-};
+}
 
 /**
- * Refresh the lock on a given key.
- * @param key - The key to refresh the lock on.
- * @param ownerToken - The token of the owner of the lock.
- * @param ttlSeconds - The time to live for the lock in seconds.
- * @returns A promise that resolves to true if the lock was refreshed, false otherwise.
+ * Refresh the TTL on a lock, only if the caller still owns it.
  */
-export const refreshLock = async (
+export async function refreshLock(
   key: string,
   ownerToken: string,
   ttlSeconds: number
-): Promise<boolean> => {
+): Promise<boolean> {
   const current = await redis.get(key);
   if (current !== ownerToken) return false;
   await redis.expire(key, ttlSeconds);
   return true;
-};
+}
 
 /**
- * Release a lock on a given key.
- * @param key - The key to release the lock on.
- * @param ownerToken - The token of the owner of the lock.
- * @returns A promise that resolves when the lock is released.
+ * Release a lock using an optimistic transaction to avoid deleting a stolen lock.
  */
-export const releaseLock = async (
+export async function releaseLock(
   key: string,
   ownerToken: string
-): Promise<void> => {
+): Promise<void> {
   const tx = await redis.watch(key);
   const current = await redis.get(key);
   if (current !== ownerToken) {
@@ -107,4 +92,4 @@ export const releaseLock = async (
   await tx.multi();
   await tx.del(key);
   await tx.exec();
-};
+}

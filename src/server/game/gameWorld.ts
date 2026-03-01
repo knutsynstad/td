@@ -73,6 +73,9 @@ function parseWaveState(waveRaw: string | undefined): WaveState {
   };
 }
 
+/**
+ * Load the full game world from Redis using TrackedMaps for incremental flush.
+ */
 export async function loadGameWorld(): Promise<GameWorld> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
@@ -115,6 +118,9 @@ export async function loadGameWorld(): Promise<GameWorld> {
   };
 }
 
+/**
+ * Write only the dirty (upserted/removed) entries from the in-memory world back to Redis.
+ */
 export async function flushGameWorld(world: GameWorld): Promise<void> {
   const ops: Promise<unknown>[] = [];
 
@@ -173,6 +179,9 @@ export async function flushGameWorld(world: GameWorld): Promise<void> {
   await Promise.all(ops);
 }
 
+/**
+ * Convert the TrackedMap-based GameWorld into a plain-record WorldState for client snapshots.
+ */
 export function gameWorldToSnapshot(world: GameWorld): WorldState {
   function toRecord<V>(map: Map<string, V>): Record<string, V> {
     const record: Record<string, V> = {};
@@ -192,6 +201,9 @@ export function gameWorldToSnapshot(world: GameWorld): WorldState {
   };
 }
 
+/**
+ * Merge freshly-joined players from Redis into the in-memory world, preferring the latest lastSeenMs.
+ */
 export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
   const [playersRaw, intentsRaw] = await Promise.all([
     redis.hGetAll(KEYS.PLAYERS),
@@ -222,6 +234,9 @@ export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
   }
 }
 
+/**
+ * Remove players from the in-memory world whose lastSeenMs is older than cutoffMs.
+ */
 export function findAndRemoveStalePlayersInMemory(
   world: GameWorld,
   cutoffMs: number,

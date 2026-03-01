@@ -10,17 +10,13 @@ export const CHANNELS = {
 } as const;
 
 /**
- * Broadcast a list of events to a given channel. Batches the events into chunks of MAX_BATCH_EVENTS per message.
- * @param channel - The channel to broadcast the events to.
- * @param events - The events to broadcast.
- * @param wrapBatch - A function that wraps a batch of events into a JSON value.
- * @returns A promise that resolves when the events are broadcast.
+ * Broadcast a list of events to a channel, batched into chunks of MAX_BATCH_EVENTS per message.
  */
-export const broadcast = async <T>(
+export async function broadcast<T>(
   channel: string,
   events: T[],
   wrapBatch: (batch: T[]) => JsonValue
-): Promise<void> => {
+): Promise<void> {
   if (events.length === 0) return;
 
   // TODO: Investigate sending messages in parallel and any additional client handling required to support out-of-order delivery.
@@ -33,4 +29,4 @@ export const broadcast = async <T>(
       console.error('Realtime broadcast failed', { channel, error });
     }
   }
-};
+}

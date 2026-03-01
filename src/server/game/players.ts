@@ -10,6 +10,9 @@ import { isRecord } from '../../shared/utils';
 import { MAX_STRUCTURES } from '../config';
 import { KEYS } from '../core/redis';
 
+/**
+ * Parse a raw value into a PlayerState, returning a zeroed default on invalid input.
+ */
 export function parsePlayerState(value: unknown): PlayerState {
   if (!isRecord(value)) {
     return {
@@ -31,6 +34,9 @@ export function parsePlayerState(value: unknown): PlayerState {
   };
 }
 
+/**
+ * Parse a raw value into a PlayerIntent, returning a zeroed default on invalid input.
+ */
 export function parseIntent(value: unknown): PlayerIntent {
   if (!isRecord(value)) {
     return { updatedAtMs: 0 };
@@ -43,6 +49,9 @@ export function parseIntent(value: unknown): PlayerIntent {
   return parsed;
 }
 
+/**
+ * Write the player's state to the PLAYERS hash and update their SEEN score.
+ */
 export async function touchPlayerPresence(player: PlayerState): Promise<void> {
   await Promise.all([
     redis.hSet(KEYS.PLAYERS, { [player.playerId]: JSON.stringify(player) }),
@@ -53,6 +62,9 @@ export async function touchPlayerPresence(player: PlayerState): Promise<void> {
   ]);
 }
 
+/**
+ * Delete one or more players from the PLAYERS, INTENTS, and SEEN stores.
+ */
 export async function removePlayers(playerIds: string[]): Promise<void> {
   if (playerIds.length === 0) return;
   await Promise.all([
@@ -62,6 +74,9 @@ export async function removePlayers(playerIds: string[]): Promise<void> {
   ]);
 }
 
+/**
+ * Evict players whose lastSeenMs is at or before the cutoff, up to the given limit.
+ */
 export async function removeOldPlayersByLastSeen(
   cutoffMs: number,
   limit = 250
@@ -76,12 +91,18 @@ export async function removeOldPlayersByLastSeen(
   return playerIds;
 }
 
+/**
+ * Return true if adding incomingCount structures would stay within MAX_STRUCTURES.
+ */
 export async function enforceStructureCap(incomingCount = 1): Promise<boolean> {
   const count = await redis.hLen(KEYS.STRUCTURES);
   const safeIncoming = Math.max(0, Math.floor(incomingCount));
   return count + safeIncoming <= MAX_STRUCTURES;
 }
 
+/**
+ * Create a new player at the default spawn position.
+ */
 export function createDefaultPlayer(
   playerId: string,
   username: string,

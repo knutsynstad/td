@@ -30,6 +30,9 @@ import {
 } from './gameWorld';
 import { cleanupStalePlayersSeen } from './world';
 
+/**
+ * Broadcast game deltas to all connected clients on the game channel.
+ */
 export async function broadcast(
   worldVersion: number,
   tickSeq: number,
@@ -46,6 +49,9 @@ export async function broadcast(
   });
 }
 
+/**
+ * Ensure the static map structures exist in the world, inserting or sanitizing as needed.
+ */
 export function ensureStaticMap(world: {
   structures: Map<string, StructureState>;
   meta: { lastTickMs: number; worldVersion: number };
@@ -128,6 +134,9 @@ export type GameLoopResult = {
   ticksProcessed: number;
 };
 
+/**
+ * Acquire the leader lock and run the game tick loop for the given time window.
+ */
 export function runGameLoop(
   windowMs: number = LEADER_BROADCAST_WINDOW_MS
 ): Promise<GameLoopResult> {

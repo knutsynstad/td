@@ -41,6 +41,9 @@ function createOwnerToken(): string {
   return `leader:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * Generic tick loop: acquire a lock, run ticks at a fixed interval for a time window, then teardown.
+ */
 export async function runTickLoop<TState>(
   config: TickLoopConfig,
   handlers: TickLoopHandlers<TState>

@@ -18,6 +18,9 @@ import { getUserCoinBalance } from './economy';
 import { KEYS } from '../core/redis';
 import { parseIntent, parsePlayerState } from './players';
 
+/**
+ * Coerce an unknown value to a valid structure type, defaulting to 'wall'.
+ */
 export function parseStructureType(value: unknown): StructureState['type'] {
   return value === 'tower' || value === 'tree' || value === 'rock'
     ? value
@@ -58,6 +61,9 @@ function parseStructureMetadata(raw: unknown): StructureMetadata | undefined {
   return out;
 }
 
+/**
+ * Parse a raw value into a StructureState, returning a zeroed default on invalid input.
+ */
 export function parseStructure(value: unknown): StructureState {
   if (!isRecord(value)) {
     return {
@@ -85,6 +91,9 @@ export function parseStructure(value: unknown): StructureState {
   };
 }
 
+/**
+ * Parse a raw value into a MobState, returning a zeroed default on invalid input.
+ */
 export function parseMob(value: unknown): MobState {
   if (!isRecord(value)) {
     return {
@@ -114,6 +123,9 @@ export function parseMob(value: unknown): MobState {
   };
 }
 
+/**
+ * Deserialize a Redis hash into a typed record using the given parser.
+ */
 export function parseMapFromHash<T>(
   value: Record<string, string> | undefined,
   parser: (entry: unknown) => T
@@ -126,6 +138,9 @@ export function parseMapFromHash<T>(
   return out;
 }
 
+/**
+ * Return the initial (idle) wave state.
+ */
 export function defaultWave(): WaveState {
   return {
     wave: 0,
@@ -135,6 +150,9 @@ export function defaultWave(): WaveState {
   };
 }
 
+/**
+ * Return the initial world metadata with the given timestamp and coin balance.
+ */
 export function defaultMeta(nowMs: number, coins: number): WorldMeta {
   return {
     tickSeq: 0,
@@ -148,6 +166,9 @@ export function defaultMeta(nowMs: number, coins: number): WorldMeta {
   };
 }
 
+/**
+ * Load the full world state from Redis into plain record-based objects.
+ */
 export async function loadWorldState(): Promise<WorldState> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
@@ -230,6 +251,9 @@ export async function loadWorldState(): Promise<WorldState> {
   return { meta, players, intents, structures, mobs, wave };
 }
 
+/**
+ * Persist the full world state to Redis, replacing all collections atomically.
+ */
 export async function persistWorldState(world: WorldState): Promise<void> {
   const metaWrites: Record<string, string> = {
     tickSeq: String(world.meta.tickSeq),
@@ -289,6 +313,9 @@ export async function persistWorldState(world: WorldState): Promise<void> {
   ]);
 }
 
+/**
+ * Remove the given player IDs from the SEEN sorted set.
+ */
 export async function cleanupStalePlayersSeen(
   playerIds: string[]
 ): Promise<void> {
@@ -296,6 +323,9 @@ export async function cleanupStalePlayersSeen(
   await redis.zRem(KEYS.SEEN, playerIds);
 }
 
+/**
+ * Wipe all game state in Redis and re-seed with default meta and static map structures.
+ */
 export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
   const preservedCoins = await getUserCoinBalance(userId);
   const nextMeta = defaultMeta(nowMs, preservedCoins);
