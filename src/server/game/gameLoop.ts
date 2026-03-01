@@ -10,7 +10,6 @@ import {
   FOLLOWER_POLL_INTERVAL_MS,
   FOLLOWER_POLL_MS,
   LOCK_REFRESH_INTERVAL_TICKS,
-  PERSIST_INTERVAL_TICKS,
   PLAYER_POSITION_BROADCAST_INTERVAL_TICKS,
 } from '../config';
 import { KEYS } from '../core/keys';
@@ -39,17 +38,12 @@ async function onGameTick(
 }> {
   const deltas: GameDelta[] = [];
 
-  const isMaintenanceTick =
-    ticksProcessed > 0 && ticksProcessed % PERSIST_INTERVAL_TICKS === 0;
-
-  if (isMaintenanceTick) {
-    await flushGameWorld(world);
-    const leftIds = await mergePlayersFromRedis(world);
-    for (const playerId of leftIds) {
-      deltas.push(buildPresenceLeaveDelta(playerId));
-    }
-    await trimCommandQueue();
+  await flushGameWorld(world);
+  const leftIds = await mergePlayersFromRedis(world);
+  for (const playerId of leftIds) {
+    deltas.push(buildPresenceLeaveDelta(playerId));
   }
+  await trimCommandQueue();
 
   const commands = await popPendingCommands(nowMs);
   const result = runSimulation(world, nowMs, commands, 1);
