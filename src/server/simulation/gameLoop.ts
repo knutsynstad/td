@@ -15,7 +15,7 @@ import {
   SIM_TICK_MS,
 } from '../config';
 import { KEYS } from '../core/keys';
-import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
+import { broadcast, CHANNELS } from '../core/broadcast';
 import { runTickLoop, type TickContext } from '../core/tickLoop';
 import { buildPresenceLeaveDelta, runSimulation } from './index';
 import { ensureInitialWaveSchedule } from './waves';
@@ -52,14 +52,14 @@ async function onGameTick(
     const tickSeq = result.world.meta.tickSeq;
     const worldVersion = result.world.meta.worldVersion;
     if (result.deltas.length > 0) {
-      await broadcastGameDeltas(worldVersion, tickSeq, result.deltas);
+      await broadcast(worldVersion, tickSeq, result.deltas);
     }
     const connectedPlayerIds = Array.from(world.players.keys());
     await resetGameToDefault(nowMs, {
       reason: 'castle_death',
       connectedPlayerIds,
     });
-    await broadcastGameDeltas(0, 0, [
+    await broadcast(0, 0, [
       { type: 'resyncRequired', reason: 'castle death' },
     ]);
     const fresh = await loadGameWorld();
@@ -79,7 +79,7 @@ async function onGameTick(
       wave: world.wave,
       routesIncluded: true,
     };
-    await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
+    await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
       waveDelta,
     ]);
     return {
@@ -121,7 +121,7 @@ async function onGameTick(
   }
 
   if (deltas.length > 0) {
-    await broadcastGameDeltas(
+    await broadcast(
       result.world.meta.worldVersion,
       result.world.meta.tickSeq,
       deltas

@@ -14,7 +14,7 @@ import {
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS } from '../config';
-import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
+import { broadcast, CHANNELS } from '../core/broadcast';
 import { KEYS } from '../core/keys';
 import { addUserCoins, getUserCoinBalance, spendUserCoins } from './economy';
 import {
@@ -70,7 +70,7 @@ export async function joinGame(
       position: player.position,
     },
   };
-  await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
+  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
     joinDelta,
   ]);
 
@@ -184,7 +184,7 @@ export async function heartbeatGame(
   }
 
   if (nowMs - world.meta.lastTickMs > HEARTBEAT_STALE_MS) {
-    await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
+    await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
       { type: 'resyncRequired', reason: 'stale world' },
     ]);
   }
@@ -261,7 +261,7 @@ export async function resetGame(playerIdOverride?: string): Promise<{
   ensureInitialWaveSchedule(world);
   world.waveDirty = true;
   await flushGameWorld(world);
-  await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
+  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
     {
       type: 'resyncRequired',
       reason: 'game reset',

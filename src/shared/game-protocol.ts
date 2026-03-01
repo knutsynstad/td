@@ -146,7 +146,6 @@ export type GameDelta =
   | ResyncRequiredDelta;
 
 export type DeltaBatch = {
-  type: 'deltaBatch';
   tickSeq: number;
   worldVersion: number;
   events: GameDelta[];

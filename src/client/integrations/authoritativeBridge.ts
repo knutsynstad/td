@@ -107,7 +107,6 @@ const isJoinResponse = (value: unknown): value is JoinResponse => {
 
 const isDeltaBatch = (value: unknown): value is DeltaBatch =>
   isRecord(value) &&
-  value.type === 'deltaBatch' &&
   Array.isArray(value.events) &&
   typeof value.tickSeq === 'number' &&
   typeof value.worldVersion === 'number';
