@@ -18,7 +18,6 @@ export function createDefaultPlayer(
     playerId,
     username,
     position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
-    velocity: { x: 0, z: 0 },
     speed: PLAYER_SPEED,
     lastSeenMs: nowMs,
   };

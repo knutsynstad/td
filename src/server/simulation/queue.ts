@@ -7,7 +7,7 @@ import {
   MAX_TX_RETRIES,
 } from '../config';
 import { KEYS } from '../core/keys';
-import { parseCommandEnvelope } from './parse';
+import { parseCommandEnvelope } from '../game/parse';
 
 export async function enqueueCommand(
   nowMs: number,

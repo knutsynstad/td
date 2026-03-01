@@ -21,7 +21,7 @@ import {
   enforceStructureCap,
   touchPlayerPresence,
 } from './players';
-import { enqueueCommand } from './queue';
+import { enqueueCommand } from '../simulation/queue';
 import { loadWorldState, resetGameState } from './persistence';
 import {
   flushGameWorld,
@@ -53,7 +53,7 @@ export async function joinGame(
     existing ?? createDefaultPlayer(playerId, username, nowMs);
   player.username = username;
   player.position = { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z };
-  player.velocity = { x: 0, z: 0 };
+  player.target = undefined;
   player.lastSeenMs = nowMs;
   world.players.set(playerId, player);
   await touchPlayerPresence(player);

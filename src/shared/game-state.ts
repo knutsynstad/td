@@ -25,7 +25,7 @@ export type PlayerState = {
   playerId: string;
   username: string;
   position: Vec2;
-  velocity: Vec2;
+  target?: Vec2;
   speed: number;
   lastSeenMs: number;
 };

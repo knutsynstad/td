@@ -1,6 +1,6 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import { runGameLoop } from '../game/gameLoop';
+import { runGameLoop } from '../simulation/gameLoop';
 
 const test = createDevvitTest();
 

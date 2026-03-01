@@ -11,7 +11,7 @@ import {
   resetGame,
   resyncGame,
 } from './handlers';
-import { runGameLoop } from './gameLoop';
+import { runGameLoop } from '../simulation/gameLoop';
 import { loadWorldState, persistWorldState } from './persistence';
 
 const test = createDevvitTest();

@@ -9,7 +9,7 @@ import {
   MAX_DELTA_MOBS,
   SIM_TICK_MS,
 } from '../config';
-import { runSimulation } from './simulation';
+import { runSimulation } from './index';
 
 function world(nowMs: number): GameWorld {
   return {
@@ -333,7 +333,6 @@ describe('runSimulation', () => {
       playerId: 'p1',
       username: 'one',
       position: { x: 0, z: 0 },
-      velocity: { x: 0, z: 0 },
       speed: 1,
       lastSeenMs: nowMs,
     });

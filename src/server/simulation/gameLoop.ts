@@ -16,14 +16,14 @@ import {
 import { KEYS } from '../core/keys';
 import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
 import { runTickLoop, type TickContext } from '../core/tickLoop';
-import { buildPresenceLeaveDelta, runSimulation } from './simulation';
-import { ensureStaticMap } from './staticMap';
+import { buildPresenceLeaveDelta, runSimulation } from './index';
+import { ensureStaticMap } from '../game/staticMap';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {
   flushGameWorld,
   loadGameWorld,
   mergePlayersFromRedis,
-} from './trackedState';
+} from '../game/trackedState';
 
 async function onGameTick(
   world: GameWorld,

@@ -23,7 +23,6 @@ export function parsePlayerState(value: unknown): PlayerState {
       playerId: '',
       username: 'anonymous',
       position: { x: 0, z: 0 },
-      velocity: { x: 0, z: 0 },
       speed: PLAYER_SPEED,
       lastSeenMs: 0,
     };
@@ -32,7 +31,7 @@ export function parsePlayerState(value: unknown): PlayerState {
     playerId: String(value.playerId ?? ''),
     username: String(value.username ?? 'anonymous'),
     position: parseVec2(value.position),
-    velocity: parseVec2(value.velocity),
+    target: value.target ? parseVec2(value.target) : undefined,
     speed: Number(value.speed ?? PLAYER_SPEED),
     lastSeenMs: Number(value.lastSeenMs ?? 0),
   };
