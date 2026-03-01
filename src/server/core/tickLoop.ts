@@ -1,14 +1,16 @@
 import {
+  clearFollowerGate,
+  isFollowerGateActive,
+  pollForLeadership,
+  registerFollowerGate,
+  writeLeaderHeartbeat,
+} from './leaderElection';
+import {
   acquireLock,
-  clearFollower,
-  isActiveFollower,
   refreshLock,
-  registerFollower,
   releaseLock,
   sleep,
   verifyLock,
-  waitForLock,
-  writeHeartbeat,
 } from './lock';
 
 /*
@@ -84,7 +86,7 @@ export async function runTickLoop<TState>(
 
   if (!acquired && config.followerPollMs && config.followerPollIntervalMs) {
     if (config.followerGateKey && config.followerGateTtlSeconds) {
-      await registerFollower(
+      await registerFollowerGate(
         config.followerGateKey,
         ownerToken,
         config.followerGateTtlSeconds
@@ -92,24 +94,32 @@ export async function runTickLoop<TState>(
     }
 
     const shouldContinue = config.followerGateKey
-      ? () => isActiveFollower(config.followerGateKey!, ownerToken)
+      ? () => isFollowerGateActive(config.followerGateKey!, ownerToken)
       : undefined;
 
-    acquired = await waitForLock(
-      config.lockKey,
-      ownerToken,
-      config.lockTtlSeconds,
-      config.followerPollMs,
-      config.followerPollIntervalMs,
-      config.followerAggressivePollWindowMs,
-      config.followerAggressivePollIntervalMs,
-      config.heartbeatKey,
-      config.heartbeatStaleMs,
-      shouldContinue
-    );
+    acquired = await pollForLeadership({
+      lockKey: config.lockKey,
+      candidateToken: ownerToken,
+      lockTtlSeconds: config.lockTtlSeconds,
+      waitMs: config.followerPollMs,
+      pollIntervalMs: config.followerPollIntervalMs,
+      aggressivePoll:
+        config.followerAggressivePollWindowMs != null &&
+        config.followerAggressivePollIntervalMs != null
+          ? {
+              windowMs: config.followerAggressivePollWindowMs,
+              intervalMs: config.followerAggressivePollIntervalMs,
+            }
+          : undefined,
+      heartbeat:
+        config.heartbeatKey != null && config.heartbeatStaleMs != null
+          ? { key: config.heartbeatKey, staleMs: config.heartbeatStaleMs }
+          : undefined,
+      shouldContinue,
+    });
 
     if (acquired && config.followerGateKey) {
-      await clearFollower(config.followerGateKey);
+      await clearFollowerGate(config.followerGateKey);
     }
   }
 
@@ -128,7 +138,7 @@ export async function runTickLoop<TState>(
   let nextTick = tickStartedAt;
 
   if (config.heartbeatKey) {
-    await writeHeartbeat(config.heartbeatKey);
+    await writeLeaderHeartbeat(config.heartbeatKey);
   }
 
   const state = await handlers.onInit();
@@ -159,7 +169,7 @@ export async function runTickLoop<TState>(
           break;
         }
         if (config.heartbeatKey) {
-          await writeHeartbeat(config.heartbeatKey);
+          await writeLeaderHeartbeat(config.heartbeatKey);
         }
       }
 

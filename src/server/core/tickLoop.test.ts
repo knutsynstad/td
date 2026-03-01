@@ -6,28 +6,25 @@ vi.mock('./lock', () => ({
   refreshLock: vi.fn().mockResolvedValue(true),
   releaseLock: vi.fn().mockResolvedValue(undefined),
   sleep: vi.fn().mockResolvedValue(undefined),
-  waitForLock: vi.fn().mockResolvedValue(false),
-  getLeaderStartMs: vi.fn().mockResolvedValue(null),
-  writeHeartbeat: vi.fn().mockResolvedValue(undefined),
-  readHeartbeat: vi.fn().mockResolvedValue(null),
-  forceDeleteLock: vi.fn().mockResolvedValue(undefined),
-  registerFollower: vi.fn().mockResolvedValue(undefined),
-  isActiveFollower: vi.fn().mockResolvedValue(true),
-  clearFollower: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('./leaderElection', () => ({
+  writeLeaderHeartbeat: vi.fn().mockResolvedValue(undefined),
+  registerFollowerGate: vi.fn().mockResolvedValue(undefined),
+  isFollowerGateActive: vi.fn().mockResolvedValue(true),
+  clearFollowerGate: vi.fn().mockResolvedValue(undefined),
+  pollForLeadership: vi.fn().mockResolvedValue(false),
 }));
 
 import { runTickLoop, type TickLoopConfig, type TickResult } from './tickLoop';
+import { acquireLock, verifyLock, refreshLock, releaseLock } from './lock';
 import {
-  acquireLock,
-  clearFollower,
-  isActiveFollower,
-  verifyLock,
-  refreshLock,
-  registerFollower,
-  releaseLock,
-  waitForLock,
-  writeHeartbeat,
-} from './lock';
+  clearFollowerGate,
+  isFollowerGateActive,
+  pollForLeadership,
+  registerFollowerGate,
+  writeLeaderHeartbeat,
+} from './leaderElection';
 
 const baseConfig: TickLoopConfig = {
   windowMs: 100,
@@ -48,8 +45,8 @@ describe('runTickLoop', () => {
     vi.mocked(verifyLock).mockResolvedValue(true);
     vi.mocked(refreshLock).mockResolvedValue(true);
     vi.mocked(releaseLock).mockResolvedValue(undefined);
-    vi.mocked(waitForLock).mockResolvedValue(false);
-    vi.mocked(writeHeartbeat).mockResolvedValue(undefined);
+    vi.mocked(pollForLeadership).mockResolvedValue(false);
+    vi.mocked(writeLeaderHeartbeat).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -157,7 +154,7 @@ describe('runTickLoop', () => {
 
   it('polls as follower when lock is held and follower config is set', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockImplementation(async () => {
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
       vi.advanceTimersByTime(50);
       return true;
     });
@@ -178,17 +175,14 @@ describe('runTickLoop', () => {
 
     const result = await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(waitForLock).toHaveBeenCalledWith(
-      'test-lock',
-      expect.any(String),
-      30,
-      80,
-      10,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined
+    expect(pollForLeadership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lockKey: 'test-lock',
+        candidateToken: expect.any(String),
+        lockTtlSeconds: 30,
+        waitMs: 80,
+        pollIntervalMs: 10,
+      })
     );
     expect(onInit).toHaveBeenCalledOnce();
     expect(result.ticksProcessed).toBe(2);
@@ -198,7 +192,7 @@ describe('runTickLoop', () => {
 
   it('returns 0 ticks when follower polling fails', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockResolvedValue(false);
+    vi.mocked(pollForLeadership).mockResolvedValue(false);
 
     const config: TickLoopConfig = {
       ...baseConfig,
@@ -212,14 +206,14 @@ describe('runTickLoop', () => {
 
     const result = await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(waitForLock).toHaveBeenCalledOnce();
+    expect(pollForLeadership).toHaveBeenCalledOnce();
     expect(result.ticksProcessed).toBe(0);
     expect(onInit).not.toHaveBeenCalled();
   });
 
-  it('forwards aggressive poll params to waitForLock', async () => {
+  it('forwards aggressive poll params to pollForLeadership', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockImplementation(async () => {
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
       vi.advanceTimersByTime(50);
       return true;
     });
@@ -241,23 +235,21 @@ describe('runTickLoop', () => {
 
     await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(waitForLock).toHaveBeenCalledWith(
-      'test-lock',
-      expect.any(String),
-      30,
-      80,
-      500,
-      2_000,
-      50,
-      undefined,
-      undefined,
-      undefined
+    expect(pollForLeadership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lockKey: 'test-lock',
+        candidateToken: expect.any(String),
+        lockTtlSeconds: 30,
+        waitMs: 80,
+        pollIntervalMs: 500,
+        aggressivePoll: { windowMs: 2_000, intervalMs: 50 },
+      })
     );
   });
 
   it('caps tick window by time spent as follower', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockImplementation(async () => {
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
       vi.advanceTimersByTime(80);
       return true;
     });
@@ -286,7 +278,7 @@ describe('runTickLoop', () => {
     expect(releaseLock).toHaveBeenCalledOnce();
   });
 
-  it('writes heartbeat on acquire and during lock refresh', async () => {
+  it('writes leader heartbeat on acquire and during lock refresh', async () => {
     const config: TickLoopConfig = {
       ...baseConfig,
       windowMs: 200,
@@ -305,13 +297,13 @@ describe('runTickLoop', () => {
     await runTickLoop(config, { onInit, onTick, onTeardown });
 
     // 1 initial heartbeat + 2 refreshes (at tick 3 and tick 6) = 3 writes
-    expect(writeHeartbeat).toHaveBeenCalledTimes(3);
-    expect(writeHeartbeat).toHaveBeenCalledWith('hb');
+    expect(writeLeaderHeartbeat).toHaveBeenCalledTimes(3);
+    expect(writeLeaderHeartbeat).toHaveBeenCalledWith('hb');
   });
 
-  it('passes heartbeat config to waitForLock', async () => {
+  it('passes heartbeat config to pollForLeadership', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockImplementation(async () => {
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
       vi.advanceTimersByTime(50);
       return true;
     });
@@ -333,23 +325,17 @@ describe('runTickLoop', () => {
 
     await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(waitForLock).toHaveBeenCalledWith(
-      'test-lock',
-      expect.any(String),
-      30,
-      80,
-      500,
-      undefined,
-      undefined,
-      'hb',
-      3_000,
-      undefined
+    expect(pollForLeadership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lockKey: 'test-lock',
+        heartbeat: { key: 'hb', staleMs: 3_000 },
+      })
     );
   });
 
-  it('registers follower gate and passes shouldContinue to waitForLock', async () => {
+  it('registers follower gate and passes shouldContinue to pollForLeadership', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockImplementation(async () => {
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
       vi.advanceTimersByTime(50);
       return true;
     });
@@ -372,25 +358,23 @@ describe('runTickLoop', () => {
 
     await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(registerFollower).toHaveBeenCalledWith('fg', expect.any(String), 15);
-    expect(waitForLock).toHaveBeenCalledWith(
-      'test-lock',
+    expect(registerFollowerGate).toHaveBeenCalledWith(
+      'fg',
       expect.any(String),
-      30,
-      80,
-      10,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function)
+      15
     );
-    expect(clearFollower).toHaveBeenCalledWith('fg');
+    expect(pollForLeadership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lockKey: 'test-lock',
+        shouldContinue: expect.any(Function),
+      })
+    );
+    expect(clearFollowerGate).toHaveBeenCalledWith('fg');
   });
 
   it('does not register follower gate when gate key is absent', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockImplementation(async () => {
+    vi.mocked(pollForLeadership).mockImplementation(async () => {
       vi.advanceTimersByTime(50);
       return true;
     });
@@ -411,14 +395,14 @@ describe('runTickLoop', () => {
 
     await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(registerFollower).not.toHaveBeenCalled();
-    expect(clearFollower).not.toHaveBeenCalled();
+    expect(registerFollowerGate).not.toHaveBeenCalled();
+    expect(clearFollowerGate).not.toHaveBeenCalled();
   });
 
   it('exits follower wait when displaced by another follower', async () => {
     vi.mocked(acquireLock).mockResolvedValue(false);
-    vi.mocked(isActiveFollower).mockResolvedValue(false);
-    vi.mocked(waitForLock).mockResolvedValue(false);
+    vi.mocked(isFollowerGateActive).mockResolvedValue(false);
+    vi.mocked(pollForLeadership).mockResolvedValue(false);
 
     const config: TickLoopConfig = {
       ...baseConfig,
@@ -434,9 +418,9 @@ describe('runTickLoop', () => {
 
     const result = await runTickLoop(config, { onInit, onTick, onTeardown });
 
-    expect(registerFollower).toHaveBeenCalledOnce();
+    expect(registerFollowerGate).toHaveBeenCalledOnce();
     expect(result.ticksProcessed).toBe(0);
-    expect(clearFollower).not.toHaveBeenCalled();
+    expect(clearFollowerGate).not.toHaveBeenCalled();
     expect(onInit).not.toHaveBeenCalled();
   });
 });
