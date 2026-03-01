@@ -63,6 +63,7 @@ export async function joinGame(
   player.lastSeenMs = nowMs;
   world.players.set(playerId, player);
   await touchPlayerPresence(player);
+  await redis.hDel(KEYS.PLAYER_COMMAND_SEQ, [playerId]);
   const coins = await getUserCoinBalance(playerId as T2);
   world.meta.coins = coins;
 

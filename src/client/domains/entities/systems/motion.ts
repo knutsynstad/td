@@ -34,6 +34,7 @@ type MotionContext = {
   random: () => number;
   spawnCubeEffects: (pos: THREE.Vector3) => void;
   onStructureDestroyed?: (collider: DestructibleCollider) => void;
+  isServerAuthoritative?: () => boolean;
 };
 
 export const createEntityMotionSystem = (context: MotionContext) => {
@@ -124,14 +125,16 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     );
     if (distanceToSurface <= context.constants.mobBerserkRangeBuffer) {
       if (mob.siegeAttackCooldown <= 0) {
-        context.structureStore.damageStructure(
-          target,
-          context.constants.mobBerserkDamage,
-          (collider) => {
-            context.spawnCubeEffects(collider.center.clone());
-            context.onStructureDestroyed?.(collider);
-          }
-        );
+        if (!context.isServerAuthoritative?.()) {
+          context.structureStore.damageStructure(
+            target,
+            context.constants.mobBerserkDamage,
+            (collider) => {
+              context.spawnCubeEffects(collider.center.clone());
+              context.onStructureDestroyed?.(collider);
+            }
+          );
+        }
         mob.siegeAttackCooldown = context.constants.mobBerserkAttackCooldown;
       }
       return new THREE.Vector3(0, 0, 0);

@@ -1914,6 +1914,7 @@ const SERVER_HEARTBEAT_INTERVAL_MS = 500;
 const SERVER_COINS_REFRESH_INTERVAL_MS = 3_000;
 const SERVER_STRUCTURE_SYNC_INTERVAL_MS = 30_000;
 const SERVER_STRUCTURE_SYNC_RETRY_MS = 7_500;
+const SNAPSHOT_STRUCTURE_GRACE_MS = 3_000;
 const SERVER_META_SYNC_INTERVAL_MS = 10_000;
 const SERVER_META_SYNC_RETRY_MS = 3_000;
 let nextServerStructureSyncAtMs =
@@ -1922,6 +1923,7 @@ let nextServerMetaSyncAtMs = performance.now() + SERVER_META_SYNC_INTERVAL_MS;
 let nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
 let lastKnownWorldVersion = 0;
 let lastAppliedStructureChangeSeq = 0;
+let lastSnapshotReceivedAtMs = 0;
 let authoritativeSync: AuthoritativeSync;
 
 const setupAuthoritativeBridge = async () => {
@@ -1992,6 +1994,9 @@ const setupAuthoritativeBridge = async () => {
     }
     authoritativeBridgeRef.current = await connectAuthoritativeBridge({
       onSnapshot: (snapshot) => {
+        lastSnapshotReceivedAtMs = performance.now();
+        nextServerStructureSyncAtMs =
+          lastSnapshotReceivedAtMs + SNAPSHOT_STRUCTURE_GRACE_MS;
         authoritativeSync.syncServerClockSkew(snapshot.meta.lastTickMs);
         authoritativeSync.applyServerSnapshot(snapshot);
         lastKnownWorldVersion = snapshot.meta.worldVersion;
@@ -2039,11 +2044,26 @@ const setupAuthoritativeBridge = async () => {
         }
         if (!authoritativeBridgeRef.current) return;
         const bridge = authoritativeBridgeRef.current;
-        setTimeout(() => {
-          void bridge.resync().catch((error) => {
-            console.error('Failed to resync authoritative snapshot', error);
-          });
-        }, 300);
+        const RESYNC_ATTEMPTS = 3;
+        const RESYNC_INITIAL_DELAY_MS = 300;
+        const attemptResync = (attempt: number) => {
+          const delayMs =
+            attempt === 0
+              ? RESYNC_INITIAL_DELAY_MS
+              : RESYNC_INITIAL_DELAY_MS * Math.pow(2, attempt);
+          setTimeout(() => {
+            if (!authoritativeBridgeRef.current) return;
+            void bridge
+              .resync()
+              .catch((error) => {
+                console.error('Failed to resync authoritative snapshot', error);
+                if (attempt < RESYNC_ATTEMPTS - 1) {
+                  attemptResync(attempt + 1);
+                }
+              });
+          }, delayMs);
+        };
+        attemptResync(0);
       },
       onResetBanner: (reason) => {
         const bannerText =
@@ -3619,6 +3639,7 @@ const motionSystem = createEntityMotionSystem({
   onStructureDestroyed: (collider) => {
     queueTreeRegrow(collider);
   },
+  isServerAuthoritative,
 });
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
@@ -3979,7 +4000,8 @@ const tick = (now: number, delta: number) => {
   if (
     authoritativeBridgeRef.current &&
     !serverStructureSyncInFlightRef.current &&
-    now >= nextServerStructureSyncAtMs
+    now >= nextServerStructureSyncAtMs &&
+    now - lastSnapshotReceivedAtMs >= SNAPSHOT_STRUCTURE_GRACE_MS
   ) {
     serverStructureSyncInFlightRef.current = true;
     nextServerStructureSyncAtMs = now + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
@@ -3987,6 +4009,9 @@ const tick = (now: number, delta: number) => {
       .fetchStructures()
       .then((payload) => {
         if (payload.structureChangeSeq === lastAppliedStructureChangeSeq) {
+          return;
+        }
+        if (performance.now() - lastSnapshotReceivedAtMs < SNAPSHOT_STRUCTURE_GRACE_MS) {
           return;
         }
         authoritativeSync.applyServerStructureSync(payload.structures);

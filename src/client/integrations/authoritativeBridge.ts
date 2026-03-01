@@ -206,6 +206,8 @@ export const connectAuthoritativeBridge = async (
   const joinResponse = parseJoinResponse(joinPayload);
   callbacks.onSnapshot(joinResponse.snapshot);
 
+  const snapshotTickSeq = joinResponse.snapshot.meta.tickSeq;
+
   for (const player of Object.values(joinResponse.snapshot.players)) {
     if (player.playerId === joinResponse.playerId) {
       callbacks.onSelfReady(player.playerId, player.username, player.position);
@@ -244,6 +246,14 @@ export const connectAuthoritativeBridge = async (
         });
       }
       for (const event of batch.events) {
+        if (
+          event &&
+          typeof event === 'object' &&
+          (event as { type?: string }).type === 'structureDelta' &&
+          batch.tickSeq <= snapshotTickSeq
+        ) {
+          continue;
+        }
         try {
           applyDelta(event, callbacks);
         } catch (err) {
