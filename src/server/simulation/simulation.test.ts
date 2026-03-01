@@ -4,9 +4,7 @@ import type { GameWorld } from '../../shared/game-state';
 import { TrackedMap } from '../../shared/utils/trackedMap';
 import {
   AUTO_WAVE_INITIAL_DELAY_MS,
-  FULL_MOB_DELTA_INTERVAL_MS,
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
-  MAX_DELTA_MOBS,
   SIM_TICK_MS,
 } from '../config';
 import { runSimulation } from './index';
@@ -380,7 +378,7 @@ describe('runSimulation', () => {
     }
   });
 
-  it('sends compact mob deltas between full snapshot intervals', () => {
+  it('sends full mob snapshots every tick', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);
     gameWorld.meta.tickSeq = 1;
@@ -403,7 +401,7 @@ describe('runSimulation', () => {
         ],
       },
     ];
-    for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
+    for (let i = 0; i < 50; i += 1) {
       gameWorld.mobs.set(String(i + 1), {
         mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },
@@ -415,25 +413,23 @@ describe('runSimulation', () => {
       });
     }
     const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
-    const entityDelta = result.deltas.find(
+    const entityDeltas = result.deltas.filter(
       (delta) => delta.type === 'entityDelta'
     );
+    expect(entityDeltas.length).toBeGreaterThan(0);
+    const entityDelta = entityDeltas[0];
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
-      expect(entityDelta.fullMobList).toBe(false);
-      expect(entityDelta.mobSlices?.base.length).toBe(MAX_DELTA_MOBS);
-      expect(entityDelta.mobSlices).toBeDefined();
+      expect(entityDelta.fullMobList).toBe(true);
+      expect(entityDelta.mobSlices).toBeUndefined();
+      expect(entityDelta.mobPool).toBeDefined();
     }
   });
 
-  it('sends full mob snapshots every five seconds', () => {
+  it('sends full mob snapshots in chunks when many mobs', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);
-    const intervalTicks = Math.max(
-      1,
-      Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
-    );
-    gameWorld.meta.tickSeq = intervalTicks - 1;
+    gameWorld.meta.tickSeq = 0;
     gameWorld.meta.lastStructureChangeTickSeq = 0;
     gameWorld.wave.wave = 1;
     gameWorld.wave.active = true;
@@ -473,7 +469,7 @@ describe('runSimulation', () => {
       const entityDelta = entityDeltas[i]!;
       expect(entityDelta.fullMobList).toBe(true);
       expect(entityDelta.mobSlices).toBeUndefined();
-      expect(entityDelta.fullMobSnapshotId).toBe(intervalTicks);
+      expect(entityDelta.fullMobSnapshotId).toBe(1);
       expect(entityDelta.fullMobSnapshotChunkCount).toBe(2);
       expect(entityDelta.fullMobSnapshotChunkIndex).toBe(i);
       expect(entityDelta.mobPool).toBeDefined();
@@ -517,7 +513,7 @@ describe('runSimulation', () => {
         ],
       },
     ];
-    for (let i = 0; i < MAX_DELTA_MOBS + 40; i += 1) {
+    for (let i = 0; i < FULL_MOB_SNAPSHOT_CHUNK_SIZE + 25; i += 1) {
       gameWorld.mobs.set(String(i + 1), {
         mobId: String(i + 1),
         position: { x: i * 0.1, z: -10 },

@@ -181,7 +181,6 @@ export const updateMobs = (
     const reachedCastle = nearestGoalDistance <= CASTLE_CAPTURE_RADIUS;
     if (mob.hp <= 0 || reachedCastle || stuckTimedOut) {
       if (reachedCastle) {
-        world.meta.lives = Math.max(0, world.meta.lives - 1);
         castleCaptures += 1;
       }
       despawnedIds.push(mob.mobId);

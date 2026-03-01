@@ -187,9 +187,13 @@ export const createAuthoritativeSync = (
   let pendingFullMobSnapshotStartMs = 0;
   const PENDING_SNAPSHOT_TIMEOUT_MS = 2_000;
   const pendingFullMobSnapshotSeenIds = new Set<string>();
+  const pendingFullMobSnapshotReceivedChunks = new Set<number>();
 
   let lastMobDeltaReceivedAtMs = 0;
   const CONNECTION_ALIVE_THRESHOLD_MS = 3_000;
+  const MOB_DELTA_DEBUG =
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('DEBUG_MOB_DELTA') === '1';
 
   const mobPool: MobEntity[] = [];
 
@@ -715,38 +719,82 @@ export const createAuthoritativeSync = (
     hasMaxHp: boolean
   ) => {
     const poolLen = Math.min(
-      pool.ids.length,
-      pool.px.length,
-      pool.pz.length,
-      pool.vx.length,
-      pool.vz.length,
-      pool.hp.length
+      pool.ids?.length ?? 0,
+      pool.px?.length ?? 0,
+      pool.pz?.length ?? 0,
+      pool.vx?.length ?? 0,
+      pool.vz?.length ?? 0,
+      pool.hp?.length ?? 0
     );
+    if (poolLen === 0 && (pool.ids?.length ?? 0) > 0) {
+      console.error('[MobDelta] Pool array length mismatch', {
+        ids: pool.ids?.length,
+        px: pool.px?.length,
+        pz: pool.pz?.length,
+        vx: pool.vx?.length,
+        vz: pool.vz?.length,
+        hp: pool.hp?.length,
+      });
+      return;
+    }
     const iter = indices ?? Array.from({ length: poolLen }, (_, i) => i);
     for (const idx of iter) {
       if (idx < 0 || idx >= poolLen) continue;
-      const mobId = String(pool.ids[idx]!);
-      if (serverMobSeenIdsScratch.has(mobId)) continue;
-      serverMobSeenIdsScratch.add(mobId);
-      applyServerMobUpdateValues(
-        mobId,
-        dequantize(pool.px[idx]!),
-        dequantize(pool.pz[idx]!),
-        dequantize(pool.vx[idx]!),
-        dequantize(pool.vz[idx]!),
-        pool.hp[idx]!,
-        hasMaxHp && pool.maxHp ? pool.maxHp[idx] : undefined,
-        delta
-      );
+      try {
+        const mobId = String(pool.ids![idx]!);
+        if (serverMobSeenIdsScratch.has(mobId)) continue;
+        serverMobSeenIdsScratch.add(mobId);
+        const px = dequantize(pool.px![idx]!);
+        const pz = dequantize(pool.pz![idx]!);
+        if (!Number.isFinite(px) || !Number.isFinite(pz)) {
+          console.warn('[MobDelta] Skipping mob with invalid position', { mobId, idx, px, pz });
+          continue;
+        }
+        applyServerMobUpdateValues(
+          mobId,
+          px,
+          pz,
+          dequantize(pool.vx![idx]!),
+          dequantize(pool.vz![idx]!),
+          pool.hp![idx]!,
+          hasMaxHp && pool.maxHp ? pool.maxHp[idx] : undefined,
+          delta
+        );
+      } catch (err) {
+        console.error('[MobDelta] Error applying mob entry', {
+          idx,
+          mobId: pool.ids?.[idx],
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   };
 
   const applyServerMobDelta = (delta: EntityDelta) => {
+    const pool = delta.mobPool;
+    const poolSize = pool
+      ? Math.min(
+          pool.ids?.length ?? 0,
+          pool.px?.length ?? 0,
+          pool.pz?.length ?? 0
+        )
+      : 0;
+    if (MOB_DELTA_DEBUG) {
+      console.log('[MobDelta] Delta received', {
+        fullMobList: !!delta.fullMobList,
+        snapshotId: delta.fullMobSnapshotId,
+        chunkIndex: delta.fullMobSnapshotChunkIndex,
+        chunkCount: delta.fullMobSnapshotChunkCount,
+        poolSize,
+        despawnedCount: delta.despawnedMobIds?.length ?? 0,
+        mobsBeforeApply: ctx.serverMobsById.size,
+      });
+    }
+
     syncServerClockSkew(delta.serverTimeMs);
     lastMobDeltaReceivedAtMs = performance.now();
     serverMobSeenIdsScratch.clear();
 
-    const pool = delta.mobPool;
     if (pool) {
       const isFullSnapshot = !!delta.fullMobList;
       if (isFullSnapshot) {
@@ -771,6 +819,7 @@ export const createAuthoritativeSync = (
     ) {
       pendingFullMobSnapshotId = null;
       pendingFullMobSnapshotSeenIds.clear();
+      pendingFullMobSnapshotReceivedChunks.clear();
     }
 
     if (delta.fullMobList) {
@@ -784,22 +833,42 @@ export const createAuthoritativeSync = (
           pendingFullMobSnapshotId = snapshotId;
           pendingFullMobSnapshotStartMs = performance.now();
           pendingFullMobSnapshotSeenIds.clear();
+          pendingFullMobSnapshotReceivedChunks.clear();
         }
         for (const mobId of serverMobSeenIdsScratch) {
           pendingFullMobSnapshotSeenIds.add(mobId);
         }
+        pendingFullMobSnapshotReceivedChunks.add(chunkIndex);
         const isFinalChunk = chunkIndex >= chunkCount - 1;
-        if (isFinalChunk) {
+        const receivedAllChunksInOrder = Array.from(
+          { length: chunkCount },
+          (_, i) => i
+        ).every((i) => pendingFullMobSnapshotReceivedChunks.has(i));
+        if (isFinalChunk && receivedAllChunksInOrder) {
           serverMobRemovalScratch.length = 0;
           for (const mobId of ctx.serverMobsById.keys()) {
             if (pendingFullMobSnapshotSeenIds.has(mobId)) continue;
             serverMobRemovalScratch.push(mobId);
+          }
+          if (MOB_DELTA_DEBUG && serverMobRemovalScratch.length > 0) {
+            console.warn('[MobDelta] Removing mobs not in full snapshot (chunk cleanup)', {
+              removedCount: serverMobRemovalScratch.length,
+              removedIds: serverMobRemovalScratch.slice(0, 20),
+              snapshotSeenCount: pendingFullMobSnapshotSeenIds.size,
+              chunkIndex,
+              chunkCount,
+            });
           }
           for (const mobId of serverMobRemovalScratch) {
             removeServerMobById(mobId);
           }
           pendingFullMobSnapshotId = null;
           pendingFullMobSnapshotSeenIds.clear();
+          pendingFullMobSnapshotReceivedChunks.clear();
+        } else if (isFinalChunk && !receivedAllChunksInOrder) {
+          pendingFullMobSnapshotId = null;
+          pendingFullMobSnapshotSeenIds.clear();
+          pendingFullMobSnapshotReceivedChunks.clear();
         }
       } else {
         serverMobRemovalScratch.length = 0;
@@ -807,11 +876,18 @@ export const createAuthoritativeSync = (
           if (serverMobSeenIdsScratch.has(mobId)) continue;
           serverMobRemovalScratch.push(mobId);
         }
-        for (const mobId of serverMobRemovalScratch) {
-          removeServerMobById(mobId);
+        if (MOB_DELTA_DEBUG && serverMobRemovalScratch.length > 0) {
+          console.warn('[MobDelta] Removing mobs not in single-chunk snapshot', {
+            removedCount: serverMobRemovalScratch.length,
+            removedIds: serverMobRemovalScratch.slice(0, 20),
+          });
         }
+        for (const mobId of serverMobRemovalScratch) {
+            removeServerMobById(mobId);
+          }
         pendingFullMobSnapshotId = null;
         pendingFullMobSnapshotSeenIds.clear();
+        pendingFullMobSnapshotReceivedChunks.clear();
       }
     } else if (pendingFullMobSnapshotId !== null) {
       for (const mobId of serverMobSeenIdsScratch) {
@@ -819,6 +895,7 @@ export const createAuthoritativeSync = (
       }
     } else {
       pendingFullMobSnapshotSeenIds.clear();
+      pendingFullMobSnapshotReceivedChunks.clear();
     }
     for (const numId of delta.despawnedMobIds) {
       const mobId = String(numId);
@@ -828,6 +905,12 @@ export const createAuthoritativeSync = (
       }
       removeServerMobById(mobId);
       ctx.serverMobMaxHpCache.delete(mobId);
+    }
+    if (MOB_DELTA_DEBUG) {
+      console.log('[MobDelta] Delta applied', {
+        mobsAfterApply: ctx.serverMobsById.size,
+        despawnedApplied: delta.despawnedMobIds?.length ?? 0,
+      });
     }
   };
 
@@ -936,8 +1019,18 @@ export const createAuthoritativeSync = (
         staleMobIds.push(mobId);
       }
     }
-    for (const mobId of staleMobIds) {
-      removeServerMobById(mobId);
+    if (staleMobIds.length > 0) {
+      if (MOB_DELTA_DEBUG || staleMobIds.length > 5) {
+        console.warn('[MobDelta] Removing stale mobs (no recent update)', {
+          count: staleMobIds.length,
+          ids: staleMobIds.slice(0, 10),
+          connectionAlive,
+          lastDeltaMsAgo: lastMobDeltaReceivedAtMs > 0 ? now - lastMobDeltaReceivedAtMs : null,
+        });
+      }
+      for (const mobId of staleMobIds) {
+        removeServerMobById(mobId);
+      }
     }
 
     const renderNow = now - ctx.SERVER_MOB_INTERPOLATION_BACKTIME_MS;

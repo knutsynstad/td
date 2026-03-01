@@ -11,8 +11,6 @@ import {
   MAX_DELTA_PLAYERS,
   MAX_STRUCTURE_DELTA_UPSERTS,
   MAX_STRUCTURE_DELTA_REMOVES,
-  FULL_MOB_DELTA_INTERVAL_MS,
-  FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS,
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
 } from '../config';
 import { applyCommands } from './commands';
@@ -22,11 +20,7 @@ import {
 } from './pathfinding';
 import { ensureInitialWaveSchedule, updateWave } from './waves';
 import { updateMobs } from './mobs';
-import {
-  ENABLE_FULL_MOB_DELTAS,
-  buildMobPoolFromList,
-  buildUnifiedMobDelta,
-} from './deltas';
+import { ENABLE_FULL_MOB_DELTAS, buildMobPoolFromList } from './deltas';
 
 export type SimulationPerfStats = {
   mobsSimulated: number;
@@ -40,16 +34,9 @@ export type SimulationResult = {
   world: GameWorld;
   deltas: GameDelta[];
   perf: SimulationPerfStats;
+  gameOver: boolean;
+  castleCaptures: number;
 };
-
-const FULL_MOB_DELTA_INTERVAL_TICKS = Math.max(
-  1,
-  Math.round(FULL_MOB_DELTA_INTERVAL_MS / SIM_TICK_MS)
-);
-const FULL_MOB_AFTER_STRUCTURE_CHANGE_TICKS = Math.max(
-  1,
-  Math.round(FULL_MOB_DELTA_ON_STRUCTURE_CHANGE_WINDOW_MS / SIM_TICK_MS)
-);
 
 export const runSimulation = (
   world: GameWorld,
@@ -162,21 +149,8 @@ export const runSimulation = (
 
   if (steps > 0) {
     const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);
-    const lastStructureChangeTickSeq =
-      world.meta.lastStructureChangeTickSeq ?? 0;
-    const ticksSinceStructureChange = Math.max(
-      0,
-      world.meta.tickSeq - lastStructureChangeTickSeq
-    );
-    const structureChangeBurstActive =
-      lastStructureChangeTickSeq > 0 &&
-      ticksSinceStructureChange <= FULL_MOB_AFTER_STRUCTURE_CHANGE_TICKS;
-    const includeFullMobList =
-      ENABLE_FULL_MOB_DELTAS &&
-      (world.meta.tickSeq % FULL_MOB_DELTA_INTERVAL_TICKS === 0 ||
-        structureChangeBurstActive);
     const despawnedIds = Array.from(despawnedDuringRun).map(Number);
-    if (includeFullMobList) {
+    if (ENABLE_FULL_MOB_DELTAS) {
       const chunkSize = Math.max(1, FULL_MOB_SNAPSHOT_CHUNK_SIZE);
       const chunkCount = Math.max(
         1,
@@ -186,7 +160,6 @@ export const runSimulation = (
       for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
         const start = chunkIndex * chunkSize;
         const end = Math.min(latestMobUpserts.length, start + chunkSize);
-        const isFinalChunk = chunkIndex === chunkCount - 1;
         const chunkMobs = latestMobUpserts.slice(start, end);
         const chunkDelta: EntityDelta = {
           type: 'entityDelta',
@@ -198,23 +171,10 @@ export const runSimulation = (
           fullMobSnapshotId: snapshotId,
           fullMobSnapshotChunkIndex: chunkIndex,
           fullMobSnapshotChunkCount: chunkCount,
-          despawnedMobIds: isFinalChunk ? despawnedIds : [],
+          despawnedMobIds: despawnedIds,
         };
         deltas.push(chunkDelta);
       }
-    } else {
-      const { pool, slices } = buildUnifiedMobDelta(latestMobUpserts, world);
-      const entityDelta: EntityDelta = {
-        type: 'entityDelta',
-        serverTimeMs: world.meta.lastTickMs,
-        tickMs: simulatedWindowMs,
-        players: [],
-        mobPool: pool,
-        mobSlices: slices,
-        fullMobList: false,
-        despawnedMobIds: despawnedIds,
-      };
-      deltas.push(entityDelta);
     }
   }
   if (latestWaveDelta) {
@@ -237,5 +197,11 @@ export const runSimulation = (
   }
 
   perf.elapsedMs = Date.now() - startedAtMs;
-  return { world, deltas, perf };
+  return {
+    world,
+    deltas,
+    perf,
+    gameOver: totalCastleCaptures > 0,
+    castleCaptures: totalCastleCaptures,
+  };
 };

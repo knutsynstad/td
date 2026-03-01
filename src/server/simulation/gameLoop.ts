@@ -24,6 +24,7 @@ import {
   loadGameWorld,
   mergePlayersFromRedis,
 } from '../game/trackedState';
+import { resetGameToDefault } from '../game/persistence';
 
 async function onGameTick(
   world: GameWorld,
@@ -44,6 +45,31 @@ async function onGameTick(
 
   const commands = await popPendingCommands(nowMs);
   const result = runSimulation(world, nowMs, commands, 1);
+
+  if (result.gameOver) {
+    const connectedPlayerIds = Array.from(world.players.keys());
+    await resetGameToDefault(nowMs, {
+      reason: 'castle_death',
+      connectedPlayerIds,
+    });
+    await broadcastGameDeltas(0, 0, [
+      { type: 'resyncRequired', reason: 'castle death' },
+    ]);
+    const fresh = await loadGameWorld();
+    ensureStaticMap(fresh);
+    world.meta = fresh.meta;
+    world.wave = fresh.wave;
+    world.players = fresh.players;
+    world.structures = fresh.structures;
+    world.mobs = fresh.mobs;
+    world.intents = fresh.intents;
+    world.waveDirty = true;
+    return {
+      tickSeq: world.meta.tickSeq,
+      commandCount: commands.length,
+      deltaCount: 1,
+    };
+  }
 
   if (result.deltas.some((d) => d.type === 'waveDelta')) {
     world.waveDirty = true;

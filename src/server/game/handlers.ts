@@ -22,7 +22,7 @@ import {
   touchPlayerPresence,
 } from './players';
 import { enqueueCommand } from '../simulation/queue';
-import { loadWorldState, resetGameState } from './persistence';
+import { loadWorldState, resetGameToDefault } from './persistence';
 import {
   flushGameWorld,
   gameWorldToSnapshot,
@@ -233,7 +233,11 @@ export async function resetGame(playerIdOverride?: string): Promise<{
 }> {
   const nowMs = Date.now();
   const playerId = (playerIdOverride ?? (await getPlayerId())) as T2;
-  await resetGameState(nowMs, playerId);
+  await resetGameToDefault(nowMs, {
+    reason: 'menu',
+    connectedPlayerIds: [],
+    primaryUserId: playerId,
+  });
   const world = await loadWorldState();
   await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
     {

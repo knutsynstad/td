@@ -7,9 +7,11 @@ import type {
   StructureState,
   WorldState,
 } from '../../shared/game-state';
+import { DEFAULT_PLAYER_SPAWN } from '../../shared/game-state';
 import { PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
-import { getUserCoinBalance } from './economy';
+import { CASTLE_DEATH_TAX } from '../../shared/content';
+import { getUserCoinBalance, spendUserCoins } from './economy';
 import {
   defaultMeta,
   defaultWave,
@@ -119,10 +121,48 @@ async function clearPlayerKeys(): Promise<void> {
   ]);
 }
 
-export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
-  const preservedCoins = await getUserCoinBalance(userId);
-  const nextMeta = defaultMeta(nowMs, preservedCoins);
+export type ResetOptions = {
+  reason: 'menu' | 'castle_death';
+  connectedPlayerIds: string[];
+  primaryUserId?: T2;
+};
 
+export async function resetGameToDefault(
+  nowMs: number,
+  options: ResetOptions
+): Promise<void> {
+  const { reason, connectedPlayerIds, primaryUserId } = options;
+
+  let coinsForMeta = 0;
+  const playersToPreserve: PlayerState[] = [];
+
+  if (reason === 'menu') {
+    const userId = primaryUserId;
+    coinsForMeta = userId
+      ? await getUserCoinBalance(userId)
+      : 0;
+  } else {
+    const playersResult = await loadPlayersFromRedis();
+
+    for (const playerId of connectedPlayerIds) {
+      const player = playersResult.players.get(playerId);
+      if (!player) continue;
+      await spendUserCoins(playerId as T2, CASTLE_DEATH_TAX);
+      const updated: PlayerState = {
+        ...player,
+        position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },
+        target: undefined,
+        lastSeenMs: nowMs,
+      };
+      playersToPreserve.push(updated);
+    }
+    const firstId = connectedPlayerIds[0];
+    coinsForMeta = firstId
+      ? await getUserCoinBalance(firstId as T2)
+      : 0;
+  }
+
+  const nextMeta = defaultMeta(nowMs, coinsForMeta);
   const staticStructures = buildStaticMapStructures(nowMs);
   const structureWrites: Record<string, string> = {};
   for (const [structureId, structure] of Object.entries(staticStructures)) {
@@ -130,6 +170,17 @@ export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
   }
 
   await clearPlayerKeys();
+
+  if (reason === 'castle_death' && playersToPreserve.length > 0) {
+    const exp = new Date(Date.now() + Math.ceil(PLAYER_TIMEOUT_MS / 1000) * 1000);
+    for (const player of playersToPreserve) {
+      await redis.set(KEYS.playerPresence(player.playerId), JSON.stringify(player), {
+        expiration: exp,
+      });
+      await redis.hSet(KEYS.PLAYER_IDS, { [player.playerId]: '1' });
+    }
+  }
+
   await Promise.all([
     redis.hSet(KEYS.META, {
       tickSeq: String(nextMeta.tickSeq),
@@ -153,4 +204,12 @@ export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
   if (Object.keys(structureWrites).length > 0) {
     await redis.hSet(KEYS.STRUCTURES, structureWrites);
   }
+}
+
+export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
+  await resetGameToDefault(nowMs, {
+    reason: 'menu',
+    connectedPlayerIds: [],
+    primaryUserId: userId,
+  });
 }

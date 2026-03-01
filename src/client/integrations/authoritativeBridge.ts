@@ -192,16 +192,45 @@ export const connectAuthoritativeBridge = async (
   }
 
   let seq = 0;
+  let lastBatchLogMs = 0;
+  console.log('[MobDelta] Realtime connecting', { channel: joinResponse.channel });
   const connection = await connectRealtime({
     channel: joinResponse.channel,
     onMessage: (payload) => {
+      if (!isDeltaBatch(payload)) {
+        console.warn('[MobDelta] Received non-delta batch', {
+          hasPayload: !!payload,
+          payloadKeys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+        });
+        return;
+      }
       const batch = payload;
-      if (!isDeltaBatch(batch)) return;
+      const eventTypes = batch.events.map((e) => e?.type).filter(Boolean);
+      const entityCount = eventTypes.filter((t) => t === 'entityDelta').length;
+      const now = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (now - lastBatchLogMs > 2000) {
+        lastBatchLogMs = now;
+        console.log('[MobDelta] Batch (every 2s)', {
+          events: batch.events.length,
+          types: [...new Set(eventTypes)],
+          entityDeltas: entityCount,
+          tickSeq: batch.tickSeq,
+        });
+      }
       for (const event of batch.events) {
-        applyDelta(event, callbacks);
+        try {
+          applyDelta(event, callbacks);
+        } catch (err) {
+          console.error('[MobDelta] Error applying delta', {
+            deltaType: event && typeof event === 'object' ? (event as { type?: string }).type : 'unknown',
+            error: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+        }
       }
     },
   });
+  console.log('[MobDelta] Realtime connected');
 
   const sendCommand = async (
     command: CommandRequest['envelope']['command']

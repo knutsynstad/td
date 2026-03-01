@@ -5,6 +5,7 @@ export const USER_COINS_ACCRUED_PER_SECOND = 0.25;
 export const COINS_PER_PLAYER_KILL = 6;
 
 export const CASTLE_COINS_MIN = 0;
+export const CASTLE_DEATH_TAX = 10;
 
 export const DECAY_GRACE_MS = 1000 * 60 * 30;
 export const DECAY_HP_PER_HOUR = 1.5;
