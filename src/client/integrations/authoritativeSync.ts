@@ -191,6 +191,37 @@ export const createAuthoritativeSync = (
   let lastMobDeltaReceivedAtMs = 0;
   const CONNECTION_ALIVE_THRESHOLD_MS = 3_000;
 
+  const mobPool: MobEntity[] = [];
+
+  const acquireMobFromPool = (): MobEntity | null => {
+    const pooled = mobPool.pop();
+    if (!pooled) return null;
+    pooled.staged = false;
+    pooled.siegeAttackCooldown = 0;
+    pooled.unreachableTime = 0;
+    pooled.berserkMode = false;
+    pooled.berserkTarget = null;
+    pooled.laneBlocked = false;
+    pooled.waypoints = undefined;
+    pooled.waypointIndex = undefined;
+    pooled.lastHitBy = undefined;
+    pooled.lastHitDirection = undefined;
+    pooled.hitFlashUntilMs = undefined;
+    pooled.spawnerId = undefined;
+    pooled.representedCount = undefined;
+    return pooled;
+  };
+
+  const returnMobToPool = (mob: MobEntity) => {
+    mob.mobId = undefined;
+    mob.mesh.position.set(0, ctx.MOB_HEIGHT * 0.5, 0);
+    mob.velocity.set(0, 0, 0);
+    mob.target.set(0, 0, 0);
+    mob.hp = 0;
+    mob.maxHp = 0;
+    mobPool.push(mob);
+  };
+
   const syncServerClockSkew = (serverEpochMs: number) => {
     const sample = serverEpochMs - Date.now();
     if (!serverClockSkewInitialized) {
@@ -518,7 +549,9 @@ export const createAuthoritativeSync = (
       ? ctx.mobs.indexOf(mob)
       : ctx.mobs.findIndex((entry) => entry.mobId === mobId);
     if (index >= 0) {
+      const removed = ctx.mobs[index];
       ctx.mobs.splice(index, 1);
+      if (removed) returnMobToPool(removed);
     }
     ctx.serverMobsById.delete(mobId);
     ctx.serverMobInterpolationById.delete(mobId);
@@ -540,18 +573,21 @@ export const createAuthoritativeSync = (
       existing.maxHp = mobState.maxHp;
       return;
     }
-    const mesh = new THREE.Mesh(ctx.mobLogicGeometry, ctx.mobLogicMaterial);
+    const pooled = acquireMobFromPool();
+    const mesh = pooled
+      ? pooled.mesh
+      : new THREE.Mesh(ctx.mobLogicGeometry, ctx.mobLogicMaterial);
     mesh.position.set(
       mobState.position.x,
       ctx.MOB_HEIGHT * 0.5,
       mobState.position.z
     );
-    const mob: MobEntity = {
+    const mob: MobEntity = pooled ?? {
       mesh,
       radius: ctx.MOB_WIDTH * 0.5,
       speed: ctx.MOB_SPEED,
-      velocity: new THREE.Vector3(mobState.velocity.x, 0, mobState.velocity.z),
-      target: new THREE.Vector3(mobState.position.x, 0, mobState.position.z),
+      velocity: new THREE.Vector3(),
+      target: new THREE.Vector3(),
       kind: 'mob',
       mobId: mobState.mobId,
       hp: mobState.hp,
@@ -564,6 +600,16 @@ export const createAuthoritativeSync = (
       berserkTarget: null,
       laneBlocked: false,
     };
+    if (pooled) {
+      mob.mobId = mobState.mobId;
+      mob.hp = mobState.hp;
+      mob.maxHp = mobState.maxHp;
+      mob.velocity.set(mobState.velocity.x, 0, mobState.velocity.z);
+      mob.target.set(mobState.position.x, 0, mobState.position.z);
+    } else {
+      mob.velocity.set(mobState.velocity.x, 0, mobState.velocity.z);
+      mob.target.set(mobState.position.x, 0, mobState.position.z);
+    }
     ctx.mobs.push(mob);
     ctx.serverMobsById.set(mobState.mobId, mob);
   };
@@ -825,8 +871,9 @@ export const createAuthoritativeSync = (
       const mobId = mob.mobId;
       if (mobId && snapshotMobIds.has(mobId)) continue;
       ctx.mobs.splice(i, 1);
+      returnMobToPool(mob);
+      ctx.serverMobsById.delete(mobId ?? '');
     }
-    ctx.serverMobsById.clear();
     ctx.serverMobInterpolationById.clear();
     ctx.serverMobSampleById.clear();
     for (const mob of Object.values(snapshot.mobs)) {

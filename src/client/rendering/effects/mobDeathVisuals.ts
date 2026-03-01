@@ -20,6 +20,7 @@ const TEMP_BASE_COLOR = new THREE.Color();
 
 export const createMobDeathVisualSystem = (scene: THREE.Scene) => {
   const visuals: MobDeathVisual[] = [];
+  const visualPool: MobDeathVisual[] = [];
 
   const clear = () => {
     for (const visual of visuals) {
@@ -29,6 +30,30 @@ export const createMobDeathVisualSystem = (scene: THREE.Scene) => {
       }
     }
     visuals.length = 0;
+    for (const visual of visualPool) {
+      scene.remove(visual.root);
+      for (const material of visual.materials) {
+        material.dispose();
+      }
+    }
+    visualPool.length = 0;
+  };
+
+  const acquireFromPool = (): MobDeathVisual | null => visualPool.pop() ?? null;
+
+  const returnToPool = (visual: MobDeathVisual) => {
+    scene.remove(visual.root);
+    for (const material of visual.materials) {
+      material.opacity = 1;
+      const tintable = material as THREE.Material & { color?: THREE.Color };
+      if (tintable.color) {
+        const baseHex = tintable.userData.deathFlashBaseColorHex as
+          | number
+          | undefined;
+        if (baseHex !== undefined) tintable.color.setHex(baseHex);
+      }
+    }
+    visualPool.push(visual);
   };
 
   const spawn = (
@@ -38,19 +63,7 @@ export const createMobDeathVisualSystem = (scene: THREE.Scene) => {
     headingOffset: number
   ) => {
     if (!template) return;
-    const deathRoot = new THREE.Group();
-    const corpse = template.clone(true);
-    const corpseBounds = new THREE.Box3().setFromObject(corpse);
-    if (!corpseBounds.isEmpty()) {
-      corpse.position.y -= corpseBounds.min.y;
-    }
-    deathRoot.add(corpse);
-    deathRoot.position.copy(mob.mesh.position);
     const DEATH_VISUAL_LIFT_Y = 0.3;
-    deathRoot.position.y += groundOffsetY + DEATH_VISUAL_LIFT_Y;
-    const startX = deathRoot.position.x;
-    const startZ = deathRoot.position.z;
-    const startY = deathRoot.position.y;
     const headingSpeedSq =
       mob.velocity.x * mob.velocity.x + mob.velocity.z * mob.velocity.z;
     let heading =
@@ -78,6 +91,38 @@ export const createMobDeathVisualSystem = (scene: THREE.Scene) => {
         knockbackZ = normalizedHitDirZ * DEATH_KNOCKBACK_DISTANCE;
       }
     }
+
+    const pooled = acquireFromPool();
+    if (pooled) {
+      pooled.root.position.copy(mob.mesh.position);
+      pooled.root.position.y += groundOffsetY + DEATH_VISUAL_LIFT_Y;
+      pooled.root.rotation.set(0, heading, 0);
+      pooled.root.rotateX(0);
+      pooled.age = 0;
+      pooled.heading = heading;
+      pooled.fallSign = fallSign;
+      pooled.startX = pooled.root.position.x;
+      pooled.startZ = pooled.root.position.z;
+      pooled.startY = pooled.root.position.y;
+      pooled.knockbackX = knockbackX;
+      pooled.knockbackZ = knockbackZ;
+      scene.add(pooled.root);
+      visuals.push(pooled);
+      return;
+    }
+
+    const deathRoot = new THREE.Group();
+    const corpse = template.clone(true);
+    const corpseBounds = new THREE.Box3().setFromObject(corpse);
+    if (!corpseBounds.isEmpty()) {
+      corpse.position.y -= corpseBounds.min.y;
+    }
+    deathRoot.add(corpse);
+    deathRoot.position.copy(mob.mesh.position);
+    deathRoot.position.y += groundOffsetY + DEATH_VISUAL_LIFT_Y;
+    const startX = deathRoot.position.x;
+    const startZ = deathRoot.position.z;
+    const startY = deathRoot.position.y;
     deathRoot.rotation.y = heading;
 
     const deathMaterials: THREE.Material[] = [];
@@ -182,11 +227,8 @@ export const createMobDeathVisualSystem = (scene: THREE.Scene) => {
         material.opacity = opacity;
       }
       if (visual.age >= TOTAL_DURATION) {
-        scene.remove(visual.root);
-        for (const material of visual.materials) {
-          material.dispose();
-        }
         visuals.splice(i, 1);
+        returnToPool(visual);
       }
     }
   };
