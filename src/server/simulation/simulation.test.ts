@@ -174,6 +174,44 @@ describe('runSimulation', () => {
     }
   });
 
+  it('despawns mob at castle and triggers gameOver with castleCaptures', () => {
+    const nowMs = Date.now();
+    const gameWorld = world(nowMs);
+    gameWorld.wave.wave = 1;
+    gameWorld.wave.active = true;
+    gameWorld.wave.spawners = [
+      {
+        spawnerId: 'wave-1-north',
+        totalCount: 0,
+        spawnedCount: 0,
+        aliveCount: 1,
+        spawnRatePerSecond: 0,
+        spawnAccumulator: 0,
+        gateOpen: true,
+        routeState: 'reachable',
+        route: [{ x: 0, z: 7 }],
+      },
+    ];
+    gameWorld.mobs.set('1', {
+      mobId: '1',
+      position: { x: 0, z: 6.5 },
+      velocity: { x: 0, z: 0 },
+      hp: 100,
+      maxHp: 100,
+      spawnerId: 'wave-1-north',
+      routeIndex: 0,
+    });
+    const result = runSimulation(
+      gameWorld,
+      nowMs + SIM_TICK_MS,
+      [],
+      1
+    );
+    expect(result.world.mobs.get('1')).toBeUndefined();
+    expect(result.castleCaptures).toBe(1);
+    expect(result.gameOver).toBe(true);
+  });
+
   it('keeps blocked-route mobs moving toward side entry, not castle fallback', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);

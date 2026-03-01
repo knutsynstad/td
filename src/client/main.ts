@@ -2024,7 +2024,10 @@ const setupAuthoritativeBridge = async () => {
       onCoinBalance: (coins) => {
         gameState.coins = Math.max(0, Math.min(COINS_CAP, coins));
       },
-      onResyncRequired: () => {
+      onResyncRequired: (reason) => {
+        if (reason === 'castle death' && hudUpdaters.triggerEventBanner) {
+          hudUpdaters.triggerEventBanner('Castle fell - Game over!', 4);
+        }
         if (!authoritativeBridgeRef.current) return;
         const bridge = authoritativeBridgeRef.current;
         setTimeout(() => {

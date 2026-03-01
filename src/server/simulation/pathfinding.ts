@@ -7,6 +7,7 @@ import {
   WORLD_BOUNDS,
   GRID_SIZE,
   CASTLE_HALF_EXTENT,
+  CASTLE_CAPTURE_RADIUS,
 } from '../../shared/content/world';
 import {
   WAVE_MIN_SPAWNERS,
@@ -434,6 +435,13 @@ export const recomputeSpawnerRoutes = (world: GameWorld): void => {
   }
 
   for (const mob of world.mobs.values()) {
+    const distToGoal = getNearestGoalDistance(
+      goals,
+      mob.position.x,
+      mob.position.z
+    );
+    if (distToGoal <= CASTLE_CAPTURE_RADIUS) continue;
+
     const route = routesBySpawner.get(mob.spawnerId) ?? [];
     const nearest = getNearestRouteIndex(route, mob.position);
     mob.routeIndex = Math.max(

@@ -4,7 +4,10 @@ import type {
   StructureState,
 } from '../../shared/game-state';
 import { getTowerDef, getTowerDps } from '../../shared/content/towers';
-import { WORLD_BOUNDS } from '../../shared/content/world';
+import {
+  WORLD_BOUNDS,
+  CASTLE_CAPTURE_RADIUS,
+} from '../../shared/content/world';
 import { distance2d, hashString01, normalize2d } from '../../shared/utils';
 import { MOB_DEFS, DEFAULT_MOB_TYPE } from '../../shared/content/mobs';
 import { createSpatialIndex, spatialInsert, spatialQueryInto } from './spatial';
@@ -18,7 +21,6 @@ import type { SimulationPerfStats } from './runSimulation';
 
 export const ENABLE_SERVER_TOWER_SPATIAL_DAMAGE = true;
 
-const CASTLE_CAPTURE_RADIUS = 2;
 const MOB_ROUTE_REACH_RADIUS = 0.65;
 const MOB_ROUTE_LATERAL_SPREAD = 0.9;
 const MOB_STUCK_TIMEOUT_MS = 15_000;
@@ -61,6 +63,22 @@ export const updateMobs = (
   const mobValues = [...world.mobs.values()];
   perf.mobsSimulated += mobValues.length;
   for (const mob of mobValues) {
+    const nearestGoalDistanceAtStart = getNearestGoalDistance(
+      goals,
+      mob.position.x,
+      mob.position.z
+    );
+    if (nearestGoalDistanceAtStart <= CASTLE_CAPTURE_RADIUS) {
+      castleCaptures += 1;
+      despawnedIds.push(mob.mobId);
+      world.mobs.delete(mob.mobId);
+      const spawner = spawnerById.get(mob.spawnerId);
+      if (spawner) {
+        spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
+      }
+      continue;
+    }
+
     const side = toSideDef(mob.spawnerId);
     const entry = getSpawnerEntryPoint(side);
     const spawner = spawnerById.get(mob.spawnerId);
@@ -108,6 +126,17 @@ export const updateMobs = (
         z: routedTarget.z + forward.x * laneOffset * lateralScale,
       };
     } else if (isInMap && !canUseRoute) {
+      const nearestForEntry =
+        getNearestGoalDistance(goals, mob.position.x, mob.position.z);
+      if (nearestForEntry <= CASTLE_CAPTURE_RADIUS) {
+        castleCaptures += 1;
+        despawnedIds.push(mob.mobId);
+        world.mobs.delete(mob.mobId);
+        if (spawner) {
+          spawner.aliveCount = Math.max(0, spawner.aliveCount - 1);
+        }
+        continue;
+      }
       target = entry;
     }
 
