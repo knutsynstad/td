@@ -19,15 +19,17 @@ import { isRecord } from '../../shared/utils';
 
 type SnapshotOptions = { skipMobReplacement?: boolean };
 
+type DeltaBatchContext = { batchTickSeq: number };
+
 type PresenceCallbacks = {
   onSnapshot: (snapshot: WorldState, options?: SnapshotOptions) => void;
   onSelfReady: (playerId: string, username: string, position: Vec2) => void;
   onRemoteJoin: (playerId: string, username: string, position: Vec2) => void;
   onRemoteLeave: (playerId: string) => void;
   onPlayerMove: (playerId: string, username: string, next: Vec2) => void;
-  onMobDelta: (delta: EntityDelta) => void;
-  onStructureDelta: (delta: StructureDelta) => void;
-  onWaveDelta: (delta: WaveDelta) => void;
+  onMobDelta: (delta: EntityDelta, context: DeltaBatchContext) => void;
+  onStructureDelta: (delta: StructureDelta, context: DeltaBatchContext) => void;
+  onWaveDelta: (delta: WaveDelta, context: DeltaBatchContext) => void;
   onCoinBalance: (coins: number) => void;
   onResyncRequired: (reason: string) => void;
   onResetBanner?: (reason: string) => void;
@@ -163,7 +165,16 @@ const parseJoinResponse = (value: unknown): JoinResponse => {
   return value;
 };
 
-const applyDelta = (delta: GameDelta, callbacks: PresenceCallbacks): void => {
+const DELTA_BUFFER_MAX_BATCHES = 50;
+const DELTA_BUFFER_MAX_MS = 10_000;
+
+type BufferedBatch = { batch: DeltaBatch; receivedAtMs: number };
+
+const applyDelta = (
+  delta: GameDelta,
+  callbacks: PresenceCallbacks,
+  batchContext: DeltaBatchContext
+): void => {
   if (delta.type === 'presenceDelta') {
     if (delta.joined) {
       callbacks.onRemoteJoin(
@@ -185,15 +196,15 @@ const applyDelta = (delta: GameDelta, callbacks: PresenceCallbacks): void => {
         player.interpolation.to
       );
     }
-    callbacks.onMobDelta(delta);
+    callbacks.onMobDelta(delta, batchContext);
     return;
   }
   if (delta.type === 'structureDelta') {
-    callbacks.onStructureDelta(delta);
+    callbacks.onStructureDelta(delta, batchContext);
     return;
   }
   if (delta.type === 'waveDelta') {
-    callbacks.onWaveDelta(delta);
+    callbacks.onWaveDelta(delta, batchContext);
     return;
   }
   if (delta.type === 'resyncRequired') {
@@ -208,7 +219,7 @@ export const connectAuthoritativeBridge = async (
   const joinResponse = parseJoinResponse(joinPayload);
   callbacks.onSnapshot(joinResponse.snapshot);
 
-  const snapshotTickSeq = joinResponse.snapshot.meta.tickSeq;
+  let snapshotTickSeq = joinResponse.snapshot.meta.tickSeq;
 
   for (const player of Object.values(joinResponse.snapshot.players)) {
     if (player.playerId === joinResponse.playerId) {
@@ -221,6 +232,40 @@ export const connectAuthoritativeBridge = async (
   let seq = 0;
   let lastBatchLogMs = 0;
   let firstBatchLogged = false;
+  const deltaBuffer: BufferedBatch[] = [];
+  const pushToDeltaBuffer = (batch: DeltaBatch) => {
+    const receivedAtMs = typeof performance !== 'undefined' ? performance.now() : 0;
+    deltaBuffer.push({ batch, receivedAtMs });
+    while (deltaBuffer.length > DELTA_BUFFER_MAX_BATCHES) {
+      deltaBuffer.shift();
+    }
+    const cutoffMs = receivedAtMs - DELTA_BUFFER_MAX_MS;
+    while (deltaBuffer.length > 0 && deltaBuffer[0]!.receivedAtMs < cutoffMs) {
+      deltaBuffer.shift();
+    }
+  };
+  const replayBufferedDeltasNewerThan = (tickSeq: number) => {
+    const batchContext = { batchTickSeq: 0 };
+    for (const { batch } of deltaBuffer) {
+      if (batch.tickSeq <= tickSeq) continue;
+      batchContext.batchTickSeq = batch.tickSeq;
+      for (const event of batch.events) {
+        if (!event || typeof event !== 'object') continue;
+        const type = (event as { type?: string }).type;
+        if (type === 'entityDelta' || type === 'waveDelta') {
+          try {
+            applyDelta(event, callbacks, batchContext);
+          } catch (err) {
+            console.error('[MobDelta] Error replaying buffered delta', {
+              type,
+              tickSeq: batch.tickSeq,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+    }
+  };
   console.log('[MobDelta] Realtime connecting', {
     channel: joinResponse.channel,
   });
@@ -236,6 +281,7 @@ export const connectAuthoritativeBridge = async (
         return;
       }
       const batch = payload;
+      pushToDeltaBuffer(batch);
       const eventTypes = batch.events.map((e) => e?.type).filter(Boolean);
       const entityCount = eventTypes.filter((t) => t === 'entityDelta').length;
       const structureCount = eventTypes.filter((t) => t === 'structureDelta').length;
@@ -270,7 +316,7 @@ export const connectAuthoritativeBridge = async (
           continue;
         }
         try {
-          applyDelta(event, callbacks);
+          applyDelta(event, callbacks, { batchTickSeq: batch.tickSeq });
         } catch (err) {
           console.error('[MobDelta] Error applying delta', {
             deltaType:
@@ -343,9 +389,11 @@ export const connectAuthoritativeBridge = async (
     if (payload.resetReason && callbacks.onResetBanner) {
       callbacks.onResetBanner(payload.resetReason);
     }
+    snapshotTickSeq = payload.snapshot.meta.tickSeq;
     callbacks.onSnapshot(payload.snapshot, {
       skipMobReplacement: !payload.resetReason,
     });
+    replayBufferedDeltasNewerThan(snapshotTickSeq);
   };
 
   const fetchStructures = async (): Promise<StructuresSyncResponse> => {

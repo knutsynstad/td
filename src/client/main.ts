@@ -1902,6 +1902,9 @@ const serverMobMaxHpCache = new Map<string, number>();
 const serverWaveActiveRef = { current: false };
 const serverStructureSyncInFlightRef = { current: false };
 const serverMetaSyncInFlightRef = { current: false };
+const resyncInProgressRef = { current: false };
+let lastResyncAttemptedAt = 0;
+const RESYNC_COOLDOWN_MS = 15_000;
 const isServerAuthoritative = () => authoritativeBridgeRef.current !== null;
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
@@ -2026,14 +2029,14 @@ const setupAuthoritativeBridge = async () => {
         }
         authoritativeSync.upsertRemoteNpc(playerId, username, next);
       },
-      onMobDelta: (delta) => {
-        authoritativeSync.applyServerMobDelta(delta);
+      onMobDelta: (delta, { batchTickSeq }) => {
+        authoritativeSync.applyServerMobDelta(delta, batchTickSeq);
       },
-      onStructureDelta: (delta) => {
-        authoritativeSync.applyServerStructureDelta(delta);
+      onStructureDelta: (delta, { batchTickSeq }) => {
+        authoritativeSync.applyServerStructureDelta(delta, batchTickSeq);
       },
-      onWaveDelta: (delta) => {
-        authoritativeSync.applyServerWaveDelta(delta);
+      onWaveDelta: (delta, { batchTickSeq }) => {
+        authoritativeSync.applyServerWaveDelta(delta, batchTickSeq);
       },
       onCoinBalance: (coins) => {
         gameState.coins = Math.max(0, Math.min(COINS_CAP, coins));
@@ -2043,23 +2046,50 @@ const setupAuthoritativeBridge = async () => {
           hudUpdaters.triggerEventBanner('Castle fell - Game over!', 4);
         }
         if (!authoritativeBridgeRef.current) return;
+        const now = performance.now();
+        const skipCooldown =
+          reason === 'castle death' || reason === 'game reset';
+        if (
+          !skipCooldown &&
+          (resyncInProgressRef.current ||
+            (lastResyncAttemptedAt > 0 &&
+              now - lastResyncAttemptedAt < RESYNC_COOLDOWN_MS))
+        ) {
+          return;
+        }
+        resyncInProgressRef.current = true;
+        lastResyncAttemptedAt = now;
         const bridge = authoritativeBridgeRef.current;
         const RESYNC_ATTEMPTS = 3;
         const RESYNC_INITIAL_DELAY_MS = 300;
         const attemptResync = (attempt: number) => {
+          hudUpdaters.triggerEventBanner?.('Reconnecting…', 30);
           const delayMs =
             attempt === 0
               ? RESYNC_INITIAL_DELAY_MS
               : RESYNC_INITIAL_DELAY_MS * Math.pow(2, attempt);
           setTimeout(() => {
-            if (!authoritativeBridgeRef.current) return;
+            if (!authoritativeBridgeRef.current) {
+              resyncInProgressRef.current = false;
+              return;
+            }
             void bridge
               .resync()
               .catch((error) => {
                 console.error('Failed to resync authoritative snapshot', error);
                 if (attempt < RESYNC_ATTEMPTS - 1) {
                   attemptResync(attempt + 1);
+                } else {
+                  resyncInProgressRef.current = false;
+                  hudUpdaters.triggerEventBanner?.(
+                    'Reconnect failed - refresh to try again',
+                    6
+                  );
                 }
+              })
+              .then(() => {
+                resyncInProgressRef.current = false;
+                hudUpdaters.clearEventBanner?.();
               });
           }, delayMs);
         };

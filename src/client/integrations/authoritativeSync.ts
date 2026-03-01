@@ -155,14 +155,17 @@ export type AuthoritativeSync = {
   ) => void;
   removeServerStructure: (structureId: string) => void;
   upsertServerStructure: (entry: SharedStructureState) => void;
-  applyServerStructureDelta: (delta: StructureDelta) => void;
+  applyServerStructureDelta: (
+    delta: StructureDelta,
+    batchTickSeq?: number
+  ) => void;
   applyServerStructureSync: (
     structures: Record<string, SharedStructureState>
   ) => void;
   removeServerMobById: (mobId: string) => void;
   upsertServerMobFromSnapshot: (mobState: SharedMobState) => void;
-  applyServerMobDelta: (delta: EntityDelta) => void;
-  applyServerWaveDelta: (delta: WaveDelta) => void;
+  applyServerMobDelta: (delta: EntityDelta, batchTickSeq?: number) => void;
+  applyServerWaveDelta: (delta: WaveDelta, batchTickSeq?: number) => void;
   applyServerWaveTiming: (
     wave: number,
     active: boolean,
@@ -196,6 +199,7 @@ export const createAuthoritativeSync = (
   const pendingFullMobSnapshotReceivedChunks = new Set<number>();
 
   let lastMobDeltaReceivedAtMs = 0;
+  let lastSnapshotTickSeq = 0;
   const CONNECTION_ALIVE_THRESHOLD_MS = 3_000;
   const MOB_DELTA_DEBUG =
     typeof localStorage !== 'undefined' &&
@@ -549,7 +553,10 @@ export const createAuthoritativeSync = (
     }
   };
 
-  const applyServerStructureDelta = (delta: StructureDelta) => {
+  const applyServerStructureDelta = (
+    delta: StructureDelta,
+    _batchTickSeq?: number
+  ) => {
     if (STRUCTURE_SYNC_DEBUG) {
       console.log('[StructureSync] applyServerStructureDelta', {
         upserts: delta.upserts.length,
@@ -821,7 +828,17 @@ export const createAuthoritativeSync = (
     }
   };
 
-  const applyServerMobDelta = (delta: EntityDelta) => {
+  const applyServerMobDelta = (
+    delta: EntityDelta,
+    batchTickSeq?: number
+  ) => {
+    if (
+      batchTickSeq !== undefined &&
+      lastSnapshotTickSeq > 0 &&
+      batchTickSeq <= lastSnapshotTickSeq
+    ) {
+      return;
+    }
     const pool = delta.mobPool;
     const poolSize = pool
       ? Math.min(
@@ -960,7 +977,14 @@ export const createAuthoritativeSync = (
     }
   };
 
-  const applyServerWaveDelta = (delta: WaveDelta) => {
+  const applyServerWaveDelta = (delta: WaveDelta, batchTickSeq?: number) => {
+    if (
+      batchTickSeq !== undefined &&
+      lastSnapshotTickSeq > 0 &&
+      batchTickSeq <= lastSnapshotTickSeq
+    ) {
+      return;
+    }
     ctx.gameState.wave = delta.wave.wave;
     ctx.serverWaveActiveRef.current = delta.wave.active;
     ctx.gameState.nextWaveAtMs =
@@ -985,6 +1009,7 @@ export const createAuthoritativeSync = (
     snapshot: SharedWorldState,
     options?: { skipMobReplacement?: boolean }
   ) => {
+    lastSnapshotTickSeq = snapshot.meta.tickSeq;
     syncServerMeta(snapshot.wave, snapshot.meta);
 
     const snapshotStructureIds = new Set(Object.keys(snapshot.structures));

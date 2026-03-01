@@ -77,6 +77,7 @@ export type HudUpdaters = {
   syncCoinTrailViewport: () => void;
   syncMinimapCanvasSize: () => void;
   triggerEventBanner: (text: string, duration?: number) => void;
+  clearEventBanner: () => void;
 };
 
 const MINIMAP_MOB_SMOOTH_FACTOR = 0.3;
@@ -332,6 +333,12 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
     ctx.gameState.eventBannerTimer = duration;
   };
 
+  const clearEventBanner = () => {
+    ctx.eventBannerEl.classList.remove('show');
+    ctx.eventBannerEl.textContent = '';
+    ctx.gameState.eventBannerTimer = 0;
+  };
+
   const updateCoinTrails = (delta: number) => {
     for (let i = ctx.activeCoinTrails.length - 1; i >= 0; i -= 1) {
       const trail = ctx.activeCoinTrails[i]!;
@@ -385,5 +392,6 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
     syncCoinTrailViewport,
     syncMinimapCanvasSize,
     triggerEventBanner,
+    clearEventBanner,
   };
 };
