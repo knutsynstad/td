@@ -6,10 +6,13 @@ import type {
   GameDelta,
   HeartbeatResponse,
   JoinResponse,
+  MetaSyncResponse,
   ResyncResponse,
+  StructuresSyncResponse,
 } from '../../shared/game-protocol';
 import {
   DEFAULT_PLAYER_SPAWN,
+  type StructureState,
   type PlayerState,
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
@@ -31,6 +34,7 @@ import {
 } from './trackedState';
 import { ensureStaticMap } from './staticMap';
 import { ensureInitialWaveSchedule } from '../simulation/waves';
+import { parseMapFromHash, parseMeta, parseStructure } from './parse';
 
 export async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();
@@ -70,9 +74,7 @@ export async function joinGame(
       position: player.position,
     },
   };
-  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
-    joinDelta,
-  ]);
+  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [joinDelta]);
 
   return {
     type: 'join',
@@ -218,6 +220,31 @@ export async function getGamePreview(): Promise<GamePreview> {
     wave: world.wave.wave,
     mobsLeft: Object.keys(world.mobs).length,
     playerCount: Object.keys(world.players).length,
+  };
+}
+
+export async function getStructuresSync(): Promise<StructuresSyncResponse> {
+  const [structuresRaw, metaRaw] = await Promise.all([
+    redis.hGetAll(KEYS.STRUCTURES),
+    redis.hGetAll(KEYS.META),
+  ]);
+  const structures = parseMapFromHash<StructureState>(
+    structuresRaw,
+    parseStructure
+  );
+  const meta = parseMeta(metaRaw);
+  return {
+    type: 'structures',
+    structures,
+    structureChangeSeq: meta.lastStructureChangeTickSeq ?? 0,
+  };
+}
+
+export async function getMetaSync(): Promise<MetaSyncResponse> {
+  const metaRaw = await redis.hGetAll(KEYS.META);
+  return {
+    type: 'meta',
+    meta: parseMeta(metaRaw),
   };
 }
 

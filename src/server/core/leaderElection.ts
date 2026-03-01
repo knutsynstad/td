@@ -1,9 +1,5 @@
 import { redis } from '@devvit/web/server';
-import {
-  acquireLock,
-  forceDeleteLock,
-  sleep,
-} from './lock';
+import { acquireLock, forceDeleteLock, sleep } from './lock';
 
 export type LeaderHeartbeat = {
   key: string;
@@ -188,11 +184,7 @@ export async function pollForLeadership(
   while (Date.now() < deadline) {
     if (shouldContinue && !(await shouldContinue())) return false;
 
-    const acquired = await acquireLock(
-      lockKey,
-      candidateToken,
-      lockTtlSeconds
-    );
+    const acquired = await acquireLock(lockKey, candidateToken, lockTtlSeconds);
     if (acquired) return true;
 
     if (heartbeat) {

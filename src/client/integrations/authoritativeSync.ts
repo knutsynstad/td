@@ -156,6 +156,9 @@ export type AuthoritativeSync = {
   removeServerStructure: (structureId: string) => void;
   upsertServerStructure: (entry: SharedStructureState) => void;
   applyServerStructureDelta: (delta: StructureDelta) => void;
+  applyServerStructureSync: (
+    structures: Record<string, SharedStructureState>
+  ) => void;
   removeServerMobById: (mobId: string) => void;
   upsertServerMobFromSnapshot: (mobState: SharedMobState) => void;
   applyServerMobDelta: (delta: EntityDelta) => void;
@@ -544,6 +547,21 @@ export const createAuthoritativeSync = (
     if (delta.requiresPathRefresh) {
       ctx.refreshAllSpawnerPathlines();
     }
+  };
+
+  const applyServerStructureSync = (
+    structures: Record<string, SharedStructureState>
+  ) => {
+    const syncedIds = new Set(Object.keys(structures));
+    for (const structureId of Array.from(ctx.serverStructureById.keys())) {
+      if (!syncedIds.has(structureId)) {
+        removeServerStructure(structureId);
+      }
+    }
+    for (const structure of Object.values(structures)) {
+      upsertServerStructure(structure);
+    }
+    ctx.refreshAllSpawnerPathlines();
   };
 
   const removeServerMobById = (mobId: string) => {
@@ -1088,6 +1106,7 @@ export const createAuthoritativeSync = (
     removeServerStructure,
     upsertServerStructure,
     applyServerStructureDelta,
+    applyServerStructureSync,
     removeServerMobById,
     upsertServerMobFromSnapshot,
     applyServerMobDelta,

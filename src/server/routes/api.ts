@@ -7,8 +7,10 @@ import type {
   HeartbeatResponse,
   JoinRequest,
   JoinResponse,
+  MetaSyncResponse,
   ResyncRequest,
   ResyncResponse,
+  StructuresSyncResponse,
 } from '../../shared/game-protocol';
 import { isCommandRequest } from '../../shared/game-protocol';
 import type {
@@ -23,7 +25,9 @@ import {
   applyCommand,
   getCoinBalance,
   getGamePreview,
+  getMetaSync,
   getPlayerId,
+  getStructuresSync,
   heartbeatGame,
   joinGame,
   resetGame,
@@ -136,6 +140,16 @@ api.get('/game/preview', async (c) => {
       200
     );
   }
+});
+
+api.get('/game/structures', async (c) => {
+  const response = await getStructuresSync();
+  return c.json<StructuresSyncResponse>(response);
+});
+
+api.get('/game/meta', async (c) => {
+  const response = await getMetaSync();
+  return c.json<MetaSyncResponse>(response);
 });
 
 api.post('/game/resync', async (c) => {

@@ -59,9 +59,7 @@ async function onGameTick(
       reason: 'castle_death',
       connectedPlayerIds,
     });
-    await broadcast(0, 0, [
-      { type: 'resyncRequired', reason: 'castle death' },
-    ]);
+    await broadcast(0, 0, [{ type: 'resyncRequired', reason: 'castle death' }]);
     const fresh = await loadGameWorld();
     ensureStaticMap(fresh);
     ensureInitialWaveSchedule(fresh);
@@ -79,9 +77,7 @@ async function onGameTick(
       wave: world.wave,
       routesIncluded: true,
     };
-    await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
-      waveDelta,
-    ]);
+    await broadcast(world.meta.worldVersion, world.meta.tickSeq, [waveDelta]);
     return {
       tickSeq: world.meta.tickSeq,
       commandCount: commands.length,

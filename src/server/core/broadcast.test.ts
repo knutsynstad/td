@@ -26,9 +26,8 @@ test('single batch sends one message', async ({ mocks }) => {
 });
 
 test('splits into multiple batches', async ({ mocks }) => {
-  const events: GameDelta[] = Array.from(
-    { length: MAX_BATCH_EVENTS + 5 },
-    () => mkDelta()
+  const events: GameDelta[] = Array.from({ length: MAX_BATCH_EVENTS + 5 }, () =>
+    mkDelta()
   );
   await broadcast(3, 4, events);
 
@@ -53,9 +52,8 @@ test('error in one batch does not stop subsequent batches', async ({
   const sendSpy = vi.spyOn(realtime, 'send');
   sendSpy.mockRejectedValueOnce(new Error('network'));
 
-  const events: GameDelta[] = Array.from(
-    { length: MAX_BATCH_EVENTS + 5 },
-    () => mkDelta()
+  const events: GameDelta[] = Array.from({ length: MAX_BATCH_EVENTS + 5 }, () =>
+    mkDelta()
   );
   await broadcast(3, 4, events);
 

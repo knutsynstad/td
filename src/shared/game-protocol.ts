@@ -1,5 +1,6 @@
 import type {
   PlayerIntent,
+  WorldMeta,
   StructureState,
   Vec2,
   WaveState,
@@ -203,6 +204,17 @@ export type ResyncResponse = {
   type: 'snapshot';
   snapshot: WorldState;
   resetReason?: string;
+};
+
+export type StructuresSyncResponse = {
+  type: 'structures';
+  structures: Record<string, StructureState>;
+  structureChangeSeq: number;
+};
+
+export type MetaSyncResponse = {
+  type: 'meta';
+  meta: WorldMeta;
 };
 
 export const isCommandRequest = (value: unknown): value is CommandRequest => {

@@ -7,8 +7,10 @@ import type {
   GameDelta,
   HeartbeatResponse,
   JoinResponse,
+  MetaSyncResponse,
   ResyncResponse,
   StructureDelta,
+  StructuresSyncResponse,
   WaveDelta,
 } from '../../shared/game-protocol';
 import type { Vec2, WorldState } from '../../shared/game-state';
@@ -55,6 +57,8 @@ type AuthoritativeBridge = {
   ) => Promise<void>;
   sendRemoveStructure: (structureId: string) => Promise<void>;
   resync: () => Promise<void>;
+  fetchStructures: () => Promise<StructuresSyncResponse>;
+  fetchMeta: () => Promise<MetaSyncResponse>;
   heartbeat: (position: Vec2) => Promise<void>;
   refreshCoinBalance: () => Promise<void>;
   disconnect: () => Promise<void>;
@@ -130,6 +134,17 @@ const hasHeartbeatWaveState = (
 
 const isResyncResponse = (value: unknown): value is ResyncResponse =>
   isRecord(value) && value.type === 'snapshot' && isRecord(value.snapshot);
+
+const isStructuresSyncResponse = (
+  value: unknown
+): value is StructuresSyncResponse =>
+  isRecord(value) &&
+  value.type === 'structures' &&
+  isRecord(value.structures) &&
+  typeof value.structureChangeSeq === 'number';
+
+const isMetaSyncResponse = (value: unknown): value is MetaSyncResponse =>
+  isRecord(value) && value.type === 'meta' && isRecord(value.meta);
 
 const parseJoinResponse = (value: unknown): JoinResponse => {
   if (!isJoinResponse(value)) {
@@ -289,6 +304,22 @@ export const connectAuthoritativeBridge = async (
     callbacks.onSnapshot(payload.snapshot);
   };
 
+  const fetchStructures = async (): Promise<StructuresSyncResponse> => {
+    const payload = await getJson('/api/game/structures');
+    if (!isStructuresSyncResponse(payload)) {
+      throw new Error('invalid structures sync response');
+    }
+    return payload;
+  };
+
+  const fetchMeta = async (): Promise<MetaSyncResponse> => {
+    const payload = await getJson('/api/game/meta');
+    if (!isMetaSyncResponse(payload)) {
+      throw new Error('invalid meta sync response');
+    }
+    return payload;
+  };
+
   return {
     playerId: joinResponse.playerId,
     sendMoveIntent: async (position, target, desiredDir) => {
@@ -332,6 +363,8 @@ export const connectAuthoritativeBridge = async (
       });
     },
     resync,
+    fetchStructures,
+    fetchMeta,
     heartbeat,
     refreshCoinBalance,
     disconnect: async () => {

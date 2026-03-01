@@ -1900,7 +1900,8 @@ const serverMobSampleById = new Map<
 >();
 const serverMobMaxHpCache = new Map<string, number>();
 const serverWaveActiveRef = { current: false };
-const serverStructureResyncInFlightRef = { current: false };
+const serverStructureSyncInFlightRef = { current: false };
+const serverMetaSyncInFlightRef = { current: false };
 const isServerAuthoritative = () => authoritativeBridgeRef.current !== null;
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
@@ -1911,11 +1912,16 @@ const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
 const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
 const SERVER_HEARTBEAT_INTERVAL_MS = 500;
 const SERVER_COINS_REFRESH_INTERVAL_MS = 3_000;
-const SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS = 45_000;
-const SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS = 7_500;
-let nextServerStructureResyncAtMs =
-  performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+const SERVER_STRUCTURE_SYNC_INTERVAL_MS = 30_000;
+const SERVER_STRUCTURE_SYNC_RETRY_MS = 7_500;
+const SERVER_META_SYNC_INTERVAL_MS = 10_000;
+const SERVER_META_SYNC_RETRY_MS = 3_000;
+let nextServerStructureSyncAtMs =
+  performance.now() + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
+let nextServerMetaSyncAtMs = performance.now() + SERVER_META_SYNC_INTERVAL_MS;
 let nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
+let lastKnownWorldVersion = 0;
+let lastAppliedStructureChangeSeq = 0;
 let authoritativeSync: AuthoritativeSync;
 
 const setupAuthoritativeBridge = async () => {
@@ -1988,6 +1994,9 @@ const setupAuthoritativeBridge = async () => {
       onSnapshot: (snapshot) => {
         authoritativeSync.syncServerClockSkew(snapshot.meta.lastTickMs);
         authoritativeSync.applyServerSnapshot(snapshot);
+        lastKnownWorldVersion = snapshot.meta.worldVersion;
+        lastAppliedStructureChangeSeq =
+          snapshot.meta.lastStructureChangeTickSeq ?? 0;
         authoritativeInitialDataReady = true;
         startGameWhenReady?.();
       },
@@ -2045,10 +2054,12 @@ const setupAuthoritativeBridge = async () => {
         authoritativeSync.applyServerWaveTiming(wave, active, nextWaveAtMs);
       },
     });
-    nextServerStructureResyncAtMs =
-      performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
+    nextServerStructureSyncAtMs =
+      performance.now() + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
+    nextServerMetaSyncAtMs = performance.now() + SERVER_META_SYNC_INTERVAL_MS;
     nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
-    serverStructureResyncInFlightRef.current = false;
+    serverStructureSyncInFlightRef.current = false;
+    serverMetaSyncInFlightRef.current = false;
     void syncCastleCoinsFromServer();
   } catch (error) {
     console.error('Failed to connect authoritative bridge', error);
@@ -3903,21 +3914,55 @@ const tick = (now: number, delta: number) => {
   }
   if (
     authoritativeBridgeRef.current &&
-    !serverStructureResyncInFlightRef.current &&
-    now >= nextServerStructureResyncAtMs
+    !serverMetaSyncInFlightRef.current &&
+    now >= nextServerMetaSyncAtMs
   ) {
-    serverStructureResyncInFlightRef.current = true;
-    nextServerStructureResyncAtMs =
-      now + SERVER_STRUCTURE_PERIODIC_RESYNC_INTERVAL_MS;
-    void authoritativeBridgeRef.current
-      .resync()
+    const bridge = authoritativeBridgeRef.current;
+    serverMetaSyncInFlightRef.current = true;
+    nextServerMetaSyncAtMs = now + SERVER_META_SYNC_INTERVAL_MS;
+    void bridge
+      .fetchMeta()
+      .then((payload) => {
+        const { meta } = payload;
+        gameState.lives = meta.lives;
+        gameState.coins = Math.max(0, Math.min(COINS_CAP, meta.coins));
+        if (meta.worldVersion === lastKnownWorldVersion) {
+          return;
+        }
+        lastKnownWorldVersion = meta.worldVersion;
+        return bridge.resync();
+      })
       .catch((error) => {
-        console.error('Failed periodic authoritative snapshot resync', error);
-        nextServerStructureResyncAtMs =
-          performance.now() + SERVER_STRUCTURE_PERIODIC_RESYNC_RETRY_MS;
+        console.error('Failed periodic meta sync', error);
+        nextServerMetaSyncAtMs = performance.now() + SERVER_META_SYNC_RETRY_MS;
       })
       .finally(() => {
-        serverStructureResyncInFlightRef.current = false;
+        serverMetaSyncInFlightRef.current = false;
+      });
+  }
+  if (
+    authoritativeBridgeRef.current &&
+    !serverStructureSyncInFlightRef.current &&
+    now >= nextServerStructureSyncAtMs
+  ) {
+    serverStructureSyncInFlightRef.current = true;
+    nextServerStructureSyncAtMs = now + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
+    void authoritativeBridgeRef.current
+      .fetchStructures()
+      .then((payload) => {
+        if (payload.structureChangeSeq === lastAppliedStructureChangeSeq) {
+          return;
+        }
+        authoritativeSync.applyServerStructureSync(payload.structures);
+        lastAppliedStructureChangeSeq = payload.structureChangeSeq;
+      })
+      .catch((error) => {
+        console.error('Failed periodic structure sync', error);
+        nextServerStructureSyncAtMs =
+          performance.now() + SERVER_STRUCTURE_SYNC_RETRY_MS;
+      })
+      .finally(() => {
+        serverStructureSyncInFlightRef.current = false;
       });
   }
   for (const npc of npcs) {
@@ -4360,7 +4405,7 @@ startGameWhenReady = () => {
 };
 const disposeGameScene = createDisposeScene({
   authoritativeBridgeRef,
-  serverStructureResyncInFlightRef,
+  serverStructureResyncInFlightRef: serverStructureSyncInFlightRef,
   particleSystem,
   spawnContainerOverlay,
   stagingIslandsOverlay,
