@@ -55,9 +55,13 @@ export const updateHud = (
     showNextWave && state.nextWaveAtMs > 0
       ? state.toPerfTime(state.nextWaveAtMs)
       : 0;
-  const nextWaveIn = showNextWave
-    ? Math.max(0, Math.ceil((nextWaveAtPerf - state.now) / 1000))
+  // diff is ms until next wave; divide by 1000 for seconds. Clamp to 60s max
+  // (expected: 10s intermission, 30s after castle death) to avoid wild displays
+  // from clock skew or ms/sec unit bugs.
+  const rawSeconds = showNextWave
+    ? Math.max(0, (nextWaveAtPerf - state.now) / 1000)
     : 0;
+  const nextWaveIn = Math.min(60, Math.ceil(rawSeconds));
   elements.waveEl.textContent = String(
     showNextWave ? state.wave + 1 : state.wave
   );

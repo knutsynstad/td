@@ -4406,9 +4406,10 @@ const tick = (now: number, delta: number) => {
     showNextWave && gameState.nextWaveAtMs > 0
       ? authoritativeSync.toPerfTime(gameState.nextWaveAtMs)
       : 0;
-  const nextWaveIn = showNextWave
-    ? Math.max(0, Math.ceil((nextWaveAtPerf - now) / 1000))
+  const rawNextWaveSeconds = showNextWave
+    ? Math.max(0, (nextWaveAtPerf - now) / 1000)
     : 0;
+  const nextWaveIn = Math.min(60, Math.ceil(rawNextWaveSeconds));
   if (showNextWave && nextWaveIn >= 1 && nextWaveIn <= 5) {
     if (nextWaveIn !== gameState.lastCountdownBannerSecond) {
       gameState.lastCountdownBannerSecond = nextWaveIn;
