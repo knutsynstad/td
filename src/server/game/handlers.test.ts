@@ -13,6 +13,7 @@ import {
 } from './handlers';
 import { runGameLoop } from '../simulation/gameLoop';
 import { loadWorldState, persistWorldState } from './persistence';
+import { SIM_TICK_MS } from '../config';
 
 const test = createDevvitTest();
 
@@ -126,4 +127,48 @@ test('resync heals invalid map trees near castle and spawn entry lanes', async (
   const reloaded = await loadWorldState();
   expect(reloaded.structures['map-tree-castle-camper']).toBeUndefined();
   expect(reloaded.structures['map-tree-spawn-camper']).toBeUndefined();
+});
+
+test('mob positions persist across leader handoff (load, simulate, flush, load)', async () => {
+  await resetGame(TEST_USER_ID);
+  const nowMs = Date.now();
+  const seeded = await loadWorldState();
+
+  seeded.meta.lastTickMs = nowMs - SIM_TICK_MS * 2;
+  seeded.wave.wave = 1;
+  seeded.wave.active = true;
+  seeded.wave.spawners = [
+    {
+      spawnerId: 'wave-1-north',
+      totalCount: 1,
+      spawnedCount: 1,
+      aliveCount: 1,
+      spawnRatePerSecond: 0,
+      spawnAccumulator: 0,
+      gateOpen: true,
+      routeState: 'reachable',
+      route: [
+        { x: 0, z: -61 },
+        { x: 0, z: 0 },
+      ],
+    },
+  ];
+  seeded.mobs['1'] = {
+    mobId: '1',
+    position: { x: 0, z: -55 },
+    velocity: { x: 0, z: 0 },
+    hp: 100,
+    maxHp: 100,
+    spawnerId: 'wave-1-north',
+    routeIndex: 0,
+  };
+
+  await persistWorldState(seeded);
+
+  await runGameLoop(350);
+
+  const reloaded = await loadWorldState();
+  const mob = reloaded.mobs['1'];
+  expect(mob).toBeDefined();
+  expect(mob!.position.z).not.toBe(-55);
 });

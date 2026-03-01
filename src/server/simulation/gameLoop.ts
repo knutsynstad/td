@@ -49,6 +49,10 @@ async function onGameTick(
   const commands = await popPendingCommands(nowMs);
   const result = runSimulation(world, nowMs, commands, 1);
 
+  for (const [id, mob] of world.mobs) {
+    world.mobs.set(id, mob);
+  }
+
   if (result.perf.elapsedMs > 0 && ticksProcessed % 10 === 0) {
     console.log('[SimPerf]', {
       tickSeq: result.world.meta.tickSeq,
