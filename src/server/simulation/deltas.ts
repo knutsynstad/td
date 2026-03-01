@@ -29,6 +29,44 @@ export const buildMobPoolFromList = (
   return { ids, px, pz, vx, vz, hp, maxHp };
 };
 
+type MobSnapshot = { px: number; pz: number; hp: number };
+const lastBroadcastMobs = new Map<number, MobSnapshot>();
+
+export const filterChangedMobs = (mobs: MobState[]): MobState[] => {
+  const changed: MobState[] = [];
+  for (const mob of mobs) {
+    const id = Number(mob.mobId);
+    const qpx = quantize(mob.position.x);
+    const qpz = quantize(mob.position.z);
+    const prev = lastBroadcastMobs.get(id);
+    if (!prev || prev.px !== qpx || prev.pz !== qpz || prev.hp !== mob.hp) {
+      changed.push(mob);
+    }
+  }
+  return changed;
+};
+
+export const updateLastBroadcastMobs = (
+  mobs: MobState[],
+  despawnedIds: Set<string>
+): void => {
+  for (const mob of mobs) {
+    const id = Number(mob.mobId);
+    lastBroadcastMobs.set(id, {
+      px: quantize(mob.position.x),
+      pz: quantize(mob.position.z),
+      hp: mob.hp,
+    });
+  }
+  for (const mobId of despawnedIds) {
+    lastBroadcastMobs.delete(Number(mobId));
+  }
+};
+
+export const resetLastBroadcastMobs = (): void => {
+  lastBroadcastMobs.clear();
+};
+
 export const buildPresenceLeaveDelta = (playerId: string): GameDelta => ({
   type: 'presenceDelta',
   left: {

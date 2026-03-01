@@ -1,6 +1,7 @@
 import { connectRealtime } from '@devvit/web/client';
 import type {
   CommandRequest,
+  CommandResponse,
   CoinBalanceResponse,
   DeltaBatch,
   EntityDelta,
@@ -47,15 +48,15 @@ type AuthoritativeBridge = {
     structureId: string;
     type: 'wall' | 'tower' | 'tree' | 'rock';
     center: Vec2;
-  }) => Promise<void>;
+  }) => Promise<CommandResponse>;
   sendBuildStructures: (
     payloads: Array<{
       structureId: string;
       type: 'wall' | 'tower' | 'tree' | 'rock';
       center: Vec2;
     }>
-  ) => Promise<void>;
-  sendRemoveStructure: (structureId: string) => Promise<void>;
+  ) => Promise<CommandResponse>;
+  sendRemoveStructure: (structureId: string) => Promise<CommandResponse>;
   resync: () => Promise<void>;
   fetchStructures: () => Promise<StructuresSyncResponse>;
   fetchMeta: () => Promise<MetaSyncResponse>;
@@ -145,6 +146,13 @@ const isStructuresSyncResponse = (
 
 const isMetaSyncResponse = (value: unknown): value is MetaSyncResponse =>
   isRecord(value) && value.type === 'meta' && isRecord(value.meta);
+
+const isCommandResponse = (value: unknown): value is CommandResponse =>
+  isRecord(value) &&
+  value.type === 'commandAck' &&
+  typeof value.accepted === 'boolean' &&
+  typeof value.tickSeq === 'number' &&
+  typeof value.worldVersion === 'number';
 
 const parseJoinResponse = (value: unknown): JoinResponse => {
   if (!isJoinResponse(value)) {
@@ -255,15 +263,25 @@ export const connectAuthoritativeBridge = async (
 
   const sendCommand = async (
     command: CommandRequest['envelope']['command']
-  ): Promise<void> => {
+  ): Promise<CommandResponse> => {
     seq += 1;
-    await postJson('/api/game/command', {
+    const payload = await postJson('/api/game/command', {
       envelope: {
         seq,
         sentAtMs: Date.now(),
         command,
       },
     } satisfies CommandRequest);
+    if (!isCommandResponse(payload)) {
+      return {
+        type: 'commandAck',
+        accepted: false,
+        tickSeq: 0,
+        worldVersion: 0,
+        reason: 'invalid response',
+      };
+    }
+    return payload;
   };
 
   const heartbeat = async (position: Vec2): Promise<void> => {
@@ -292,7 +310,6 @@ export const connectAuthoritativeBridge = async (
 
   const resync = async (): Promise<void> => {
     const payload = await postJson('/api/game/resync', {
-      tickSeq: 0,
       playerId: joinResponse.playerId,
     });
     if (!isResyncResponse(payload)) {
@@ -341,22 +358,29 @@ export const connectAuthoritativeBridge = async (
       });
     },
     sendBuildStructure: async (payload) => {
-      await sendCommand({
+      return sendCommand({
         type: 'buildStructure',
         playerId: joinResponse.playerId,
         structure: payload,
       });
     },
     sendBuildStructures: async (payloads) => {
-      if (payloads.length === 0) return;
-      await sendCommand({
+      if (payloads.length === 0) {
+        return {
+          type: 'commandAck',
+          accepted: true,
+          tickSeq: 0,
+          worldVersion: 0,
+        };
+      }
+      return sendCommand({
         type: 'buildStructures',
         playerId: joinResponse.playerId,
         structures: payloads,
       });
     },
     sendRemoveStructure: async (structureId) => {
-      await sendCommand({
+      return sendCommand({
         type: 'removeStructure',
         playerId: joinResponse.playerId,
         structureId,

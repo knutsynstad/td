@@ -22,7 +22,12 @@ test('single batch sends one message', async ({ mocks }) => {
 
   const msgs = mocks.realtime.getSentMessagesForChannel(CHANNELS.game);
   expect(msgs).toHaveLength(1);
-  expect(msgs[0].data?.msg).toEqual({ tickSeq: 2, worldVersion: 1, events });
+  expect(msgs[0].data?.msg).toEqual({
+    tickSeq: 2,
+    worldVersion: 1,
+    channelId: CHANNELS.game,
+    events,
+  });
 });
 
 test('splits into multiple batches', async ({ mocks }) => {
@@ -36,11 +41,13 @@ test('splits into multiple batches', async ({ mocks }) => {
   expect(msgs[0].data?.msg).toEqual({
     tickSeq: 4,
     worldVersion: 3,
+    channelId: CHANNELS.game,
     events: events.slice(0, MAX_BATCH_EVENTS),
   });
   expect(msgs[1].data?.msg).toEqual({
     tickSeq: 4,
     worldVersion: 3,
+    channelId: CHANNELS.game,
     events: events.slice(MAX_BATCH_EVENTS),
   });
 });
@@ -68,6 +75,7 @@ test('error in one batch does not stop subsequent batches', async ({
   expect(msgs[0].data?.msg).toEqual({
     tickSeq: 4,
     worldVersion: 3,
+    channelId: CHANNELS.game,
     events: events.slice(MAX_BATCH_EVENTS),
   });
 });

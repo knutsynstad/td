@@ -12,6 +12,7 @@ import {
   MAX_STRUCTURE_DELTA_UPSERTS,
   MAX_STRUCTURE_DELTA_REMOVES,
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
+  FULL_MOB_SNAPSHOT_INTERVAL_TICKS,
 } from '../config';
 import { applyCommands } from './commands';
 import {
@@ -20,7 +21,12 @@ import {
 } from './pathfinding';
 import { ensureInitialWaveSchedule, updateWave } from './waves';
 import { updateMobs } from './mobs';
-import { ENABLE_FULL_MOB_DELTAS, buildMobPoolFromList } from './deltas';
+import {
+  ENABLE_FULL_MOB_DELTAS,
+  buildMobPoolFromList,
+  filterChangedMobs,
+  updateLastBroadcastMobs,
+} from './deltas';
 
 export type SimulationPerfStats = {
   mobsSimulated: number;
@@ -151,30 +157,50 @@ export const runSimulation = (
     const simulatedWindowMs = Math.max(SIM_TICK_MS, steps * SIM_TICK_MS);
     const despawnedIds = Array.from(despawnedDuringRun).map(Number);
     if (ENABLE_FULL_MOB_DELTAS) {
-      const chunkSize = Math.max(1, FULL_MOB_SNAPSHOT_CHUNK_SIZE);
-      const chunkCount = Math.max(
-        1,
-        Math.ceil(latestMobUpserts.length / chunkSize)
-      );
-      const snapshotId = world.meta.tickSeq;
-      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-        const start = chunkIndex * chunkSize;
-        const end = Math.min(latestMobUpserts.length, start + chunkSize);
-        const chunkMobs = latestMobUpserts.slice(start, end);
-        const chunkDelta: EntityDelta = {
-          type: 'entityDelta',
-          serverTimeMs: world.meta.lastTickMs,
-          tickMs: simulatedWindowMs,
-          players: [],
-          mobPool: buildMobPoolFromList(chunkMobs, true),
-          fullMobList: true,
-          fullMobSnapshotId: snapshotId,
-          fullMobSnapshotChunkIndex: chunkIndex,
-          fullMobSnapshotChunkCount: chunkCount,
-          despawnedMobIds: despawnedIds,
-        };
-        deltas.push(chunkDelta);
+      const isFullSnapshotTick =
+        world.meta.tickSeq % FULL_MOB_SNAPSHOT_INTERVAL_TICKS === 0;
+
+      if (isFullSnapshotTick) {
+        const chunkSize = Math.max(1, FULL_MOB_SNAPSHOT_CHUNK_SIZE);
+        const chunkCount = Math.max(
+          1,
+          Math.ceil(latestMobUpserts.length / chunkSize)
+        );
+        const snapshotId = world.meta.tickSeq;
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          const start = chunkIndex * chunkSize;
+          const end = Math.min(latestMobUpserts.length, start + chunkSize);
+          const chunkMobs = latestMobUpserts.slice(start, end);
+          const chunkDelta: EntityDelta = {
+            type: 'entityDelta',
+            serverTimeMs: world.meta.lastTickMs,
+            tickMs: simulatedWindowMs,
+            players: [],
+            mobPool: buildMobPoolFromList(chunkMobs, true),
+            fullMobList: true,
+            fullMobSnapshotId: snapshotId,
+            fullMobSnapshotChunkIndex: chunkIndex,
+            fullMobSnapshotChunkCount: chunkCount,
+            despawnedMobIds: despawnedIds,
+          };
+          deltas.push(chunkDelta);
+        }
+      } else {
+        const changedMobs = filterChangedMobs(latestMobUpserts);
+        if (changedMobs.length > 0 || despawnedIds.length > 0) {
+          const incrementalDelta: EntityDelta = {
+            type: 'entityDelta',
+            serverTimeMs: world.meta.lastTickMs,
+            tickMs: simulatedWindowMs,
+            players: [],
+            mobPool: buildMobPoolFromList(changedMobs, false),
+            despawnedMobIds: despawnedIds,
+          };
+          deltas.push(incrementalDelta);
+        }
       }
+
+      updateLastBroadcastMobs(latestMobUpserts, despawnedDuringRun);
     }
   }
   if (latestWaveDelta) {

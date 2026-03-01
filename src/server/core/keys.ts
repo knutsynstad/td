@@ -16,6 +16,7 @@ export const KEYS = {
   PLAYER: (userId: T2) => `p:${userId}`, // Hash - economy
   playerPresence: (playerId: string) => `player:${playerId}`,
   PLAYER_IDS: 'player_ids',
+  PLAYER_COMMAND_SEQ: 'playerCommandSeq',
 } as const;
 
 export const FIELDS = {

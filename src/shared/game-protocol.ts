@@ -52,19 +52,12 @@ export type StartWaveCommand = {
   playerId: string;
 };
 
-export type ShootCommand = {
-  type: 'shoot';
-  playerId: string;
-  target: Vec2;
-};
-
 export type GameCommand =
   | MoveIntentCommand
   | BuildStructureCommand
   | BuildStructuresCommand
   | RemoveStructureCommand
-  | StartWaveCommand
-  | ShootCommand;
+  | StartWaveCommand;
 
 export type CommandEnvelope = {
   seq: number;
@@ -81,7 +74,7 @@ export type PresenceDelta = {
   };
   left?: {
     playerId: string;
-    reason: 'timeout' | 'disconnect';
+    reason: 'timeout';
   };
 };
 
@@ -95,13 +88,6 @@ export type MobPool = {
   maxHp?: number[];
 };
 
-export type MobSlices = {
-  base: number[];
-  nearPlayers: number[];
-  castleThreats: number[];
-  recentlyDamaged: number[];
-};
-
 export type EntityDelta = {
   type: 'entityDelta';
   serverTimeMs: number;
@@ -112,7 +98,6 @@ export type EntityDelta = {
     interpolation: EntityInterpolation;
   }>;
   mobPool?: MobPool;
-  mobSlices?: MobSlices;
   fullMobList?: boolean;
   fullMobSnapshotId?: number;
   fullMobSnapshotChunkIndex?: number;
@@ -149,12 +134,11 @@ export type GameDelta =
 export type DeltaBatch = {
   tickSeq: number;
   worldVersion: number;
+  channelId?: string;
   events: GameDelta[];
 };
 
-export type JoinRequest = {
-  lastKnownTickSeq?: number;
-};
+export type JoinRequest = Record<string, never>;
 
 export type JoinResponse = {
   type: 'join';
@@ -196,7 +180,6 @@ export type CoinBalanceResponse = {
 };
 
 export type ResyncRequest = {
-  tickSeq: number;
   playerId?: string;
 };
 

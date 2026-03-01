@@ -369,16 +369,5 @@ export function parseCommandEnvelope(
       },
     };
   }
-  if (commandType === 'shoot') {
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'shoot',
-        playerId,
-        target: parseVec2(value.command.target),
-      },
-    };
-  }
   return undefined;
 }

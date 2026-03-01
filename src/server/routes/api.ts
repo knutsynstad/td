@@ -155,7 +155,6 @@ api.get('/game/meta', async (c) => {
 api.post('/game/resync', async (c) => {
   const body = await c.req.json<ResyncRequest>().catch(() => undefined);
   const request: ResyncRequest = {
-    tickSeq: Number(body?.tickSeq ?? 0),
     playerId: body?.playerId ? String(body.playerId) : undefined,
   };
   const playerId = request.playerId ?? (await resolvePlayerId(c));

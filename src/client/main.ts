@@ -2857,9 +2857,18 @@ const selectionDialog = new SelectionDialog(
         if (authoritativeBridgeRef.current) {
           const structureId = getStructureIdFromCollider(collider);
           if (structureId) {
-            void authoritativeBridgeRef.current.sendRemoveStructure(
-              structureId
-            );
+            void authoritativeBridgeRef.current
+              .sendRemoveStructure(structureId)
+              .then((response) => {
+                if (!response.accepted) {
+                  hudUpdaters.triggerEventBanner(
+                    response.reason ?? 'Remove failed'
+                  );
+                }
+              })
+              .catch(() => {
+                hudUpdaters.triggerEventBanner('Remove failed');
+              });
           }
         }
         queueTreeRegrow(collider);
@@ -3372,11 +3381,20 @@ const canPlace = (
 
 const placeBuilding = (center: THREE.Vector3) => {
   if (authoritativeBridgeRef.current && gameState.buildMode !== 'off') {
-    void authoritativeBridgeRef.current.sendBuildStructure({
-      structureId: `${gameState.buildMode}-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
-      type: gameState.buildMode === 'tower' ? 'tower' : 'wall',
-      center: { x: center.x, z: center.z },
-    });
+    void authoritativeBridgeRef.current
+      .sendBuildStructure({
+        structureId: `${gameState.buildMode}-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
+        type: gameState.buildMode === 'tower' ? 'tower' : 'wall',
+        center: { x: center.x, z: center.z },
+      })
+      .then((response) => {
+        if (!response.accepted) {
+          hudUpdaters.triggerEventBanner(response.reason ?? 'Build failed');
+        }
+      })
+      .catch(() => {
+        hudUpdaters.triggerEventBanner('Build failed');
+      });
     return true;
   }
   const result = placeBuildingAt(center, gameState.buildMode, gameState.coins, {
@@ -3416,13 +3434,22 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     );
     if (validPositions.length === 0) return false;
     const now = Date.now();
-    void authoritativeBridgeRef.current.sendBuildStructures(
-      validPositions.map((center, i) => ({
-        structureId: `wall-line-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
-        type: 'wall',
-        center: { x: center.x, z: center.z },
-      }))
-    );
+    void authoritativeBridgeRef.current
+      .sendBuildStructures(
+        validPositions.map((center, i) => ({
+          structureId: `wall-line-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
+          type: 'wall',
+          center: { x: center.x, z: center.z },
+        }))
+      )
+      .then((response) => {
+        if (!response.accepted) {
+          hudUpdaters.triggerEventBanner(response.reason ?? 'Build failed');
+        }
+      })
+      .catch(() => {
+        hudUpdaters.triggerEventBanner('Build failed');
+      });
     return true;
   }
   const placed = placeWallSegment(start, end, gameState.coins, {
@@ -3443,13 +3470,22 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
 const placeWallSegments = (positions: THREE.Vector3[]) => {
   if (authoritativeBridgeRef.current && positions.length > 0) {
     const now = Date.now();
-    void authoritativeBridgeRef.current.sendBuildStructures(
-      positions.map((center, i) => ({
-        structureId: `wall-segments-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
-        type: 'wall',
-        center: { x: center.x, z: center.z },
-      }))
-    );
+    void authoritativeBridgeRef.current
+      .sendBuildStructures(
+        positions.map((center, i) => ({
+          structureId: `wall-segments-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
+          type: 'wall',
+          center: { x: center.x, z: center.z },
+        }))
+      )
+      .then((response) => {
+        if (!response.accepted) {
+          hudUpdaters.triggerEventBanner(response.reason ?? 'Build failed');
+        }
+      })
+      .catch(() => {
+        hudUpdaters.triggerEventBanner('Build failed');
+      });
     return true;
   }
   const placed = placeWallSegmentsAt(positions, gameState.coins, {

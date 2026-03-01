@@ -94,6 +94,20 @@ export async function applyCommand(
 
   const resolvePlayerId = async () => playerIdOverride ?? getPlayerId();
 
+  const playerId = await resolvePlayerId();
+  const lastSeqRaw = await redis.hGet(KEYS.PLAYER_COMMAND_SEQ, playerId);
+  const lastSeq = lastSeqRaw ? Number(lastSeqRaw) : 0;
+  if (envelope.seq > 0 && envelope.seq <= lastSeq) {
+    const world = await loadWorldState();
+    return {
+      type: 'commandAck',
+      accepted: false,
+      tickSeq: world.meta.tickSeq,
+      worldVersion: world.meta.worldVersion,
+      reason: 'duplicate',
+    };
+  }
+
   if (
     envelope.command.type === 'buildStructure' ||
     envelope.command.type === 'buildStructures'
@@ -128,8 +142,7 @@ export async function applyCommand(
       (total, structure) => total + getStructureCoinCost(structure.type),
       0
     );
-    const playerId = (await resolvePlayerId()) as T2;
-    const spendResult = await spendUserCoins(playerId, coinCost);
+    const spendResult = await spendUserCoins(playerId as T2, coinCost);
     if (!spendResult.success) {
       const world = await loadWorldState();
       return {
@@ -146,8 +159,7 @@ export async function applyCommand(
   const enqueueResult = await enqueueCommand(nowMs, envelope);
   if (!enqueueResult.accepted) {
     if (spentBuildCoins > 0) {
-      const playerId = (await resolvePlayerId()) as T2;
-      await addUserCoins(playerId, spentBuildCoins);
+      await addUserCoins(playerId as T2, spentBuildCoins);
     }
     const world = await loadWorldState();
     return {
@@ -157,6 +169,12 @@ export async function applyCommand(
       worldVersion: world.meta.worldVersion,
       reason: enqueueResult.reason,
     };
+  }
+
+  if (envelope.seq > 0) {
+    await redis.hSet(KEYS.PLAYER_COMMAND_SEQ, {
+      [playerId]: String(envelope.seq),
+    });
   }
 
   const world = await loadWorldState();

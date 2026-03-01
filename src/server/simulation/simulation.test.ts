@@ -402,19 +402,15 @@ describe('runSimulation', () => {
     );
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
-      if (entityDelta.mobSlices) {
-        expect(entityDelta.mobSlices.nearPlayers.length).toBeGreaterThan(0);
-        expect(entityDelta.mobSlices.castleThreats.length).toBeGreaterThan(0);
-      } else if (entityDelta.mobPool) {
-        expect(entityDelta.mobPool.ids.length).toBeGreaterThan(0);
-      }
+      expect(entityDelta.mobPool).toBeDefined();
+      expect(entityDelta.mobPool!.ids.length).toBeGreaterThan(0);
     }
   });
 
-  it('sends full mob snapshots every tick', () => {
+  it('sends full mob snapshots on snapshot ticks', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);
-    gameWorld.meta.tickSeq = 1;
+    gameWorld.meta.tickSeq = 9;
     gameWorld.meta.lastStructureChangeTickSeq = 0;
     gameWorld.wave.wave = 1;
     gameWorld.wave.active = true;
@@ -454,7 +450,6 @@ describe('runSimulation', () => {
     expect(entityDelta?.type).toBe('entityDelta');
     if (entityDelta?.type === 'entityDelta') {
       expect(entityDelta.fullMobList).toBe(true);
-      expect(entityDelta.mobSlices).toBeUndefined();
       expect(entityDelta.mobPool).toBeDefined();
     }
   });
@@ -462,7 +457,7 @@ describe('runSimulation', () => {
   it('sends full mob snapshots in chunks when many mobs', () => {
     const nowMs = Date.now();
     const gameWorld = world(nowMs);
-    gameWorld.meta.tickSeq = 0;
+    gameWorld.meta.tickSeq = 9;
     gameWorld.meta.lastStructureChangeTickSeq = 0;
     gameWorld.wave.wave = 1;
     gameWorld.wave.active = true;
@@ -501,8 +496,7 @@ describe('runSimulation', () => {
     for (let i = 0; i < entityDeltas.length; i += 1) {
       const entityDelta = entityDeltas[i]!;
       expect(entityDelta.fullMobList).toBe(true);
-      expect(entityDelta.mobSlices).toBeUndefined();
-      expect(entityDelta.fullMobSnapshotId).toBe(1);
+      expect(entityDelta.fullMobSnapshotId).toBe(10);
       expect(entityDelta.fullMobSnapshotChunkCount).toBe(2);
       expect(entityDelta.fullMobSnapshotChunkIndex).toBe(i);
       expect(entityDelta.mobPool).toBeDefined();

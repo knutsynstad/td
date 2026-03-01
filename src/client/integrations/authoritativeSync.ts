@@ -829,19 +829,7 @@ export const createAuthoritativeSync = (
 
     if (pool) {
       const isFullSnapshot = !!delta.fullMobList;
-      if (isFullSnapshot) {
-        applyMobPoolEntries(pool, undefined, delta, true);
-      } else {
-        const slices = delta.mobSlices;
-        if (slices) {
-          applyMobPoolEntries(pool, slices.base, delta, false);
-          applyMobPoolEntries(pool, slices.nearPlayers, delta, false);
-          applyMobPoolEntries(pool, slices.castleThreats, delta, false);
-          applyMobPoolEntries(pool, slices.recentlyDamaged, delta, false);
-        } else {
-          applyMobPoolEntries(pool, undefined, delta, false);
-        }
-      }
+      applyMobPoolEntries(pool, undefined, delta, isFullSnapshot);
     }
 
     if (

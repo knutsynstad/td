@@ -18,6 +18,7 @@ import { KEYS } from '../core/keys';
 import { broadcast, CHANNELS } from '../core/broadcast';
 import { runTickLoop, type TickContext } from '../core/tickLoop';
 import { buildPresenceLeaveDelta, runSimulation } from './index';
+import { resetLastBroadcastMobs } from './deltas';
 import { ensureInitialWaveSchedule } from './waves';
 import { ensureStaticMap } from '../game/staticMap';
 import { popPendingCommands, trimCommandQueue } from './queue';
@@ -47,6 +48,19 @@ async function onGameTick(
 
   const commands = await popPendingCommands(nowMs);
   const result = runSimulation(world, nowMs, commands, 1);
+
+  if (result.perf.elapsedMs > 0 && ticksProcessed % 10 === 0) {
+    console.log('[SimPerf]', {
+      tickSeq: result.world.meta.tickSeq,
+      commands: commands.length,
+      deltas: result.deltas.length,
+      mobs: result.perf.mobsSimulated,
+      towers: result.perf.towersSimulated,
+      towerMobChecks: result.perf.towerMobChecks,
+      spawned: result.perf.waveSpawnedMobs,
+      elapsedMs: result.perf.elapsedMs,
+    });
+  }
 
   if (result.gameOver) {
     const tickSeq = result.world.meta.tickSeq;
@@ -159,6 +173,7 @@ export function runGameLoop(
     },
     {
       onInit: async function () {
+        resetLastBroadcastMobs();
         const world = await loadGameWorld();
         ensureStaticMap(world);
         world.waveDirty = true;
