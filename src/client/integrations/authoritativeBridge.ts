@@ -218,6 +218,7 @@ export const connectAuthoritativeBridge = async (
 
   let seq = 0;
   let lastBatchLogMs = 0;
+  let firstBatchLogged = false;
   console.log('[MobDelta] Realtime connecting', {
     channel: joinResponse.channel,
   });
@@ -235,7 +236,19 @@ export const connectAuthoritativeBridge = async (
       const batch = payload;
       const eventTypes = batch.events.map((e) => e?.type).filter(Boolean);
       const entityCount = eventTypes.filter((t) => t === 'entityDelta').length;
+      const structureCount = eventTypes.filter((t) => t === 'structureDelta').length;
       const now = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (!firstBatchLogged) {
+        firstBatchLogged = true;
+        console.log('[MobDelta] First batch received', {
+          msSinceLoad: now,
+          events: batch.events.length,
+          types: [...new Set(eventTypes)],
+          entityDeltas: entityCount,
+          structureDeltas: structureCount,
+          tickSeq: batch.tickSeq,
+        });
+      }
       if (now - lastBatchLogMs > 2000) {
         lastBatchLogMs = now;
         console.log('[MobDelta] Batch (every 2s)', {

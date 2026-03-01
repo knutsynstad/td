@@ -198,6 +198,8 @@ export const createAuthoritativeSync = (
     typeof localStorage !== 'undefined' &&
     localStorage.getItem('DEBUG_MOB_DELTA') === '1';
 
+  const STRUCTURE_SYNC_DEBUG = true;
+
   const mobPool: MobEntity[] = [];
 
   const acquireMobFromPool = (): MobEntity | null => {
@@ -348,6 +350,13 @@ export const createAuthoritativeSync = (
     if (existingCollider) {
       const state = ctx.structureStore.structureStates.get(existingCollider);
       if (state) {
+        if (STRUCTURE_SYNC_DEBUG && state.hp !== entry.hp) {
+          console.log('[StructureSync] HP overwrite', {
+            structureId: entry.structureId,
+            prevHp: state.hp,
+            entryHp: entry.hp,
+          });
+        }
         state.hp = entry.hp;
         state.maxHp = entry.maxHp;
         state.mesh.position.set(
@@ -418,7 +427,7 @@ export const createAuthoritativeSync = (
         tower,
         entry.maxHp,
         {
-          playerBuilt: true,
+          playerBuilt: entry.ownerId !== 'Map',
           createdAtMs: entry.createdAtMs,
           lastDecayTickMs: entry.createdAtMs,
         }
@@ -538,6 +547,12 @@ export const createAuthoritativeSync = (
   };
 
   const applyServerStructureDelta = (delta: StructureDelta) => {
+    if (STRUCTURE_SYNC_DEBUG) {
+      console.log('[StructureSync] applyServerStructureDelta', {
+        upserts: delta.upserts.length,
+        removes: delta.removes.length,
+      });
+    }
     for (const structureId of delta.removes) {
       removeServerStructure(structureId);
     }
@@ -552,6 +567,11 @@ export const createAuthoritativeSync = (
   const applyServerStructureSync = (
     structures: Record<string, SharedStructureState>
   ) => {
+    if (STRUCTURE_SYNC_DEBUG) {
+      console.log('[StructureSync] applyServerStructureSync', {
+        structureCount: Object.keys(structures).length,
+      });
+    }
     const syncedIds = new Set(Object.keys(structures));
     for (const structureId of Array.from(ctx.serverStructureById.keys())) {
       if (!syncedIds.has(structureId)) {

@@ -4014,6 +4014,11 @@ const tick = (now: number, delta: number) => {
         if (performance.now() - lastSnapshotReceivedAtMs < SNAPSHOT_STRUCTURE_GRACE_MS) {
           return;
         }
+        const applyAtMs = performance.now();
+        console.log('[StructureSync] fetchStructures applying', {
+          msSinceSnapshot: applyAtMs - lastSnapshotReceivedAtMs,
+          structureCount: Object.keys(payload.structures).length,
+        });
         authoritativeSync.applyServerStructureSync(payload.structures);
         lastAppliedStructureChangeSeq = payload.structureChangeSeq;
       })
