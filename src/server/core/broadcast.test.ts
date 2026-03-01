@@ -37,6 +37,7 @@ test('splits into multiple batches', async ({ mocks }) => {
 test('error in one batch does not stop subsequent batches', async ({
   mocks,
 }) => {
+  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   const sendSpy = vi.spyOn(realtime, 'send');
   sendSpy.mockRejectedValueOnce(new Error('network'));
 
@@ -44,6 +45,10 @@ test('error in one batch does not stop subsequent batches', async ({
   await broadcast('ch', events, identity);
 
   expect(sendSpy).toHaveBeenCalledTimes(2);
+  expect(errorSpy).toHaveBeenCalledWith('Realtime broadcast failed', {
+    channel: 'ch',
+    error: expect.any(Error),
+  });
 
   const msgs = mocks.realtime.getSentMessagesForChannel('ch');
   expect(msgs).toHaveLength(1);

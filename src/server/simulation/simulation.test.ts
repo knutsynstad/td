@@ -201,12 +201,7 @@ describe('runSimulation', () => {
       spawnerId: 'wave-1-north',
       routeIndex: 0,
     });
-    const result = runSimulation(
-      gameWorld,
-      nowMs + SIM_TICK_MS,
-      [],
-      1
-    );
+    const result = runSimulation(gameWorld, nowMs + SIM_TICK_MS, [], 1);
     expect(result.world.mobs.get('1')).toBeUndefined();
     expect(result.castleCaptures).toBe(1);
     expect(result.gameOver).toBe(true);

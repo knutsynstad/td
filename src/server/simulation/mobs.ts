@@ -126,8 +126,11 @@ export const updateMobs = (
         z: routedTarget.z + forward.x * laneOffset * lateralScale,
       };
     } else if (isInMap && !canUseRoute) {
-      const nearestForEntry =
-        getNearestGoalDistance(goals, mob.position.x, mob.position.z);
+      const nearestForEntry = getNearestGoalDistance(
+        goals,
+        mob.position.x,
+        mob.position.z
+      );
       if (nearestForEntry <= CASTLE_CAPTURE_RADIUS) {
         castleCaptures += 1;
         despawnedIds.push(mob.mobId);

@@ -8,7 +8,7 @@
 
 ## Test Layout
 
-- Harness-backed integration tests: `tests/server/**/*.integration.test.ts`
+- Harness-backed integration tests: `tests/journeys/**/*.test.ts`
 - Shared test helpers: `tests/helpers/**/*`
 - Colocated unit tests: `src/server/**/*.test.ts`
 
@@ -26,7 +26,7 @@
 
 ## Conventions
 
-- Name files with `.test.ts` (or `.integration.test.ts` for journey tests).
+- Name files with `.test.ts`.
 - Keep tests deterministic and isolated; each Devvit harness test runs in a fresh world.
 - Prefer small focused assertions for branch behavior, with one larger assertion per journey test.
 

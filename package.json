@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "check": "npm run type-check && npm run lint:fix && npm run prettier",
+    "check": "npm run type-check && npm run lint:fix && npm run prettier && npm run test",
     "deploy": "npm run build && devvit upload",
     "dev": "devvit playtest",
     "dev:client": "vite build --watch",
@@ -19,8 +19,7 @@
     "lint:fix": "eslint --fix ./src",
     "login": "devvit login",
     "prettier": "prettier-package-json --write ./package.json && prettier --write .",
-    "test": "vitest",
-    "test:run": "vitest run",
+    "test": "vitest run",
     "test:watch": "vitest --watch",
     "type-check": "tsc --build"
   },

@@ -6,7 +6,7 @@ export default defineConfig({
     globals: true,
     include: [
       'src/client/**/*.test.ts',
-      'tests/server/**/*.test.ts',
+      'tests/journeys/**/*.test.ts',
       'src/server/**/*.test.ts',
       'src/shared/**/*.test.ts',
     ],
