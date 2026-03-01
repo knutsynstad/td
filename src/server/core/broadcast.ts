@@ -2,16 +2,11 @@ import { realtime } from '@devvit/web/server';
 import type { JsonValue } from '@devvit/shared';
 import { MAX_BATCH_EVENTS } from '../config';
 
-/**
- * The channels used for the realtime communication.
- */
 export const CHANNELS = {
   game: 'game_global',
 } as const;
 
-/**
- * Broadcast a list of events to a channel, batched into chunks of MAX_BATCH_EVENTS per message.
- */
+// TODO: Investigate sending messages in parallel and any additional client handling required to support out-of-order delivery.
 export async function broadcast<T>(
   channel: string,
   events: T[],
@@ -19,7 +14,6 @@ export async function broadcast<T>(
 ): Promise<void> {
   if (events.length === 0) return;
 
-  // TODO: Investigate sending messages in parallel and any additional client handling required to support out-of-order delivery.
   for (let i = 0; i < events.length; i += MAX_BATCH_EVENTS) {
     const batchEvents = events.slice(i, i + MAX_BATCH_EVENTS);
     const payload = wrapBatch(batchEvents);

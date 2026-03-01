@@ -1,6 +1,6 @@
 import { redis } from '@devvit/web/server';
 import type { T2 } from '@devvit/web/shared';
-import { KEYS, FIELDS } from '../core/redis';
+import { KEYS, FIELDS } from '../core/keys';
 import {
   CASTLE_COINS_MIN,
   USER_COINS_ACCRUED_PER_SECOND,

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { intersectsAabb } from '../utils';
+import { intersectsAabb } from '../../shared/utils';
 import {
   buildStaticMapStructures,
   CASTLE_TREE_CLEARANCE_ZONE,
   getSpawnerClearanceZones,
   sanitizeStaticMapStructures,
-} from './staticStructures';
+} from './staticMap';
 
 describe('buildStaticMapStructures', () => {
   it('keeps spawner entry corridors free of trees and rocks', () => {

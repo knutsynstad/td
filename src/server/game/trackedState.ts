@@ -1,81 +1,25 @@
 import { redis } from '@devvit/web/server';
-import { COINS_CAP } from '../../shared/content';
 import type {
   GameWorld,
   MobState,
   PlayerIntent,
   PlayerState,
   StructureState,
-  WaveState,
-  WorldMeta,
   WorldState,
 } from '../../shared/game-state';
-import { parseVec2 } from '../../shared/game-state';
-import { isRecord, safeParseJson } from '../../shared/utils';
+import { safeParseJson } from '../../shared/utils';
 import { TrackedMap } from '../../shared/utils/trackedMap';
-import { KEYS } from '../core/redis';
-import { parseIntent, parsePlayerState } from './players';
-import { defaultWave, parseMob, parseStructure } from './world';
+import { KEYS } from '../core/keys';
+import {
+  parseIntent,
+  parseMeta,
+  parseMob,
+  parsePlayerState,
+  parseStructure,
+  parseTrackedMapFromHash,
+  parseWaveState,
+} from './parse';
 
-function parseTrackedMapFromHash<T>(
-  raw: Record<string, string> | undefined,
-  parser: (entry: unknown) => T
-): TrackedMap<T> {
-  const map = new TrackedMap<T>();
-  if (!raw) return map;
-  for (const [key, encoded] of Object.entries(raw)) {
-    Map.prototype.set.call(map, key, parser(safeParseJson(encoded)));
-  }
-  return map;
-}
-
-function parseWaveState(waveRaw: string | undefined): WaveState {
-  const parsed = safeParseJson(waveRaw);
-  function makeDefaultSpawner(): WaveState['spawners'][number] {
-    return {
-      spawnerId: '',
-      totalCount: 0,
-      spawnedCount: 0,
-      aliveCount: 0,
-      spawnRatePerSecond: 0,
-      spawnAccumulator: 0,
-      gateOpen: false,
-      routeState: 'blocked',
-      route: [],
-    };
-  }
-  if (!isRecord(parsed)) return defaultWave();
-  return {
-    wave: Number(parsed.wave ?? 0),
-    active: Boolean(parsed.active ?? false),
-    nextWaveAtMs: Number(parsed.nextWaveAtMs ?? 0),
-    spawners: Array.isArray(parsed.spawners)
-      ? parsed.spawners.map((entry) => {
-          if (!isRecord(entry)) return makeDefaultSpawner();
-          const rawRoute = Array.isArray(entry.route) ? entry.route : [];
-          const routeState: WaveState['spawners'][number]['routeState'] =
-            entry.routeState === 'reachable' || entry.routeState === 'unstable'
-              ? entry.routeState
-              : 'blocked';
-          return {
-            spawnerId: String(entry.spawnerId ?? ''),
-            totalCount: Number(entry.totalCount ?? 0),
-            spawnedCount: Number(entry.spawnedCount ?? 0),
-            aliveCount: Number(entry.aliveCount ?? 0),
-            spawnRatePerSecond: Number(entry.spawnRatePerSecond ?? 0),
-            spawnAccumulator: Number(entry.spawnAccumulator ?? 0),
-            gateOpen: Boolean(entry.gateOpen ?? false),
-            routeState,
-            route: rawRoute.map((point) => parseVec2(point)),
-          };
-        })
-      : [],
-  };
-}
-
-/**
- * Load the full game world from Redis using TrackedMaps for incremental flush.
- */
 export async function loadGameWorld(): Promise<GameWorld> {
   const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
     await Promise.all([
@@ -87,25 +31,8 @@ export async function loadGameWorld(): Promise<GameWorld> {
       redis.get(KEYS.WAVE),
     ]);
 
-  const now = Date.now();
-  const meta: WorldMeta = {
-    tickSeq: Number(metaRaw?.tickSeq ?? '0'),
-    worldVersion: Number(metaRaw?.worldVersion ?? '0'),
-    lastTickMs: Number(metaRaw?.lastTickMs ?? String(now)),
-    lastStructureChangeTickSeq: Number(
-      metaRaw?.lastStructureChangeTickSeq ?? '0'
-    ),
-    seed: Number(metaRaw?.seed ?? String(now)),
-    coins: Math.max(
-      0,
-      Math.min(COINS_CAP, Number(metaRaw?.coins ?? String(COINS_CAP)))
-    ),
-    lives: Number(metaRaw?.lives ?? '1'),
-    nextMobSeq: Number(metaRaw?.nextMobSeq ?? '1'),
-  };
-
   return {
-    meta,
+    meta: parseMeta(metaRaw),
     players: parseTrackedMapFromHash<PlayerState>(playersRaw, parsePlayerState),
     intents: parseTrackedMapFromHash<PlayerIntent>(intentsRaw, parseIntent),
     structures: parseTrackedMapFromHash<StructureState>(
@@ -118,9 +45,6 @@ export async function loadGameWorld(): Promise<GameWorld> {
   };
 }
 
-/**
- * Write only the dirty (upserted/removed) entries from the in-memory world back to Redis.
- */
 export async function flushGameWorld(world: GameWorld): Promise<void> {
   const ops: Promise<unknown>[] = [];
 
@@ -179,9 +103,6 @@ export async function flushGameWorld(world: GameWorld): Promise<void> {
   await Promise.all(ops);
 }
 
-/**
- * Convert the TrackedMap-based GameWorld into a plain-record WorldState for client snapshots.
- */
 export function gameWorldToSnapshot(world: GameWorld): WorldState {
   function toRecord<V>(map: Map<string, V>): Record<string, V> {
     const record: Record<string, V> = {};
@@ -201,9 +122,6 @@ export function gameWorldToSnapshot(world: GameWorld): WorldState {
   };
 }
 
-/**
- * Merge freshly-joined players from Redis into the in-memory world, preferring the latest lastSeenMs.
- */
 export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
   const [playersRaw, intentsRaw] = await Promise.all([
     redis.hGetAll(KEYS.PLAYERS),
@@ -234,9 +152,6 @@ export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
   }
 }
 
-/**
- * Remove players from the in-memory world whose lastSeenMs is older than cutoffMs.
- */
 export function findAndRemoveStalePlayersInMemory(
   world: GameWorld,
   cutoffMs: number,

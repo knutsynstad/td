@@ -12,7 +12,7 @@ import {
   resyncGame,
 } from './handlers';
 import { runGameLoop } from './gameLoop';
-import { loadWorldState, persistWorldState } from './world';
+import { loadWorldState, persistWorldState } from './persistence';
 
 const test = createDevvitTest();
 

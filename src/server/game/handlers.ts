@@ -14,7 +14,7 @@ import {
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
-import { CHANNELS } from '../core/realtime';
+import { CHANNELS } from '../core/broadcast';
 import { addUserCoins, getUserCoinBalance, spendUserCoins } from './economy';
 import {
   createDefaultPlayer,
@@ -23,26 +23,20 @@ import {
   touchPlayerPresence,
 } from './players';
 import { enqueueCommand } from './queue';
-import { loadWorldState, resetGameState } from './world';
+import { loadWorldState, resetGameState } from './persistence';
 import {
   flushGameWorld,
   gameWorldToSnapshot,
   loadGameWorld,
-} from './gameWorld';
+} from './trackedState';
 import { broadcast, ensureStaticMap } from './gameLoop';
 
-/**
- * Resolve the current player's ID from the Reddit username, falling back to an anonymous ID.
- */
 export async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();
   if (!username) return `anon-${Date.now()}`;
   return username.toLowerCase();
 }
 
-/**
- * Join the game: prune stale players, create or restore the player, and broadcast the join delta.
- */
 export async function joinGame(
   playerIdOverride?: string
 ): Promise<JoinResponse> {
@@ -87,9 +81,6 @@ export async function joinGame(
   };
 }
 
-/**
- * Validate and enqueue a player command, spending coins for build commands and refunding on failure.
- */
 export async function applyCommand(
   envelope: CommandEnvelope,
   playerIdOverride?: string
@@ -173,9 +164,6 @@ export async function applyCommand(
   };
 }
 
-/**
- * Update a player's presence timestamp and optional position, returning current wave state.
- */
 export async function heartbeatGame(
   playerId: string,
   position?: { x: number; z: number }
@@ -201,9 +189,6 @@ export async function heartbeatGame(
   };
 }
 
-/**
- * Get a player's current coin balance (with accrual applied).
- */
 export async function getCoinBalance(
   playerIdOverride?: string
 ): Promise<number> {
@@ -217,9 +202,6 @@ export type GamePreview = {
   playerCount: number;
 };
 
-/**
- * Return a lightweight preview of the game state for the splash screen.
- */
 export async function getGamePreview(): Promise<GamePreview> {
   const world = await loadWorldState();
   return {
@@ -229,9 +211,6 @@ export async function getGamePreview(): Promise<GamePreview> {
   };
 }
 
-/**
- * Return a full world snapshot for client resynchronization, healing the static map if needed.
- */
 export async function resyncGame(
   playerIdOverride?: string
 ): Promise<ResyncResponse> {
@@ -248,9 +227,6 @@ export async function resyncGame(
   };
 }
 
-/**
- * Reset the game to initial state, preserving the caller's coin balance, and broadcast a resync event.
- */
 export async function resetGame(playerIdOverride?: string): Promise<{
   tickSeq: number;
   worldVersion: number;

@@ -8,31 +8,28 @@ import {
   PERSIST_INTERVAL_TICKS,
   PLAYER_TIMEOUT_MS,
 } from '../config';
-import { KEYS } from '../core/redis';
+import { KEYS } from '../core/keys';
+import { CHANNELS, broadcast as broadcastToChannel } from '../core/broadcast';
+import { runTickLoop, type TickContext } from '../core/tickLoop';
 import {
   buildPresenceLeaveDelta,
   runSimulation,
   SIM_TICK_MS,
-} from '../../shared/simulation';
+} from './simulation';
 import {
   buildStaticMapStructures,
   hasStaticMapStructures,
   sanitizeStaticMapStructures,
-} from '../../shared/world/staticStructures';
-import { CHANNELS, broadcast as broadcastToChannel } from '../core/realtime';
-import { runTickLoop, type TickContext } from './tick';
+} from './staticMap';
 import { popPendingCommands, trimCommandQueue } from './queue';
 import {
   flushGameWorld,
   loadGameWorld,
   mergePlayersFromRedis,
   findAndRemoveStalePlayersInMemory,
-} from './gameWorld';
-import { cleanupStalePlayersSeen } from './world';
+} from './trackedState';
+import { cleanupStalePlayersSeen } from './persistence';
 
-/**
- * Broadcast game deltas to all connected clients on the game channel.
- */
 export async function broadcast(
   worldVersion: number,
   tickSeq: number,
@@ -49,9 +46,6 @@ export async function broadcast(
   });
 }
 
-/**
- * Ensure the static map structures exist in the world, inserting or sanitizing as needed.
- */
 export function ensureStaticMap(world: {
   structures: Map<string, StructureState>;
   meta: { lastTickMs: number; worldVersion: number };
@@ -134,9 +128,6 @@ export type GameLoopResult = {
   ticksProcessed: number;
 };
 
-/**
- * Acquire the leader lock and run the game tick loop for the given time window.
- */
 export function runGameLoop(
   windowMs: number = LEADER_BROADCAST_WINDOW_MS
 ): Promise<GameLoopResult> {

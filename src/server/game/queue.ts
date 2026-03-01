@@ -1,113 +1,12 @@
 import { redis } from '@devvit/web/server';
 import type { CommandEnvelope } from '../../shared/game-protocol';
-import { parseVec2 } from '../../shared/game-state';
-import { isRecord, safeParseJson } from '../../shared/utils';
+import { safeParseJson } from '../../shared/utils';
 import { MAX_COMMANDS_PER_BATCH, MAX_QUEUE_COMMANDS } from '../config';
-import { KEYS } from '../core/redis';
-import { parseIntent } from './players';
-import { parseStructureType } from './world';
+import { KEYS } from '../core/keys';
+import { parseCommandEnvelope } from './parse';
 
 const MAX_TX_RETRIES = 5;
 
-function parseCommandEnvelope(value: unknown): CommandEnvelope | undefined {
-  if (!isRecord(value)) return undefined;
-  const seq = Number(value.seq ?? -1);
-  const sentAtMs = Number(value.sentAtMs ?? 0);
-  if (!isRecord(value.command)) return undefined;
-  const commandType = String(value.command.type ?? '');
-  const playerId = String(value.command.playerId ?? '');
-  if (commandType === 'moveIntent') {
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'moveIntent',
-        playerId,
-        intent: parseIntent(value.command.intent),
-        clientPosition: value.command.clientPosition
-          ? parseVec2(value.command.clientPosition)
-          : undefined,
-      },
-    };
-  }
-  if (commandType === 'buildStructure') {
-    const structure = isRecord(value.command.structure)
-      ? value.command.structure
-      : {};
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'buildStructure',
-        playerId,
-        structure: {
-          structureId: String(structure.structureId ?? ''),
-          type: parseStructureType(structure.type),
-          center: parseVec2(structure.center),
-        },
-      },
-    };
-  }
-  if (commandType === 'buildStructures') {
-    const rawStructures = Array.isArray(value.command.structures)
-      ? value.command.structures
-      : [];
-    const structures = rawStructures
-      .filter(isRecord)
-      .map((structure) => ({
-        structureId: String(structure.structureId ?? ''),
-        type: parseStructureType(structure.type),
-        center: parseVec2(structure.center),
-      }))
-      .filter((structure) => structure.structureId.length > 0);
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'buildStructures',
-        playerId,
-        structures,
-      },
-    };
-  }
-  if (commandType === 'removeStructure') {
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'removeStructure',
-        playerId,
-        structureId: String(value.command.structureId ?? ''),
-      },
-    };
-  }
-  if (commandType === 'startWave') {
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'startWave',
-        playerId,
-      },
-    };
-  }
-  if (commandType === 'shoot') {
-    return {
-      seq,
-      sentAtMs,
-      command: {
-        type: 'shoot',
-        playerId,
-        target: parseVec2(value.command.target),
-      },
-    };
-  }
-  return undefined;
-}
-
-/**
- * Atomically enqueue a command into the sorted-set queue, retrying on contention.
- */
 export async function enqueueCommand(
   nowMs: number,
   envelope: CommandEnvelope
@@ -132,9 +31,6 @@ export async function enqueueCommand(
   return { accepted: false, reason: 'queue contention' };
 }
 
-/**
- * Atomically pop and return all pending commands scored up to upToMs, retrying on contention.
- */
 export async function popPendingCommands(
   upToMs: number
 ): Promise<CommandEnvelope[]> {
@@ -175,9 +71,6 @@ export async function popPendingCommands(
   return [];
 }
 
-/**
- * Trim the command queue to MAX_QUEUE_COMMANDS by removing the oldest entries.
- */
 export async function trimCommandQueue(): Promise<void> {
   const count = await redis.zCard(KEYS.QUEUE);
   if (count <= MAX_QUEUE_COMMANDS) return;

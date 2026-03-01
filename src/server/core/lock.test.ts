@@ -1,7 +1,7 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import { acquireLock, releaseLock, verifyLock } from '../core/redis';
-import { KEYS } from '../core/redis';
+import { acquireLock, releaseLock, verifyLock } from './lock';
+import { KEYS } from './keys';
 
 const test = createDevvitTest();
 

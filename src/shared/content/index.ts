@@ -55,5 +55,3 @@ export {
   CASTLE_HALF_EXTENT,
   PLAYER_SPEED,
 } from './world';
-
-export type { TowerState, MobEntityState } from './entities';

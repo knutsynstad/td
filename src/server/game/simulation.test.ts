@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { CommandEnvelope } from './game-protocol';
-import type { GameWorld } from './game-state';
-import { TrackedMap } from './utils/trackedMap';
+import type { CommandEnvelope } from '../../shared/game-protocol';
+import type { GameWorld } from '../../shared/game-state';
+import { TrackedMap } from '../../shared/utils/trackedMap';
 import {
   AUTO_WAVE_INITIAL_DELAY_MS,
   FULL_MOB_DELTA_INTERVAL_MS,

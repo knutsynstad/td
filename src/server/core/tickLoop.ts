@@ -4,7 +4,8 @@ import {
   releaseLock,
   sleep,
   verifyLock,
-} from '../core/redis';
+} from './lock';
+
 export type TickLoopConfig = {
   windowMs: number;
   tickIntervalMs: number;

@@ -6,23 +6,23 @@ import type {
   MobSlices,
   StructureDelta,
   WaveDelta,
-} from './game-protocol';
+} from '../../shared/game-protocol';
 import type {
   GameWorld,
   MobState,
   StructureState,
   WorldMeta,
-} from './game-state';
-import { getStructureFootprint, STRUCTURE_DEFS } from './content/structures';
-import { getTowerDef, getTowerDps } from './content/towers';
-import { MOB_DEFS, DEFAULT_MOB_TYPE } from './content/mobs';
+} from '../../shared/game-state';
+import { getStructureFootprint, STRUCTURE_DEFS } from '../../shared/content/structures';
+import { getTowerDef, getTowerDps } from '../../shared/content/towers';
+import { MOB_DEFS, DEFAULT_MOB_TYPE } from '../../shared/content/mobs';
 import {
   getWaveMobCount,
   getWaveSpawnRate,
   WAVE_MIN_SPAWNERS,
   WAVE_MAX_SPAWNERS,
-} from './content/waves';
-import { WORLD_BOUNDS, GRID_SIZE, CASTLE_HALF_EXTENT } from './content/world';
+} from '../../shared/content/waves';
+import { WORLD_BOUNDS, GRID_SIZE, CASTLE_HALF_EXTENT } from '../../shared/content/world';
 import {
   clamp,
   distance2d,
@@ -30,7 +30,7 @@ import {
   normalize2d,
   shuffle,
   weightedSplit,
-} from './utils';
+} from '../../shared/utils';
 
 // Simulation constants
 export const SIM_TICK_MS = 100;

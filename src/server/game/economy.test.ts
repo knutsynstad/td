@@ -9,7 +9,7 @@ import {
   addCoinsToCastle,
   takeCoinsFromCastle,
 } from './economy';
-import { KEYS } from '../core/redis';
+import { KEYS } from '../core/keys';
 import {
   USER_COINS_MAX,
   USER_COINS_MIN,
