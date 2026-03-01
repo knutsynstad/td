@@ -14,7 +14,7 @@ import {
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
-import { CHANNELS } from '../core/broadcast';
+import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
 import { addUserCoins, getUserCoinBalance, spendUserCoins } from './economy';
 import {
   createDefaultPlayer,
@@ -29,7 +29,7 @@ import {
   gameWorldToSnapshot,
   loadGameWorld,
 } from './trackedState';
-import { broadcast, ensureStaticMap } from './gameLoop';
+import { ensureStaticMap } from './gameLoop';
 
 export async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();
@@ -70,7 +70,9 @@ export async function joinGame(
       position: player.position,
     },
   };
-  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [joinDelta]);
+  await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
+    joinDelta,
+  ]);
 
   return {
     type: 'join',
@@ -235,7 +237,7 @@ export async function resetGame(playerIdOverride?: string): Promise<{
   const playerId = (playerIdOverride ?? (await getPlayerId())) as T2;
   await resetGameState(nowMs, playerId);
   const world = await loadWorldState();
-  await broadcast(world.meta.worldVersion, world.meta.tickSeq, [
+  await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
     {
       type: 'resyncRequired',
       reason: 'game reset',

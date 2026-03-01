@@ -1,4 +1,4 @@
-import type { DeltaBatch, GameDelta } from '../../shared/game-protocol';
+import type { GameDelta } from '../../shared/game-protocol';
 import type { GameWorld, StructureState } from '../../shared/game-state';
 import {
   LEADER_BROADCAST_WINDOW_MS,
@@ -15,7 +15,7 @@ import {
   PLAYER_TIMEOUT_MS,
 } from '../config';
 import { KEYS } from '../core/keys';
-import { CHANNELS, broadcast as broadcastToChannel } from '../core/broadcast';
+import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
 import { runTickLoop, type TickContext } from '../core/tickLoop';
 import {
   buildPresenceLeaveDelta,
@@ -35,22 +35,6 @@ import {
   findAndRemoveStalePlayersInMemory,
 } from './trackedState';
 import { cleanupStalePlayersSeen } from './persistence';
-
-export async function broadcast(
-  worldVersion: number,
-  tickSeq: number,
-  events: GameDelta[]
-): Promise<void> {
-  await broadcastToChannel<GameDelta>(CHANNELS.game, events, (batchEvents) => {
-    const batch: DeltaBatch = {
-      type: 'deltaBatch',
-      tickSeq,
-      worldVersion,
-      events: batchEvents,
-    };
-    return batch;
-  });
-}
 
 export function ensureStaticMap(world: {
   structures: Map<string, StructureState>;
@@ -114,7 +98,7 @@ async function onGameTick(
   deltas.push(...result.deltas);
 
   if (deltas.length > 0) {
-    await broadcast(
+    await broadcastGameDeltas(
       result.world.meta.worldVersion,
       result.world.meta.tickSeq,
       deltas

@@ -1,5 +1,6 @@
 import { realtime } from '@devvit/web/server';
 import type { JsonValue } from '@devvit/shared';
+import type { DeltaBatch, GameDelta } from '../../shared/game-protocol';
 import { MAX_BATCH_EVENTS } from '../config';
 
 export const CHANNELS = {
@@ -23,4 +24,20 @@ export async function broadcast<T>(
       console.error('Realtime broadcast failed', { channel, error });
     }
   }
+}
+
+export async function broadcastGameDeltas(
+  worldVersion: number,
+  tickSeq: number,
+  events: GameDelta[]
+): Promise<void> {
+  await broadcast<GameDelta>(CHANNELS.game, events, (batchEvents) => {
+    const batch: DeltaBatch = {
+      type: 'deltaBatch',
+      tickSeq,
+      worldVersion,
+      events: batchEvents,
+    };
+    return batch;
+  });
 }
