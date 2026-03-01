@@ -79,7 +79,11 @@ export type HudUpdaters = {
   triggerEventBanner: (text: string, duration?: number) => void;
 };
 
+const MINIMAP_MOB_SMOOTH_FACTOR = 0.3;
+
 export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
+  const minimapMobPosCache = new Map<string, { x: number; z: number }>();
+
   const updateCoinHudView = (delta: number) => {
     const rect = ctx.coinHudCanvasEl.getBoundingClientRect();
     const width = Math.max(1, Math.round(rect.width));
@@ -258,8 +262,21 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
     ctx.minimapCtx.fill();
 
     ctx.minimapCtx.fillStyle = '#ff6a6a';
+    const seenMobIds = new Set<string>();
     for (const mob of ctx.mobs) {
-      const point = worldToMap(mob.mesh.position.x, mob.mesh.position.z);
+      const mobKey = mob.mobId ?? `mesh-${mob.mesh.id}`;
+      seenMobIds.add(mobKey);
+      const targetX = mob.mesh.position.x;
+      const targetZ = mob.mesh.position.z;
+      let cached = minimapMobPosCache.get(mobKey);
+      if (!cached) {
+        cached = { x: targetX, z: targetZ };
+        minimapMobPosCache.set(mobKey, cached);
+      } else {
+        cached.x += (targetX - cached.x) * MINIMAP_MOB_SMOOTH_FACTOR;
+        cached.z += (targetZ - cached.z) * MINIMAP_MOB_SMOOTH_FACTOR;
+      }
+      const point = worldToMap(cached.x, cached.z);
       ctx.minimapCtx.beginPath();
       ctx.minimapCtx.arc(
         point.x,
@@ -269,6 +286,9 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
         Math.PI * 2
       );
       ctx.minimapCtx.fill();
+    }
+    for (const id of minimapMobPosCache.keys()) {
+      if (!seenMobIds.has(id)) minimapMobPosCache.delete(id);
     }
 
     for (const [

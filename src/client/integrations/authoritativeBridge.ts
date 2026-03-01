@@ -17,8 +17,10 @@ import type {
 import type { Vec2, WorldState } from '../../shared/game-state';
 import { isRecord } from '../../shared/utils';
 
+type SnapshotOptions = { skipMobReplacement?: boolean };
+
 type PresenceCallbacks = {
-  onSnapshot: (snapshot: WorldState) => void;
+  onSnapshot: (snapshot: WorldState, options?: SnapshotOptions) => void;
   onSelfReady: (playerId: string, username: string, position: Vec2) => void;
   onRemoteJoin: (playerId: string, username: string, position: Vec2) => void;
   onRemoteLeave: (playerId: string) => void;
@@ -341,7 +343,9 @@ export const connectAuthoritativeBridge = async (
     if (payload.resetReason && callbacks.onResetBanner) {
       callbacks.onResetBanner(payload.resetReason);
     }
-    callbacks.onSnapshot(payload.snapshot);
+    callbacks.onSnapshot(payload.snapshot, {
+      skipMobReplacement: !payload.resetReason,
+    });
   };
 
   const fetchStructures = async (): Promise<StructuresSyncResponse> => {

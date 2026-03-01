@@ -168,7 +168,10 @@ export type AuthoritativeSync = {
     active: boolean,
     nextWaveAtMs: number
   ) => void;
-  applyServerSnapshot: (snapshot: SharedWorldState) => void;
+  applyServerSnapshot: (
+    snapshot: SharedWorldState,
+    options?: { skipMobReplacement?: boolean }
+  ) => void;
   updateServerMobInterpolation: (now: number) => void;
   serverWaveActiveRef: { current: boolean };
 };
@@ -672,6 +675,12 @@ export const createAuthoritativeSync = (
     }
 
     const existing = ctx.serverMobsById.get(mobId);
+    if (existing) {
+      const sample = ctx.serverMobSampleById.get(mobId);
+      if (sample && delta.serverTimeMs <= sample.serverTimeMs) {
+        return; // Ignore stale/out-of-order delta
+      }
+    }
     if (!existing) {
       upsertServerMobFromSnapshot({
         mobId,
@@ -972,7 +981,10 @@ export const createAuthoritativeSync = (
     ctx.gameState.nextWaveAtMs = nextWaveAtMs > 0 ? nextWaveAtMs : 0;
   };
 
-  const applyServerSnapshot = (snapshot: SharedWorldState) => {
+  const applyServerSnapshot = (
+    snapshot: SharedWorldState,
+    options?: { skipMobReplacement?: boolean }
+  ) => {
     syncServerMeta(snapshot.wave, snapshot.meta);
 
     const snapshotStructureIds = new Set(Object.keys(snapshot.structures));
@@ -984,6 +996,8 @@ export const createAuthoritativeSync = (
     for (const structure of Object.values(snapshot.structures)) {
       upsertServerStructure(structure);
     }
+
+    if (options?.skipMobReplacement) return;
 
     const snapshotMobIds = new Set(Object.keys(snapshot.mobs));
     for (let i = ctx.mobs.length - 1; i >= 0; i -= 1) {

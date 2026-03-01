@@ -1993,12 +1993,12 @@ const setupAuthoritativeBridge = async () => {
       });
     }
     authoritativeBridgeRef.current = await connectAuthoritativeBridge({
-      onSnapshot: (snapshot) => {
+      onSnapshot: (snapshot, options) => {
         lastSnapshotReceivedAtMs = performance.now();
         nextServerStructureSyncAtMs =
           lastSnapshotReceivedAtMs + SNAPSHOT_STRUCTURE_GRACE_MS;
         authoritativeSync.syncServerClockSkew(snapshot.meta.lastTickMs);
-        authoritativeSync.applyServerSnapshot(snapshot);
+        authoritativeSync.applyServerSnapshot(snapshot, options);
         lastKnownWorldVersion = snapshot.meta.worldVersion;
         lastAppliedStructureChangeSeq =
           snapshot.meta.lastStructureChangeTickSeq ?? 0;
