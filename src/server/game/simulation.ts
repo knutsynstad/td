@@ -1269,12 +1269,6 @@ export const runSimulation = (
         Math.ceil(latestMobUpserts.length / chunkSize)
       );
       const snapshotId = world.meta.tickSeq;
-      console.info('Mob snapshot payload', {
-        tickSeq: world.meta.tickSeq,
-        totalMobs: latestMobUpserts.length,
-        chunkCount,
-        chunkSize,
-      });
       for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
         const start = chunkIndex * chunkSize;
         const end = Math.min(latestMobUpserts.length, start + chunkSize);

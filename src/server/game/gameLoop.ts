@@ -2,7 +2,13 @@ import type { DeltaBatch, GameDelta } from '../../shared/game-protocol';
 import type { GameWorld, StructureState } from '../../shared/game-state';
 import {
   LEADER_BROADCAST_WINDOW_MS,
+  LEADER_HEARTBEAT_STALE_MS,
   LEADER_LOCK_TTL_SECONDS,
+  FOLLOWER_AGGRESSIVE_POLL_INTERVAL_MS,
+  FOLLOWER_AGGRESSIVE_POLL_WINDOW_MS,
+  FOLLOWER_GATE_TTL_SECONDS,
+  FOLLOWER_POLL_INTERVAL_MS,
+  FOLLOWER_POLL_MS,
   LEADER_STALE_PLAYER_INTERVAL,
   LOCK_REFRESH_INTERVAL_TICKS,
   PERSIST_INTERVAL_TICKS,
@@ -139,6 +145,14 @@ export function runGameLoop(
       lockTtlSeconds: LEADER_LOCK_TTL_SECONDS,
       lockRefreshIntervalTicks: LOCK_REFRESH_INTERVAL_TICKS,
       channelName: CHANNELS.game,
+      followerPollMs: FOLLOWER_POLL_MS,
+      followerPollIntervalMs: FOLLOWER_POLL_INTERVAL_MS,
+      followerAggressivePollWindowMs: FOLLOWER_AGGRESSIVE_POLL_WINDOW_MS,
+      followerAggressivePollIntervalMs: FOLLOWER_AGGRESSIVE_POLL_INTERVAL_MS,
+      heartbeatKey: KEYS.LEADER_HEARTBEAT,
+      heartbeatStaleMs: LEADER_HEARTBEAT_STALE_MS,
+      followerGateKey: KEYS.FOLLOWER_GATE,
+      followerGateTtlSeconds: FOLLOWER_GATE_TTL_SECONDS,
     },
     {
       onInit: async function () {

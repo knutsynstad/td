@@ -11,6 +11,8 @@ export const KEYS = {
   SEEN: 'seen',
   SNAPS: 'snaps',
   LEADER_LOCK: 'leaderLock',
+  LEADER_HEARTBEAT: 'leaderHeartbeat',
+  FOLLOWER_GATE: 'followerGate',
   CASTLE_COIN_BALANCE: 'castle:coins',
   PLAYER: (userId: T2) => `p:${userId}`, // Hash
 } as const;
