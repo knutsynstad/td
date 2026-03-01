@@ -1,5 +1,6 @@
 import { expect } from 'vitest';
 import { redis } from '@devvit/web/server';
+import { KEYS } from '../../src/server/core/keys';
 import { createTestApp, devvitTest, postJson } from '../helpers/devvitTest';
 
 devvitTest(
@@ -7,7 +8,7 @@ devvitTest(
   async () => {
     const app = createTestApp();
     const now = Date.now();
-    await redis.hSet('g:global:m', {
+    await redis.hSet(KEYS.META, {
       tickSeq: '1',
       worldVersion: '0',
       lastTickMs: String(now - 15_000),
@@ -16,7 +17,7 @@ devvitTest(
       lives: '1',
     });
     await redis.set(
-      'g:global:w',
+      KEYS.WAVE,
       JSON.stringify({
         wave: 1,
         active: true,
@@ -37,12 +38,12 @@ devvitTest(
 
     const tickResponse = await postJson(
       app,
-      '/internal/scheduler/server-clock',
+      '/internal/scheduler/server-clock?windowMs=500',
       {}
     );
     expect(tickResponse.status).toBe(200);
     const tickBody = await tickResponse.json();
-    expect(tickBody.status).toBe('success');
-    expect(Number(tickBody.tickSeq)).toBeGreaterThan(1);
+    expect(tickBody.status).toBe('ok');
+    expect(Number(tickBody.ticksProcessed)).toBeGreaterThan(0);
   }
 );

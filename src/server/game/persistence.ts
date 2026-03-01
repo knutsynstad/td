@@ -7,6 +7,7 @@ import type {
   StructureState,
   WorldState,
 } from '../../shared/game-state';
+import { PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
 import { getUserCoinBalance } from './economy';
 import {
@@ -15,27 +16,32 @@ import {
   parseMapFromHash,
   parseMeta,
   parseMob,
-  parsePlayerState,
   parseIntent,
   parseStructure,
   parseWaveState,
 } from './parse';
 import { buildStaticMapStructures } from './staticMap';
+import { loadPlayersFromRedis } from './trackedState';
 
 export async function loadWorldState(): Promise<WorldState> {
-  const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
+  const [metaRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw, playersResult] =
     await Promise.all([
       redis.hGetAll(KEYS.META),
-      redis.hGetAll(KEYS.PLAYERS),
       redis.hGetAll(KEYS.INTENTS),
       redis.hGetAll(KEYS.STRUCTURES),
       redis.hGetAll(KEYS.MOBS),
       redis.get(KEYS.WAVE),
+      loadPlayersFromRedis(),
     ]);
+
+  const players: Record<string, PlayerState> = {};
+  for (const [id, p] of playersResult.players) {
+    players[id] = p;
+  }
 
   return {
     meta: parseMeta(metaRaw),
-    players: parseMapFromHash<PlayerState>(playersRaw, parsePlayerState),
+    players,
     intents: parseMapFromHash<PlayerIntent>(intentsRaw, parseIntent),
     structures: parseMapFromHash<StructureState>(structuresRaw, parseStructure),
     mobs: parseMapFromHash<MobState>(mobsRaw, parseMob),
@@ -57,10 +63,7 @@ export async function persistWorldState(world: WorldState): Promise<void> {
     nextMobSeq: String(world.meta.nextMobSeq),
   };
 
-  const playersWrites: Record<string, string> = {};
-  for (const [playerId, player] of Object.entries(world.players)) {
-    playersWrites[playerId] = JSON.stringify(player);
-  }
+  const playerTtlSeconds = Math.ceil(PLAYER_TIMEOUT_MS / 1000);
 
   const intentsWrites: Record<string, string> = {};
   for (const [playerId, intent] of Object.entries(world.intents)) {
@@ -77,9 +80,17 @@ export async function persistWorldState(world: WorldState): Promise<void> {
     mobWrites[mobId] = JSON.stringify(mob);
   }
 
+  await clearPlayerKeys();
+  const exp = new Date(Date.now() + playerTtlSeconds * 1000);
+  for (const [playerId, player] of Object.entries(world.players)) {
+    await redis.set(KEYS.playerPresence(playerId), JSON.stringify(player), {
+      expiration: exp,
+    });
+    await redis.hSet(KEYS.PLAYER_IDS, { [playerId]: '1' });
+  }
+
   await Promise.all([
     redis.hSet(KEYS.META, metaWrites),
-    redis.del(KEYS.PLAYERS),
     redis.del(KEYS.INTENTS),
     redis.del(KEYS.STRUCTURES),
     redis.del(KEYS.MOBS),
@@ -87,9 +98,6 @@ export async function persistWorldState(world: WorldState): Promise<void> {
   ]);
 
   await Promise.all([
-    Object.keys(playersWrites).length > 0
-      ? redis.hSet(KEYS.PLAYERS, playersWrites)
-      : Promise.resolve(),
     Object.keys(intentsWrites).length > 0
       ? redis.hSet(KEYS.INTENTS, intentsWrites)
       : Promise.resolve(),
@@ -102,11 +110,13 @@ export async function persistWorldState(world: WorldState): Promise<void> {
   ]);
 }
 
-export async function cleanupStalePlayersSeen(
-  playerIds: string[]
-): Promise<void> {
-  if (playerIds.length === 0) return;
-  await redis.zRem(KEYS.SEEN, playerIds);
+async function clearPlayerKeys(): Promise<void> {
+  const idsRecord = await redis.hGetAll(KEYS.PLAYER_IDS);
+  const ids = Object.keys(idsRecord ?? {});
+  await Promise.all([
+    ...ids.map((id: string) => redis.del(KEYS.playerPresence(id))),
+    redis.del(KEYS.PLAYER_IDS),
+  ]);
 }
 
 export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
@@ -119,6 +129,7 @@ export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
     structureWrites[structureId] = JSON.stringify(structure);
   }
 
+  await clearPlayerKeys();
   await Promise.all([
     redis.hSet(KEYS.META, {
       tickSeq: String(nextMeta.tickSeq),
@@ -132,12 +143,10 @@ export async function resetGameState(nowMs: number, userId: T2): Promise<void> {
       lives: String(nextMeta.lives),
     }),
     redis.set(KEYS.WAVE, JSON.stringify(defaultWave())),
-    redis.del(KEYS.PLAYERS),
     redis.del(KEYS.INTENTS),
     redis.del(KEYS.STRUCTURES),
     redis.del(KEYS.MOBS),
     redis.del(KEYS.QUEUE),
-    redis.del(KEYS.SEEN),
     redis.del(KEYS.SNAPS),
     redis.del(KEYS.LEADER_LOCK),
   ]);

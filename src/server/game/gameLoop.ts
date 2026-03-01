@@ -9,10 +9,9 @@ import {
   FOLLOWER_GATE_TTL_SECONDS,
   FOLLOWER_POLL_INTERVAL_MS,
   FOLLOWER_POLL_MS,
-  LEADER_STALE_PLAYER_INTERVAL,
   LOCK_REFRESH_INTERVAL_TICKS,
   PERSIST_INTERVAL_TICKS,
-  PLAYER_TIMEOUT_MS,
+  PLAYER_POSITION_BROADCAST_INTERVAL_TICKS,
 } from '../config';
 import { KEYS } from '../core/keys';
 import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
@@ -28,9 +27,7 @@ import {
   flushGameWorld,
   loadGameWorld,
   mergePlayersFromRedis,
-  findAndRemoveStalePlayersInMemory,
 } from './trackedState';
-import { cleanupStalePlayersSeen } from './persistence';
 
 async function onGameTick(
   world: GameWorld,
@@ -47,22 +44,11 @@ async function onGameTick(
 
   if (isMaintenanceTick) {
     await flushGameWorld(world);
-    await mergePlayersFromRedis(world);
-
-    if (ticksProcessed % LEADER_STALE_PLAYER_INTERVAL === 0) {
-      await trimCommandQueue();
-      const stalePlayers = findAndRemoveStalePlayersInMemory(
-        world,
-        nowMs - PLAYER_TIMEOUT_MS,
-        500
-      );
-      if (stalePlayers.length > 0) {
-        await cleanupStalePlayersSeen(stalePlayers);
-        for (const playerId of stalePlayers) {
-          deltas.push(buildPresenceLeaveDelta(playerId));
-        }
-      }
+    const leftIds = await mergePlayersFromRedis(world);
+    for (const playerId of leftIds) {
+      deltas.push(buildPresenceLeaveDelta(playerId));
     }
+    await trimCommandQueue();
   }
 
   const commands = await popPendingCommands(nowMs);
@@ -73,6 +59,31 @@ async function onGameTick(
   }
 
   deltas.push(...result.deltas);
+
+  if (
+    ticksProcessed > 0 &&
+    ticksProcessed % PLAYER_POSITION_BROADCAST_INTERVAL_TICKS === 0
+  ) {
+    const players = Array.from(world.players.values()).map((p) => ({
+      playerId: p.playerId,
+      username: p.username,
+      interpolation: {
+        from: p.position,
+        to: p.position,
+        t0: nowMs - SIM_TICK_MS,
+        t1: nowMs,
+      },
+    }));
+    if (players.length > 0) {
+      deltas.push({
+        type: 'entityDelta',
+        serverTimeMs: nowMs,
+        tickMs: SIM_TICK_MS,
+        players,
+        despawnedMobIds: [],
+      });
+    }
+  }
 
   if (deltas.length > 0) {
     await broadcastGameDeltas(

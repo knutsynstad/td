@@ -4,8 +4,10 @@ import {
   type PlayerState,
 } from '../../shared/game-state';
 import { PLAYER_SPEED } from '../../shared/content';
-import { MAX_STRUCTURES } from '../config';
+import { MAX_STRUCTURES, PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
+
+const PLAYER_TTL_SECONDS = Math.ceil(PLAYER_TIMEOUT_MS / 1000);
 
 export function createDefaultPlayer(
   playerId: string,
@@ -23,36 +25,13 @@ export function createDefaultPlayer(
 }
 
 export async function touchPlayerPresence(player: PlayerState): Promise<void> {
+  const key = KEYS.playerPresence(player.playerId);
   await Promise.all([
-    redis.hSet(KEYS.PLAYERS, { [player.playerId]: JSON.stringify(player) }),
-    redis.zAdd(KEYS.SEEN, {
-      member: player.playerId,
-      score: player.lastSeenMs,
+    redis.set(key, JSON.stringify(player), {
+      expiration: new Date(Date.now() + PLAYER_TTL_SECONDS * 1000),
     }),
+    redis.hSet(KEYS.PLAYER_IDS, { [player.playerId]: '1' }),
   ]);
-}
-
-export async function removePlayers(playerIds: string[]): Promise<void> {
-  if (playerIds.length === 0) return;
-  await Promise.all([
-    redis.hDel(KEYS.PLAYERS, playerIds),
-    redis.hDel(KEYS.INTENTS, playerIds),
-    redis.zRem(KEYS.SEEN, playerIds),
-  ]);
-}
-
-export async function removeOldPlayersByLastSeen(
-  cutoffMs: number,
-  limit = 250
-): Promise<string[]> {
-  const stale = await redis.zRange(KEYS.SEEN, 0, cutoffMs, {
-    by: 'score',
-    limit: { offset: 0, count: limit },
-  });
-  if (stale.length === 0) return [];
-  const playerIds = stale.map((entry) => entry.member);
-  await removePlayers(playerIds);
-  return playerIds;
 }
 
 export async function enforceStructureCap(incomingCount = 1): Promise<boolean> {

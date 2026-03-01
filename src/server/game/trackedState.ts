@@ -9,6 +9,7 @@ import type {
 } from '../../shared/game-state';
 import { safeParseJson } from '../../shared/utils';
 import { TrackedMap } from '../../shared/utils/trackedMap';
+import { PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
 import {
   parseIntent,
@@ -20,20 +21,54 @@ import {
   parseWaveState,
 } from './parse';
 
+export async function loadPlayersFromRedis(): Promise<{
+  players: Map<string, PlayerState>;
+  expiredIds: string[];
+}> {
+  const idsRecord = await redis.hGetAll(KEYS.PLAYER_IDS);
+  const ids = Object.keys(idsRecord ?? {});
+  if (ids.length === 0) {
+    return { players: new Map(), expiredIds: [] };
+  }
+  const keys = ids.map((id: string) => KEYS.playerPresence(id));
+  const values = await redis.mGet(keys);
+  const players = new Map<string, PlayerState>();
+  const expiredIds: string[] = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    const raw = values[i];
+    if (!raw) {
+      expiredIds.push(ids[i]!);
+      continue;
+    }
+    const player = parsePlayerState(safeParseJson(raw));
+    player.playerId = ids[i]!;
+    players.set(ids[i]!, player);
+  }
+  if (expiredIds.length > 0) {
+    await redis.hDel(KEYS.PLAYER_IDS, expiredIds);
+  }
+  return { players, expiredIds };
+}
+
 export async function loadGameWorld(): Promise<GameWorld> {
-  const [metaRaw, playersRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw] =
+  const [metaRaw, intentsRaw, structuresRaw, mobsRaw, waveRaw, playersResult] =
     await Promise.all([
       redis.hGetAll(KEYS.META),
-      redis.hGetAll(KEYS.PLAYERS),
       redis.hGetAll(KEYS.INTENTS),
       redis.hGetAll(KEYS.STRUCTURES),
       redis.hGetAll(KEYS.MOBS),
       redis.get(KEYS.WAVE),
+      loadPlayersFromRedis(),
     ]);
+
+  const players = new TrackedMap<PlayerState>();
+  for (const [id, p] of playersResult.players) {
+    players.set(id, p);
+  }
 
   return {
     meta: parseMeta(metaRaw),
-    players: parseTrackedMapFromHash<PlayerState>(playersRaw, parsePlayerState),
+    players,
     intents: parseTrackedMapFromHash<PlayerIntent>(intentsRaw, parseIntent),
     structures: parseTrackedMapFromHash<StructureState>(
       structuresRaw,
@@ -92,7 +127,24 @@ export async function flushGameWorld(world: GameWorld): Promise<void> {
     KEYS.STRUCTURES,
     world.structures as TrackedMap<StructureState>
   );
-  flushCollection(KEYS.PLAYERS, world.players as TrackedMap<PlayerState>);
+
+  const playerTtlSeconds = Math.ceil(PLAYER_TIMEOUT_MS / 1000);
+  const playersMap = world.players as TrackedMap<PlayerState>;
+  const exp = new Date(Date.now() + playerTtlSeconds * 1000);
+  for (const [playerId, player] of world.players) {
+    ops.push(
+      redis.set(KEYS.playerPresence(playerId), JSON.stringify(player), {
+        expiration: exp,
+      })
+    );
+    ops.push(redis.hSet(KEYS.PLAYER_IDS, { [playerId]: '1' }));
+  }
+  for (const playerId of playersMap.removed) {
+    ops.push(redis.del(KEYS.playerPresence(playerId)));
+    ops.push(redis.hDel(KEYS.PLAYER_IDS, [playerId]));
+  }
+  playersMap.resetTracking();
+
   flushCollection(KEYS.INTENTS, world.intents as TrackedMap<PlayerIntent>);
 
   if (world.waveDirty) {
@@ -122,27 +174,33 @@ export function gameWorldToSnapshot(world: GameWorld): WorldState {
   };
 }
 
-export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
-  const [playersRaw, intentsRaw] = await Promise.all([
-    redis.hGetAll(KEYS.PLAYERS),
-    redis.hGetAll(KEYS.INTENTS),
-  ]);
+export async function mergePlayersFromRedis(
+  world: GameWorld
+): Promise<string[]> {
+  const { players: redisPlayers, expiredIds } = await loadPlayersFromRedis();
 
-  if (playersRaw) {
-    for (const [playerId, encoded] of Object.entries(playersRaw)) {
-      const redisPlayer = parsePlayerState(safeParseJson(encoded));
-      const existing = world.players.get(playerId);
-      if (!existing) {
-        world.players.set(playerId, redisPlayer);
-      } else {
-        existing.lastSeenMs = Math.max(
-          existing.lastSeenMs,
-          redisPlayer.lastSeenMs
-        );
-      }
+  const leftIds = expiredIds.filter((id) => world.players.has(id));
+  for (const id of expiredIds) {
+    world.players.delete(id);
+    world.intents.delete(id);
+  }
+  if (expiredIds.length > 0) {
+    await redis.hDel(KEYS.INTENTS, expiredIds);
+  }
+
+  for (const [playerId, redisPlayer] of redisPlayers) {
+    const existing = world.players.get(playerId);
+    if (!existing) {
+      world.players.set(playerId, redisPlayer);
+    } else {
+      existing.lastSeenMs = Math.max(
+        existing.lastSeenMs,
+        redisPlayer.lastSeenMs
+      );
     }
   }
 
+  const intentsRaw = await redis.hGetAll(KEYS.INTENTS);
   if (intentsRaw) {
     for (const [playerId, encoded] of Object.entries(intentsRaw)) {
       if (!world.intents.has(playerId)) {
@@ -150,23 +208,6 @@ export async function mergePlayersFromRedis(world: GameWorld): Promise<void> {
       }
     }
   }
-}
 
-export function findAndRemoveStalePlayersInMemory(
-  world: GameWorld,
-  cutoffMs: number,
-  limit: number
-): string[] {
-  const stale: string[] = [];
-  for (const player of world.players.values()) {
-    if (player.lastSeenMs < cutoffMs) {
-      stale.push(player.playerId);
-      if (stale.length >= limit) break;
-    }
-  }
-  for (const id of stale) {
-    world.players.delete(id);
-    world.intents.delete(id);
-  }
-  return stale;
+  return leftIds;
 }

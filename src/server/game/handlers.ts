@@ -13,13 +13,12 @@ import {
   type PlayerState,
 } from '../../shared/game-state';
 import { getStructureCoinCost } from '../../shared/content';
-import { MAX_PLAYERS, PLAYER_TIMEOUT_MS } from '../config';
+import { MAX_PLAYERS } from '../config';
 import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
 import { addUserCoins, getUserCoinBalance, spendUserCoins } from './economy';
 import {
   createDefaultPlayer,
   enforceStructureCap,
-  removeOldPlayersByLastSeen,
   touchPlayerPresence,
 } from './players';
 import { enqueueCommand } from './queue';
@@ -41,7 +40,6 @@ export async function joinGame(
   playerIdOverride?: string
 ): Promise<JoinResponse> {
   const nowMs = Date.now();
-  await removeOldPlayersByLastSeen(nowMs - PLAYER_TIMEOUT_MS, MAX_PLAYERS);
   const world = await loadGameWorld();
   ensureStaticMap(world);
   if (world.players.size >= MAX_PLAYERS) {

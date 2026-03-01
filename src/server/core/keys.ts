@@ -2,19 +2,19 @@ import type { T2 } from '@devvit/web/shared';
 
 export const KEYS = {
   META: 'meta',
-  PLAYERS: 'p:all',
   INTENTS: 'intents',
   STRUCTURES: 'structures',
   MOBS: 'mobs',
   WAVE: 'wave',
   QUEUE: 'queue',
-  SEEN: 'seen',
   SNAPS: 'snaps',
   LEADER_LOCK: 'leaderLock',
   LEADER_HEARTBEAT: 'leaderHeartbeat',
   FOLLOWER_GATE: 'followerGate',
   CASTLE_COIN_BALANCE: 'castle:coins',
-  PLAYER: (userId: T2) => `p:${userId}`, // Hash
+  PLAYER: (userId: T2) => `p:${userId}`, // Hash - economy
+  playerPresence: (playerId: string) => `player:${playerId}`,
+  PLAYER_IDS: 'player_ids',
 } as const;
 
 export const FIELDS = {
