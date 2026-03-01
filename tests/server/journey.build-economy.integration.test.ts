@@ -33,6 +33,8 @@ devvitTest('build command spends coins and updates structures', async () => {
   );
   expect(buildResponse.status).toBe(200);
 
+  await postJson(app, '/internal/scheduler/server-clock?windowMs=500', {});
+
   const afterCoinsResponse = await getJson(app, '/api/game/coins');
   const afterCoinsBody = await afterCoinsResponse.json();
   expect(Number(afterCoinsBody.coins)).toBeLessThan(beforeCoins);

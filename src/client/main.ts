@@ -2026,9 +2026,17 @@ const setupAuthoritativeBridge = async () => {
       },
       onResyncRequired: () => {
         if (!authoritativeBridgeRef.current) return;
-        void authoritativeBridgeRef.current.resync().catch((error) => {
-          console.error('Failed to resync authoritative snapshot', error);
-        });
+        const bridge = authoritativeBridgeRef.current;
+        setTimeout(() => {
+          void bridge.resync().catch((error) => {
+            console.error('Failed to resync authoritative snapshot', error);
+          });
+        }, 300);
+      },
+      onResetBanner: (reason) => {
+        const bannerText =
+          reason === 'castle death' ? 'Castle fell - Game over!' : 'Game reset';
+        hudUpdaters.triggerEventBanner(bannerText, 4);
       },
       onHeartbeatWaveState: (wave, active, nextWaveAtMs) => {
         authoritativeSync.applyServerWaveTiming(wave, active, nextWaveAtMs);
@@ -4243,6 +4251,20 @@ const tick = (now: number, delta: number) => {
 
   if (gameState.prevMobsCount > 0 && waveComplete) {
     hudUpdaters.triggerEventBanner('Wave cleared');
+  }
+
+  const isPreWaveCountdown = gameState.wave === 0 && gameState.nextWaveAt !== 0;
+  const showNextWave =
+    gameState.nextWaveAt !== 0 && (waveComplete || isPreWaveCountdown);
+  const nextWaveIn = showNextWave
+    ? Math.max(0, Math.ceil((gameState.nextWaveAt - now) / 1000))
+    : 0;
+  if (showNextWave && nextWaveIn >= 1 && nextWaveIn <= 5) {
+    if (nextWaveIn !== gameState.lastCountdownBannerSecond) {
+      gameState.lastCountdownBannerSecond = nextWaveIn;
+    }
+  } else if (nextWaveIn === 0) {
+    gameState.lastCountdownBannerSecond = -1;
   }
 
   if (gameState.eventBannerTimer > 0) {

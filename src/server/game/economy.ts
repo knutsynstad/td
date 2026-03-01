@@ -3,6 +3,7 @@ import type { T2 } from '@devvit/web/shared';
 import { KEYS, FIELDS } from '../core/keys';
 import {
   CASTLE_COINS_MIN,
+  CASTLE_DEATH_TAX_RATIO,
   USER_COINS_ACCRUED_PER_SECOND,
   USER_COINS_MIN,
   USER_COINS_MAX,
@@ -32,11 +33,13 @@ export async function getUserCoinBalance(userId: T2): Promise<number> {
   lastAccruedMs = Number(lastAccruedMs);
 
   const elapsedMs = now - lastAccruedMs;
-  const accrued = Math.floor(elapsedMs * 1_000 * USER_COINS_ACCRUED_PER_SECOND);
+  const accrued = Math.floor(
+    (elapsedMs / 1000) * USER_COINS_ACCRUED_PER_SECOND
+  );
 
   balance += accrued;
   balance = Math.floor(balance);
-  balance = clamp(balance + accrued, USER_COINS_MIN, USER_COINS_MAX);
+  balance = clamp(balance, USER_COINS_MIN, USER_COINS_MAX);
 
   await redis.hSet(KEYS.PLAYER(userId), {
     [FIELDS.USER_COIN_BALANCE]: String(balance),
@@ -90,6 +93,18 @@ export async function addUserCoins(
     // Deliberately not updating lastAccruedMs since getUserCoinBalance already did.
   });
   return { added, balance: next };
+}
+
+/**
+ * Apply castle death tax: reduce castle balance by 20%. Called when castle falls.
+ */
+export async function applyCastleDeathTax(): Promise<number> {
+  const balance = await getCastleCoinBalance();
+  const tax = Math.floor(balance * CASTLE_DEATH_TAX_RATIO);
+  if (tax <= 0) return 0;
+  const newBalance = Math.max(CASTLE_COINS_MIN, balance - tax);
+  await redis.set(KEYS.CASTLE_COIN_BALANCE, String(newBalance));
+  return tax;
 }
 
 /**

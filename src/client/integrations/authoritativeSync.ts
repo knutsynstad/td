@@ -747,7 +747,12 @@ export const createAuthoritativeSync = (
         const px = dequantize(pool.px![idx]!);
         const pz = dequantize(pool.pz![idx]!);
         if (!Number.isFinite(px) || !Number.isFinite(pz)) {
-          console.warn('[MobDelta] Skipping mob with invalid position', { mobId, idx, px, pz });
+          console.warn('[MobDelta] Skipping mob with invalid position', {
+            mobId,
+            idx,
+            px,
+            pz,
+          });
           continue;
         }
         applyServerMobUpdateValues(
@@ -794,6 +799,16 @@ export const createAuthoritativeSync = (
     syncServerClockSkew(delta.serverTimeMs);
     lastMobDeltaReceivedAtMs = performance.now();
     serverMobSeenIdsScratch.clear();
+
+    for (const numId of delta.despawnedMobIds ?? []) {
+      const mobId = String(numId);
+      const mob = ctx.serverMobsById.get(mobId);
+      if (mob) {
+        ctx.spawnMobDeathVisual(mob);
+      }
+      removeServerMobById(mobId);
+      ctx.serverMobMaxHpCache.delete(mobId);
+    }
 
     if (pool) {
       const isFullSnapshot = !!delta.fullMobList;
@@ -851,13 +866,16 @@ export const createAuthoritativeSync = (
             serverMobRemovalScratch.push(mobId);
           }
           if (MOB_DELTA_DEBUG && serverMobRemovalScratch.length > 0) {
-            console.warn('[MobDelta] Removing mobs not in full snapshot (chunk cleanup)', {
-              removedCount: serverMobRemovalScratch.length,
-              removedIds: serverMobRemovalScratch.slice(0, 20),
-              snapshotSeenCount: pendingFullMobSnapshotSeenIds.size,
-              chunkIndex,
-              chunkCount,
-            });
+            console.warn(
+              '[MobDelta] Removing mobs not in full snapshot (chunk cleanup)',
+              {
+                removedCount: serverMobRemovalScratch.length,
+                removedIds: serverMobRemovalScratch.slice(0, 20),
+                snapshotSeenCount: pendingFullMobSnapshotSeenIds.size,
+                chunkIndex,
+                chunkCount,
+              }
+            );
           }
           for (const mobId of serverMobRemovalScratch) {
             removeServerMobById(mobId);
@@ -877,14 +895,17 @@ export const createAuthoritativeSync = (
           serverMobRemovalScratch.push(mobId);
         }
         if (MOB_DELTA_DEBUG && serverMobRemovalScratch.length > 0) {
-          console.warn('[MobDelta] Removing mobs not in single-chunk snapshot', {
-            removedCount: serverMobRemovalScratch.length,
-            removedIds: serverMobRemovalScratch.slice(0, 20),
-          });
+          console.warn(
+            '[MobDelta] Removing mobs not in single-chunk snapshot',
+            {
+              removedCount: serverMobRemovalScratch.length,
+              removedIds: serverMobRemovalScratch.slice(0, 20),
+            }
+          );
         }
         for (const mobId of serverMobRemovalScratch) {
-            removeServerMobById(mobId);
-          }
+          removeServerMobById(mobId);
+        }
         pendingFullMobSnapshotId = null;
         pendingFullMobSnapshotSeenIds.clear();
         pendingFullMobSnapshotReceivedChunks.clear();
@@ -896,15 +917,6 @@ export const createAuthoritativeSync = (
     } else {
       pendingFullMobSnapshotSeenIds.clear();
       pendingFullMobSnapshotReceivedChunks.clear();
-    }
-    for (const numId of delta.despawnedMobIds) {
-      const mobId = String(numId);
-      const mob = ctx.serverMobsById.get(mobId);
-      if (mob) {
-        ctx.spawnMobDeathVisual(mob);
-      }
-      removeServerMobById(mobId);
-      ctx.serverMobMaxHpCache.delete(mobId);
     }
     if (MOB_DELTA_DEBUG) {
       console.log('[MobDelta] Delta applied', {
@@ -1025,7 +1037,10 @@ export const createAuthoritativeSync = (
           count: staleMobIds.length,
           ids: staleMobIds.slice(0, 10),
           connectionAlive,
-          lastDeltaMsAgo: lastMobDeltaReceivedAtMs > 0 ? now - lastMobDeltaReceivedAtMs : null,
+          lastDeltaMsAgo:
+            lastMobDeltaReceivedAtMs > 0
+              ? now - lastMobDeltaReceivedAtMs
+              : null,
         });
       }
       for (const mobId of staleMobIds) {

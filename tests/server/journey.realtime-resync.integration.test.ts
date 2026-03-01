@@ -1,5 +1,6 @@
 import { expect } from 'vitest';
 import { redis } from '@devvit/web/server';
+import { KEYS } from '../../src/server/core/keys';
 import { createTestApp, devvitTest, postJson } from '../helpers/devvitTest';
 
 devvitTest(
@@ -12,7 +13,9 @@ devvitTest(
     const playerId = String(joinBody.playerId);
     const channel = String(joinBody.channel);
 
-    await redis.hSet('g:global:m', { lastTickMs: String(Date.now() - 60_000) });
+    await redis.hSet(KEYS.META, {
+      lastTickMs: String(Date.now() - 60_000),
+    });
 
     const heartbeatResponse = await postJson(app, '/api/game/heartbeat', {
       playerId,

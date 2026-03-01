@@ -203,6 +203,7 @@ export type ResyncRequest = {
 export type ResyncResponse = {
   type: 'snapshot';
   snapshot: WorldState;
+  resetReason?: string;
 };
 
 export const isCommandRequest = (value: unknown): value is CommandRequest => {

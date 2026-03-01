@@ -31,6 +31,8 @@ devvitTest(
     );
     expect(commandResponse.status).toBe(200);
 
+    await postJson(app, '/internal/scheduler/server-clock?windowMs=500', {});
+
     const resyncResponse = await postJson(app, '/api/game/resync', {
       tickSeq: 0,
       playerId,

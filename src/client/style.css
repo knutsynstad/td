@@ -1259,6 +1259,10 @@ canvas {
 
 .event-banner__single {
   font-size: clamp(1.6rem, 4vw, 4rem);
+  text-shadow:
+    0 0 8px rgba(0, 0, 0, 0.9),
+    0 2px 4px rgba(0, 0, 0, 0.8),
+    0 0 24px rgba(0, 0, 0, 0.6);
 }
 
 .event-banner__subhead {

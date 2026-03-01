@@ -25,6 +25,7 @@ type PresenceCallbacks = {
   onWaveDelta: (delta: WaveDelta) => void;
   onCoinBalance: (coins: number) => void;
   onResyncRequired: (reason: string) => void;
+  onResetBanner?: (reason: string) => void;
   onHeartbeatWaveState?: (
     wave: number,
     active: boolean,
@@ -193,14 +194,17 @@ export const connectAuthoritativeBridge = async (
 
   let seq = 0;
   let lastBatchLogMs = 0;
-  console.log('[MobDelta] Realtime connecting', { channel: joinResponse.channel });
+  console.log('[MobDelta] Realtime connecting', {
+    channel: joinResponse.channel,
+  });
   const connection = await connectRealtime({
     channel: joinResponse.channel,
     onMessage: (payload) => {
       if (!isDeltaBatch(payload)) {
         console.warn('[MobDelta] Received non-delta batch', {
           hasPayload: !!payload,
-          payloadKeys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+          payloadKeys:
+            payload && typeof payload === 'object' ? Object.keys(payload) : [],
         });
         return;
       }
@@ -222,7 +226,10 @@ export const connectAuthoritativeBridge = async (
           applyDelta(event, callbacks);
         } catch (err) {
           console.error('[MobDelta] Error applying delta', {
-            deltaType: event && typeof event === 'object' ? (event as { type?: string }).type : 'unknown',
+            deltaType:
+              event && typeof event === 'object'
+                ? (event as { type?: string }).type
+                : 'unknown',
             error: err instanceof Error ? err.message : String(err),
             stack: err instanceof Error ? err.stack : undefined,
           });
@@ -276,6 +283,9 @@ export const connectAuthoritativeBridge = async (
     });
     if (!isResyncResponse(payload)) {
       throw new Error('invalid resync response');
+    }
+    if (payload.resetReason && callbacks.onResetBanner) {
+      callbacks.onResetBanner(payload.resetReason);
     }
     callbacks.onSnapshot(payload.snapshot);
   };

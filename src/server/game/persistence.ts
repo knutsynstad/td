@@ -11,7 +11,11 @@ import { DEFAULT_PLAYER_SPAWN } from '../../shared/game-state';
 import { PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
 import { CASTLE_DEATH_TAX } from '../../shared/content';
-import { getUserCoinBalance, spendUserCoins } from './economy';
+import {
+  applyCastleDeathTax,
+  getUserCoinBalance,
+  spendUserCoins,
+} from './economy';
 import {
   defaultMeta,
   defaultWave,
@@ -138,10 +142,9 @@ export async function resetGameToDefault(
 
   if (reason === 'menu') {
     const userId = primaryUserId;
-    coinsForMeta = userId
-      ? await getUserCoinBalance(userId)
-      : 0;
+    coinsForMeta = userId ? await getUserCoinBalance(userId) : 0;
   } else {
+    await applyCastleDeathTax();
     const playersResult = await loadPlayersFromRedis();
 
     for (const playerId of connectedPlayerIds) {
@@ -157,9 +160,7 @@ export async function resetGameToDefault(
       playersToPreserve.push(updated);
     }
     const firstId = connectedPlayerIds[0];
-    coinsForMeta = firstId
-      ? await getUserCoinBalance(firstId as T2)
-      : 0;
+    coinsForMeta = firstId ? await getUserCoinBalance(firstId as T2) : 0;
   }
 
   const nextMeta = defaultMeta(nowMs, coinsForMeta);
@@ -172,11 +173,17 @@ export async function resetGameToDefault(
   await clearPlayerKeys();
 
   if (reason === 'castle_death' && playersToPreserve.length > 0) {
-    const exp = new Date(Date.now() + Math.ceil(PLAYER_TIMEOUT_MS / 1000) * 1000);
+    const exp = new Date(
+      Date.now() + Math.ceil(PLAYER_TIMEOUT_MS / 1000) * 1000
+    );
     for (const player of playersToPreserve) {
-      await redis.set(KEYS.playerPresence(player.playerId), JSON.stringify(player), {
-        expiration: exp,
-      });
+      await redis.set(
+        KEYS.playerPresence(player.playerId),
+        JSON.stringify(player),
+        {
+          expiration: exp,
+        }
+      );
       await redis.hSet(KEYS.PLAYER_IDS, { [player.playerId]: '1' });
     }
   }
@@ -204,6 +211,8 @@ export async function resetGameToDefault(
   if (Object.keys(structureWrites).length > 0) {
     await redis.hSet(KEYS.STRUCTURES, structureWrites);
   }
+  const resetReason = reason === 'castle_death' ? 'castle death' : 'game reset';
+  await redis.set(KEYS.LAST_RESET_REASON, resetReason);
 }
 
 export async function resetGameState(nowMs: number, userId: T2): Promise<void> {

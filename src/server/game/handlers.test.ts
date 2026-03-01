@@ -30,7 +30,7 @@ test('resetGame resets wave progression without economy tax', async () => {
   const snapshot = await resyncGame(TEST_USER_ID);
   expect(snapshot.snapshot.wave.wave).toBe(0);
   expect(snapshot.snapshot.wave.active).toBe(false);
-  expect(snapshot.snapshot.wave.nextWaveAtMs).toBe(0);
+  expect(snapshot.snapshot.wave.nextWaveAtMs).toBeGreaterThan(0);
   expect(Object.keys(snapshot.snapshot.mobs)).toHaveLength(0);
   const structures = Object.values(snapshot.snapshot.structures);
   expect(structures.length).toBeGreaterThan(0);

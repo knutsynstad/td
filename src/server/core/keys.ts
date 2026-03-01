@@ -11,6 +11,7 @@ export const KEYS = {
   LEADER_LOCK: 'leaderLock',
   LEADER_HEARTBEAT: 'leaderHeartbeat',
   FOLLOWER_GATE: 'followerGate',
+  LAST_RESET_REASON: 'lastResetReason',
   CASTLE_COIN_BALANCE: 'castle:coins',
   PLAYER: (userId: T2) => `p:${userId}`, // Hash - economy
   playerPresence: (playerId: string) => `player:${playerId}`,

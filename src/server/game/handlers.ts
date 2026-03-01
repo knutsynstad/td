@@ -1,4 +1,4 @@
-import { reddit } from '@devvit/web/server';
+import { reddit, redis } from '@devvit/web/server';
 import type { T2 } from '@devvit/web/shared';
 import type {
   CommandEnvelope,
@@ -15,6 +15,7 @@ import {
 import { getStructureCoinCost } from '../../shared/content';
 import { MAX_PLAYERS } from '../config';
 import { broadcastGameDeltas, CHANNELS } from '../core/broadcast';
+import { KEYS } from '../core/keys';
 import { addUserCoins, getUserCoinBalance, spendUserCoins } from './economy';
 import {
   createDefaultPlayer,
@@ -29,6 +30,7 @@ import {
   loadGameWorld,
 } from './trackedState';
 import { ensureStaticMap } from './staticMap';
+import { ensureInitialWaveSchedule } from '../simulation/waves';
 
 export async function getPlayerId(): Promise<string> {
   const username = await reddit.getCurrentUsername();
@@ -164,6 +166,8 @@ export async function applyCommand(
   };
 }
 
+const HEARTBEAT_STALE_MS = 30_000;
+
 export async function heartbeatGame(
   playerId: string,
   position?: { x: number; z: number }
@@ -177,6 +181,12 @@ export async function heartbeatGame(
       player.position = position;
     }
     await touchPlayerPresence(player);
+  }
+
+  if (nowMs - world.meta.lastTickMs > HEARTBEAT_STALE_MS) {
+    await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
+      { type: 'resyncRequired', reason: 'stale world' },
+    ]);
   }
 
   return {
@@ -221,10 +231,18 @@ export async function resyncGame(
   }
   const playerId = (playerIdOverride ?? (await getPlayerId())) as T2;
   world.meta.coins = await getUserCoinBalance(playerId);
-  return {
+  const resetReason = await redis.get(KEYS.LAST_RESET_REASON);
+  if (resetReason) {
+    await redis.del(KEYS.LAST_RESET_REASON);
+  }
+  const response: ResyncResponse = {
     type: 'snapshot',
     snapshot: gameWorldToSnapshot(world),
   };
+  if (resetReason) {
+    response.resetReason = resetReason;
+  }
+  return response;
 }
 
 export async function resetGame(playerIdOverride?: string): Promise<{
@@ -238,7 +256,11 @@ export async function resetGame(playerIdOverride?: string): Promise<{
     connectedPlayerIds: [],
     primaryUserId: playerId,
   });
-  const world = await loadWorldState();
+  const world = await loadGameWorld();
+  ensureStaticMap(world);
+  ensureInitialWaveSchedule(world);
+  world.waveDirty = true;
+  await flushGameWorld(world);
   await broadcastGameDeltas(world.meta.worldVersion, world.meta.tickSeq, [
     {
       type: 'resyncRequired',
