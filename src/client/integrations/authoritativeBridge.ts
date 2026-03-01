@@ -393,7 +393,11 @@ export const connectAuthoritativeBridge = async (
     callbacks.onSnapshot(payload.snapshot, {
       skipMobReplacement: !payload.resetReason,
     });
-    replayBufferedDeltasNewerThan(snapshotTickSeq);
+    if (payload.resetReason) {
+      deltaBuffer.length = 0;
+    } else {
+      replayBufferedDeltasNewerThan(snapshotTickSeq);
+    }
   };
 
   const fetchStructures = async (): Promise<StructuresSyncResponse> => {

@@ -2061,7 +2061,7 @@ const setupAuthoritativeBridge = async () => {
         lastResyncAttemptedAt = now;
         const bridge = authoritativeBridgeRef.current;
         const RESYNC_ATTEMPTS = 3;
-        const RESYNC_INITIAL_DELAY_MS = 300;
+        const RESYNC_INITIAL_DELAY_MS = skipCooldown ? 0 : 300;
         const attemptResync = (attempt: number) => {
           console.log('Resyncing…');
           const delayMs =

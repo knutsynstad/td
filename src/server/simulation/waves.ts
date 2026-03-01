@@ -91,6 +91,11 @@ export const ensureInitialWaveSchedule = (world: GameWorld): boolean => {
   return true;
 };
 
+export const ensureWaveSpawnersPrepared = (world: GameWorld): void => {
+  if (world.wave.active || world.wave.spawners.length > 0) return;
+  prepareUpcomingWave(world);
+};
+
 const maybeActivateScheduledWave = (world: GameWorld): boolean => {
   if (world.wave.active || world.wave.nextWaveAtMs <= 0) return false;
   if (world.meta.lastTickMs < world.wave.nextWaveAtMs) return false;

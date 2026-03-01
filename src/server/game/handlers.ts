@@ -33,7 +33,10 @@ import {
   loadGameWorld,
 } from './trackedState';
 import { ensureStaticMap } from './staticMap';
-import { ensureInitialWaveSchedule } from '../simulation/waves';
+import {
+  ensureInitialWaveSchedule,
+  ensureWaveSpawnersPrepared,
+} from '../simulation/waves';
 import { parseMapFromHash, parseMeta, parseStructure } from './parse';
 
 export async function getPlayerId(): Promise<string> {
@@ -272,6 +275,7 @@ export async function resyncGame(
 ): Promise<ResyncResponse> {
   const world = await loadGameWorld();
   const staticSync = ensureStaticMap(world);
+  ensureWaveSpawnersPrepared(world);
   if (staticSync.upserts.length > 0 || staticSync.removes.length > 0) {
     await flushGameWorld(world);
   }
