@@ -1,5 +1,6 @@
 import { expect } from 'vitest';
 import { redis } from '@devvit/web/server';
+import { CASTLE_DEATH_PREPARE_MS } from '../../src/server/config';
 import { KEYS, FIELDS } from '../../src/server/core/keys';
 import {
   createTestApp,
@@ -98,6 +99,10 @@ devvitTest(
     expect(resyncBody.type).toBe('snapshot');
     expect(resyncBody.resetReason).toBe('castle death');
     expect(Object.keys(resyncBody.snapshot.mobs ?? {})).toHaveLength(0);
+
+    expect(resyncBody.snapshot.wave.nextWaveAtMs).toBeGreaterThanOrEqual(
+      now + CASTLE_DEATH_PREPARE_MS - 2000
+    );
 
     const coinsResponse = await getJson(app, '/api/game/coins');
     const coinsBody = await coinsResponse.json();

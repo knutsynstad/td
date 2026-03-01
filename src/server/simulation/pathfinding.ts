@@ -342,6 +342,25 @@ export const getNearestGoalDistance = (
   return best;
 };
 
+export const getNearestGoal = (
+  goals: Array<{ x: number; z: number }>,
+  x: number,
+  z: number
+): { x: number; z: number } => {
+  if (goals.length === 0) return { x, z };
+  let best = goals[0]!;
+  let bestDist = distance2d(best.x, best.z, x, z);
+  for (let i = 1; i < goals.length; i += 1) {
+    const g = goals[i]!;
+    const d = distance2d(g.x, g.z, x, z);
+    if (d < bestDist) {
+      best = g;
+      bestDist = d;
+    }
+  }
+  return best;
+};
+
 export const buildSpawnerRoute = (
   field: FlowField,
   start: { x: number; z: number }

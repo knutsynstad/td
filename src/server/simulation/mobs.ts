@@ -15,6 +15,7 @@ import {
   toSideDef,
   getSpawnerEntryPoint,
   getCastleEntryGoals,
+  getNearestGoal,
   getNearestGoalDistance,
 } from './pathfinding';
 import type { SimulationPerfStats } from './runSimulation';
@@ -125,6 +126,22 @@ export const updateMobs = (
         x: routedTarget.x - forward.z * laneOffset * lateralScale,
         z: routedTarget.z + forward.x * laneOffset * lateralScale,
       };
+      if (mob.routeIndex >= maxRouteIndex) {
+        const distToRouted = distance2d(
+          mob.position.x,
+          mob.position.z,
+          routedTarget.x,
+          routedTarget.z
+        );
+        const distToGoal = getNearestGoalDistance(
+          goals,
+          mob.position.x,
+          mob.position.z
+        );
+        if (distToGoal < distToRouted) {
+          target = getNearestGoal(goals, mob.position.x, mob.position.z);
+        }
+      }
     } else if (isInMap && !canUseRoute) {
       const nearestForEntry = getNearestGoalDistance(
         goals,
