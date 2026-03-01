@@ -63,9 +63,9 @@ export async function spendUserCoins(
   balance = Math.floor(balance);
   balance = clamp(balance, USER_COINS_MIN, USER_COINS_MAX);
 
-  // Deliberately not updating lastAccruedMs since getUserCoinBalance already did.
   await redis.hSet(KEYS.PLAYER(userId), {
     [FIELDS.USER_COIN_BALANCE]: String(balance),
+    // Deliberately not updating lastAccruedMs since getUserCoinBalance already did.
   });
 
   return { success: true, balance };
@@ -84,9 +84,10 @@ export async function addUserCoins(
   );
   const added = next - current;
   if (added <= 0) return { added: 0, balance: current };
+
   await redis.hSet(KEYS.PLAYER(userId), {
     [FIELDS.USER_COIN_BALANCE]: String(next),
-    [FIELDS.USER_COIN_LAST_ACCRUED_MS]: String(Date.now()),
+    // Deliberately not updating lastAccruedMs since getUserCoinBalance already did.
   });
   return { added, balance: next };
 }
@@ -167,6 +168,7 @@ export async function takeCoinsFromCastle(
       FIELDS.USER_COIN_BALANCE,
       outcome.withdrawn
     ),
+    // Deliberately not updating lastAccruedMs since getUserCoinBalance already did.
     redis.incrBy(KEYS.CASTLE_COIN_BALANCE, -outcome.withdrawn),
   ]);
 
