@@ -54,7 +54,8 @@
       {
         "label": "Reset game",
         "description": "Reset castle game",
-        "location": "subreddit",
+        "location": "post",
+        "postFilter": "currentApp",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/reset-game"
       }

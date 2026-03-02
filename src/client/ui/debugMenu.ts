@@ -13,6 +13,7 @@ export type DebugMenuContext = {
   };
   getCastleFlowField: () => CorridorFlowField;
   triggerEventBanner: (text: string, duration?: number) => void;
+  requestResync?: () => Promise<void>;
 };
 
 export type DebugMenuResult = {
@@ -33,6 +34,7 @@ export const createDebugMenu = (ctx: DebugMenuContext): DebugMenuResult => {
     flowFieldDebugOverlay,
     getCastleFlowField,
     triggerEventBanner,
+    requestResync,
   } = ctx;
 
   let isOpen = false;
@@ -141,9 +143,10 @@ export const createDebugMenu = (ctx: DebugMenuContext): DebugMenuResult => {
     if (debugResetGameButton.disabled) return;
     debugResetGameButton.disabled = true;
     void requestResetGame()
-      .then((toast) => {
+      .then(async (toast) => {
         if (toast) {
           triggerEventBanner(toast, 3.6);
+          await requestResync?.();
           return;
         }
         triggerEventBanner('Failed to reset game');

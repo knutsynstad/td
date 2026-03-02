@@ -2021,6 +2021,9 @@ export const bootstrapGame = (app: HTMLElement): void => {
     getCastleFlowField,
     triggerEventBanner: (text, duration) =>
       hudUpdaters.triggerEventBanner(text, duration),
+    requestResync: async () => {
+      await gameSessionRef.current?.resync();
+    },
   });
 
   const SELECTION_DIALOG_UPDATE_INTERVAL_MS = 100;
