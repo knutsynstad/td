@@ -2262,7 +2262,6 @@ let wasKeyboardMoving = false;
 
 type FloatingDamageText = {
   el: HTMLDivElement;
-  target: Entity | null;
   worldPos: THREE.Vector3;
   elapsed: number;
   duration: number;
@@ -2361,6 +2360,7 @@ const worldToScreen = (
 ): { x: number; y: number } | null => {
   const vector = worldPos.clone();
   vector.project(camera);
+  if (vector.z > 1) return null;
   const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
   const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
   return { x, y };
@@ -2591,7 +2591,6 @@ const spawnFloatingDamageText = (
   damageTextContainer.appendChild(text);
   activeDamageTexts.push({
     el: text,
-    target: mob,
     worldPos: mob.mesh.position.clone().setY(mob.baseY + 1.1),
     elapsed: 0,
     duration: 0.65,
@@ -2647,12 +2646,6 @@ const updateFloatingDamageTexts = (delta: number) => {
     const t = Math.min(1, text.elapsed / text.duration);
     const easeOut = 1 - Math.pow(1 - t, 2);
 
-    if (text.target !== null) {
-      text.worldPos
-        .copy(text.target.mesh.position)
-        .setY(text.target.baseY + 1.1);
-    }
-
     const liftedWorldPos = text.worldPos
       .clone()
       .setY(text.worldPos.y + easeOut * 0.55);
@@ -2663,6 +2656,9 @@ const updateFloatingDamageTexts = (delta: number) => {
       text.el.style.top = `${screenPos.y}px`;
       text.el.style.opacity = String(1 - t);
       text.el.style.transform = `translate(-50%, -100%) scale(${1 + (1 - t) * 0.2})`;
+      text.el.style.visibility = '';
+    } else {
+      text.el.style.visibility = 'hidden';
     }
 
     if (t >= 1) {
@@ -4124,7 +4120,6 @@ const tick = (now: number, delta: number) => {
   smokePoofEffect.updateSmokePoofs(delta);
   updateMobDeathVisuals(delta);
   hudUpdaters.updateCoinTrails(delta);
-  updateFloatingDamageTexts(delta);
 
   const shouldRefreshTowerTargets =
     tickFrameCounter % TOWER_TARGET_REFRESH_INTERVAL_FRAMES === 0;
@@ -4369,6 +4364,7 @@ const tick = (now: number, delta: number) => {
   camera.updateMatrixWorld();
   updateMobInstanceRender(now);
 
+  updateFloatingDamageTexts(delta);
   updateHealthBars();
   updateUsernameLabels();
 
