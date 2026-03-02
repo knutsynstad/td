@@ -205,11 +205,6 @@ export const createAuthoritativeSync = (
   let lastMobDeltaReceivedAtMs = 0;
   let lastSnapshotTickSeq = 0;
   const CONNECTION_ALIVE_THRESHOLD_MS = 3_000;
-  const MOB_DELTA_DEBUG =
-    typeof localStorage !== 'undefined' &&
-    localStorage.getItem('DEBUG_MOB_DELTA') === '1';
-
-  const STRUCTURE_SYNC_DEBUG = true;
 
   const mobPool: MobEntity[] = [];
 
@@ -363,13 +358,6 @@ export const createAuthoritativeSync = (
     if (existingCollider) {
       const state = ctx.structureStore.structureStates.get(existingCollider);
       if (state) {
-        if (STRUCTURE_SYNC_DEBUG && state.hp !== entry.hp) {
-          console.log('[StructureSync] HP overwrite', {
-            structureId: entry.structureId,
-            prevHp: state.hp,
-            entryHp: entry.hp,
-          });
-        }
         state.hp = entry.hp;
         state.maxHp = entry.maxHp;
         state.mesh.position.set(
@@ -563,12 +551,6 @@ export const createAuthoritativeSync = (
     delta: StructureDelta,
     _batchTickSeq?: number
   ) => {
-    if (STRUCTURE_SYNC_DEBUG) {
-      console.log('[StructureSync] applyServerStructureDelta', {
-        upserts: delta.upserts.length,
-        removes: delta.removes.length,
-      });
-    }
     for (const structureId of delta.removes) {
       removeServerStructure(structureId);
     }
@@ -583,11 +565,6 @@ export const createAuthoritativeSync = (
   const applyServerStructureSync = (
     structures: Record<string, SharedStructureState>
   ) => {
-    if (STRUCTURE_SYNC_DEBUG) {
-      console.log('[StructureSync] applyServerStructureSync', {
-        structureCount: Object.keys(structures).length,
-      });
-    }
     const syncedIds = new Set(Object.keys(structures));
     for (const structureId of Array.from(ctx.serverStructureById.keys())) {
       if (!syncedIds.has(structureId)) {
@@ -846,25 +823,6 @@ export const createAuthoritativeSync = (
       return;
     }
     const pool = delta.mobPool;
-    const poolSize = pool
-      ? Math.min(
-          pool.ids?.length ?? 0,
-          pool.px?.length ?? 0,
-          pool.pz?.length ?? 0
-        )
-      : 0;
-    if (MOB_DELTA_DEBUG) {
-      console.log('[MobDelta] Delta received', {
-        fullMobList: !!delta.fullMobList,
-        snapshotId: delta.fullMobSnapshotId,
-        chunkIndex: delta.fullMobSnapshotChunkIndex,
-        chunkCount: delta.fullMobSnapshotChunkCount,
-        poolSize,
-        despawnedCount: delta.despawnedMobIds?.length ?? 0,
-        mobsBeforeApply: ctx.serverMobsById.size,
-      });
-    }
-
     syncServerClockSkew(delta.serverTimeMs);
     lastMobDeltaReceivedAtMs = performance.now();
     serverMobSeenIdsScratch.clear();
@@ -922,18 +880,6 @@ export const createAuthoritativeSync = (
             if (pendingFullMobSnapshotSeenIds.has(mobId)) continue;
             serverMobRemovalScratch.push(mobId);
           }
-          if (MOB_DELTA_DEBUG && serverMobRemovalScratch.length > 0) {
-            console.warn(
-              '[MobDelta] Removing mobs not in full snapshot (chunk cleanup)',
-              {
-                removedCount: serverMobRemovalScratch.length,
-                removedIds: serverMobRemovalScratch.slice(0, 20),
-                snapshotSeenCount: pendingFullMobSnapshotSeenIds.size,
-                chunkIndex,
-                chunkCount,
-              }
-            );
-          }
           for (const mobId of serverMobRemovalScratch) {
             removeServerMobById(mobId);
           }
@@ -951,15 +897,6 @@ export const createAuthoritativeSync = (
           if (serverMobSeenIdsScratch.has(mobId)) continue;
           serverMobRemovalScratch.push(mobId);
         }
-        if (MOB_DELTA_DEBUG && serverMobRemovalScratch.length > 0) {
-          console.warn(
-            '[MobDelta] Removing mobs not in single-chunk snapshot',
-            {
-              removedCount: serverMobRemovalScratch.length,
-              removedIds: serverMobRemovalScratch.slice(0, 20),
-            }
-          );
-        }
         for (const mobId of serverMobRemovalScratch) {
           removeServerMobById(mobId);
         }
@@ -974,12 +911,6 @@ export const createAuthoritativeSync = (
     } else {
       pendingFullMobSnapshotSeenIds.clear();
       pendingFullMobSnapshotReceivedChunks.clear();
-    }
-    if (MOB_DELTA_DEBUG) {
-      console.log('[MobDelta] Delta applied', {
-        mobsAfterApply: ctx.serverMobsById.size,
-        despawnedApplied: delta.despawnedMobIds?.length ?? 0,
-      });
     }
   };
 
@@ -1118,17 +1049,6 @@ export const createAuthoritativeSync = (
       }
     }
     if (staleMobIds.length > 0) {
-      if (MOB_DELTA_DEBUG || staleMobIds.length > 5) {
-        console.warn('[MobDelta] Removing stale mobs (no recent update)', {
-          count: staleMobIds.length,
-          ids: staleMobIds.slice(0, 10),
-          connectionAlive,
-          lastDeltaMsAgo:
-            lastMobDeltaReceivedAtMs > 0
-              ? now - lastMobDeltaReceivedAtMs
-              : null,
-        });
-      }
       for (const mobId of staleMobIds) {
         removeServerMobById(mobId);
       }

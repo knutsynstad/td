@@ -1,6 +1,3 @@
-export const ENABLE_CLIENT_FRAME_PROFILING = true;
-export const FRAME_PROFILE_LOG_INTERVAL_MS = 10_000;
-export const FRAME_PROFILE_MAX_SAMPLES = 240;
 export const ENABLE_PROJECTILE_BROADPHASE = true;
 export const ENABLE_INCREMENTAL_SPATIAL_GRID = true;
 export const ENABLE_MOB_RENDER_LOD = true;

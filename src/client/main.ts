@@ -172,12 +172,9 @@ import { renderVisibleMobInstances } from './rendering/presenters/renderCoordina
 import { buildCoinCostMarkup } from './ui/components/coinCost';
 import { createDomRefs } from './ui/domRefs';
 import {
-  ENABLE_CLIENT_FRAME_PROFILING,
   ENABLE_INCREMENTAL_SPATIAL_GRID,
   ENABLE_MOB_RENDER_LOD,
   ENABLE_PROJECTILE_BROADPHASE,
-  FRAME_PROFILE_LOG_INTERVAL_MS,
-  FRAME_PROFILE_MAX_SAMPLES,
   MOB_LOD_DISABLE_FAR_WIGGLE,
   MOB_LOD_FAR_ANIMATION_STEP_MS,
   MOB_LOD_FAR_DISTANCE,
@@ -2079,7 +2076,6 @@ const setupAuthoritativeBridge = async () => {
         const RESYNC_ATTEMPTS = 3;
         const RESYNC_INITIAL_DELAY_MS = skipCooldown ? 0 : 300;
         const attemptResync = (attempt: number) => {
-          console.log('Resyncing…');
           const delayMs =
             attempt === 0
               ? RESYNC_INITIAL_DELAY_MS
@@ -2102,7 +2098,6 @@ const setupAuthoritativeBridge = async () => {
               })
               .then(() => {
                 resyncInProgressRef.current = false;
-                console.log('Resynced');
               });
           }, delayMs);
         };
@@ -2526,14 +2521,6 @@ const towerTargetPosScratch = new THREE.Vector3();
 const playerLaunchPosScratch = new THREE.Vector3();
 const playerTargetPosScratch = new THREE.Vector3();
 const projectileHitDirectionScratch = new THREE.Vector3();
-const frameStageSamples: Array<{
-  totalMs: number;
-  spatialMs: number;
-  targetingMs: number;
-  projectileMs: number;
-  renderMs: number;
-}> = [];
-let nextFrameProfileLogAtMs = 0;
 let tickFrameCounter = 0;
 let cachedSelectedMob: Entity | null = null;
 const cachedTowerTargets = new WeakMap<Tower, Entity | null>();
@@ -3937,11 +3924,6 @@ const updateGrowingTrees = (nowMs: number) => {
 
 const tick = (now: number, delta: number) => {
   tickFrameCounter += 1;
-  const framePerfStartMs = performance.now();
-  let frameSpatialMs = 0;
-  let frameTargetingMs = 0;
-  let frameProjectileMs = 0;
-  let frameRenderMs = 0;
   const serverAuthoritative = isServerAuthoritative();
   if (rockVisualsNeedFullRefresh && hasAllRockTemplates()) {
     refreshAllRockVisuals(true);
@@ -4082,7 +4064,6 @@ const tick = (now: number, delta: number) => {
     authoritativeSync.updateServerMobInterpolation(now);
   }
 
-  const spatialStartedAtMs = performance.now();
   const dynamicEntities = [player, ...npcs, ...mobs];
   if (ENABLE_INCREMENTAL_SPATIAL_GRID) {
     const nextDynamicEntities = new Set(dynamicEntities);
@@ -4107,7 +4088,6 @@ const tick = (now: number, delta: number) => {
       spatialGrid.insert(entity);
     }
   }
-  frameSpatialMs += performance.now() - spatialStartedAtMs;
 
   updateParticles(delta);
   smokePoofEffect.updateSmokePoofs(delta);
@@ -4115,7 +4095,6 @@ const tick = (now: number, delta: number) => {
   hudUpdaters.updateCoinTrails(delta);
   updateFloatingDamageTexts(delta);
 
-  const targetingStartedAtMs = performance.now();
   const shouldRefreshTowerTargets =
     tickFrameCounter % TOWER_TARGET_REFRESH_INTERVAL_FRAMES === 0;
   for (const tower of towers) {
@@ -4188,11 +4167,8 @@ const tick = (now: number, delta: number) => {
       updateBallistaRigTracking(rig, tower.mesh.position, null, null, delta);
     }
   }
-  frameTargetingMs += performance.now() - targetingStartedAtMs;
-  const projectileStartedAtMs = performance.now();
   updateTowerArrowProjectiles(delta);
   updatePlayerArrowProjectiles(delta);
-  frameProjectileMs += performance.now() - projectileStartedAtMs;
 
   // Only check collisions between entities in nearby cells
   const processed = new Set<Entity>();
@@ -4356,9 +4332,7 @@ const tick = (now: number, delta: number) => {
   camera.position.copy(player.mesh.position).add(cameraOffset);
   camera.lookAt(player.mesh.position.clone().setY(PLAYER_HEIGHT * 0.5));
   camera.updateMatrixWorld();
-  const renderStartedAtMs = performance.now();
   updateMobInstanceRender(now);
-  frameRenderMs += performance.now() - renderStartedAtMs;
 
   updateHealthBars();
   updateUsernameLabels();
@@ -4440,49 +4414,6 @@ const tick = (now: number, delta: number) => {
   hudUpdaters.updateCoinHudView(delta);
   composer.render();
   coinTrailRenderer.render(coinTrailScene, coinTrailCamera);
-  if (ENABLE_CLIENT_FRAME_PROFILING) {
-    const frameTotalMs = performance.now() - framePerfStartMs;
-    frameStageSamples.push({
-      totalMs: frameTotalMs,
-      spatialMs: frameSpatialMs,
-      targetingMs: frameTargetingMs,
-      projectileMs: frameProjectileMs,
-      renderMs: frameRenderMs,
-    });
-    if (frameStageSamples.length > FRAME_PROFILE_MAX_SAMPLES) {
-      frameStageSamples.shift();
-    }
-    if (now >= nextFrameProfileLogAtMs) {
-      const sampleCount = Math.max(1, frameStageSamples.length);
-      const avgTotal =
-        frameStageSamples.reduce((sum, sample) => sum + sample.totalMs, 0) /
-        sampleCount;
-      const avgSpatial =
-        frameStageSamples.reduce((sum, sample) => sum + sample.spatialMs, 0) /
-        sampleCount;
-      const avgTargeting =
-        frameStageSamples.reduce((sum, sample) => sum + sample.targetingMs, 0) /
-        sampleCount;
-      const avgProjectile =
-        frameStageSamples.reduce(
-          (sum, sample) => sum + sample.projectileMs,
-          0
-        ) / sampleCount;
-      const avgRender =
-        frameStageSamples.reduce((sum, sample) => sum + sample.renderMs, 0) /
-        sampleCount;
-      console.info('Client frame profile', {
-        sampleSize: frameStageSamples.length,
-        avgTotalMs: Number(avgTotal.toFixed(2)),
-        avgSpatialMs: Number(avgSpatial.toFixed(2)),
-        avgTargetingMs: Number(avgTargeting.toFixed(2)),
-        avgProjectileMs: Number(avgProjectile.toFixed(2)),
-        avgRenderMs: Number(avgRender.toFixed(2)),
-        budgetTotalMs: 16,
-      });
-      nextFrameProfileLogAtMs = now + FRAME_PROFILE_LOG_INTERVAL_MS;
-    }
-  }
 };
 
 const gameLoop = createGameLoop(tick);
