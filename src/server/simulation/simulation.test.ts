@@ -3,7 +3,7 @@ import type { CommandEnvelope } from '../../shared/game-protocol';
 import type { GameWorld } from '../../shared/game-state';
 import { TrackedMap } from '../../shared/utils/trackedMap';
 import {
-  AUTO_WAVE_INITIAL_DELAY_MS,
+  WAVE_PREPARE_MS,
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
   SIM_TICK_MS,
 } from '../config';
@@ -39,7 +39,7 @@ describe('runSimulation', () => {
     const nowMs = Date.now();
     const result = runSimulation(world(nowMs), nowMs, [], 1);
     expect(result.world.wave.nextWaveAtMs).toBe(
-      nowMs + AUTO_WAVE_INITIAL_DELAY_MS
+      nowMs + WAVE_PREPARE_MS
     );
     expect(result.deltas.some((delta) => delta.type === 'waveDelta')).toBe(
       true

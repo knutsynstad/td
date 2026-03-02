@@ -1,7 +1,7 @@
 import type { GameDelta } from '../../shared/game-protocol';
 import type { GameWorld } from '../../shared/game-state';
 import {
-  CASTLE_DEATH_PREPARE_MS,
+  WAVE_PREPARE_MS,
   LEADER_BROADCAST_WINDOW_MS,
   LEADER_HEARTBEAT_STALE_MS,
   LEADER_LOCK_TTL_SECONDS,
@@ -91,7 +91,7 @@ async function onGameTick(
     const fresh = await loadGameWorld();
     ensureStaticMap(fresh);
     ensureInitialWaveSchedule(fresh);
-    fresh.wave.nextWaveAtMs = nowMs + CASTLE_DEATH_PREPARE_MS;
+    fresh.wave.nextWaveAtMs = nowMs + WAVE_PREPARE_MS;
     world.meta = fresh.meta;
     world.wave = fresh.wave;
     world.players = fresh.players;

@@ -165,7 +165,11 @@ export type AuthoritativeSync = {
   removeServerMobById: (mobId: string) => void;
   upsertServerMobFromSnapshot: (mobState: SharedMobState) => void;
   applyServerMobDelta: (delta: EntityDelta, batchTickSeq?: number) => void;
-  applyServerWaveDelta: (delta: WaveDelta, batchTickSeq?: number) => void;
+  applyServerWaveDelta: (
+    delta: WaveDelta,
+    batchTickSeq?: number,
+    serverTimeMs?: number
+  ) => void;
   applyServerWaveTiming: (
     wave: number,
     active: boolean,
@@ -914,7 +918,11 @@ export const createAuthoritativeSync = (
     }
   };
 
-  const applyServerWaveDelta = (delta: WaveDelta, batchTickSeq?: number) => {
+  const applyServerWaveDelta = (
+    delta: WaveDelta,
+    batchTickSeq?: number,
+    serverTimeMs?: number
+  ) => {
     if (
       batchTickSeq !== undefined &&
       lastSnapshotTickSeq > 0 &&
@@ -928,6 +936,13 @@ export const createAuthoritativeSync = (
       delta.wave.nextWaveAtMs > 0 ? delta.wave.nextWaveAtMs : 0;
     if (delta.lives !== undefined) {
       ctx.gameState.lives = delta.lives;
+    }
+    if (
+      typeof serverTimeMs === 'number' &&
+      delta.wave.nextWaveAtMs > 0
+    ) {
+      countdownServerTimeMs = serverTimeMs;
+      countdownClientDateAtReceive = Date.now();
     }
     syncServerWaveSpawners(delta.wave, delta.routesIncluded ?? true);
   };

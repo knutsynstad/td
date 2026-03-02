@@ -2048,8 +2048,8 @@ const setupAuthoritativeBridge = async () => {
       onStructureDelta: (delta, { batchTickSeq }) => {
         authoritativeSync.applyServerStructureDelta(delta, batchTickSeq);
       },
-      onWaveDelta: (delta, { batchTickSeq }) => {
-        authoritativeSync.applyServerWaveDelta(delta, batchTickSeq);
+      onWaveDelta: (delta, { batchTickSeq, serverTimeMs }) => {
+        authoritativeSync.applyServerWaveDelta(delta, batchTickSeq, serverTimeMs);
       },
       onCoinBalance: (coins) => {
         gameState.coins = Math.max(0, Math.min(COINS_CAP, coins));

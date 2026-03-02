@@ -19,7 +19,10 @@ import { isRecord } from '../../shared/utils';
 
 type SnapshotOptions = { skipMobReplacement?: boolean };
 
-type DeltaBatchContext = { batchTickSeq: number };
+type DeltaBatchContext = {
+  batchTickSeq: number;
+  serverTimeMs?: number;
+};
 
 type PresenceCallbacks = {
   onSnapshot: (snapshot: WorldState, options?: SnapshotOptions) => void;
@@ -293,26 +296,45 @@ export const connectAuthoritativeBridge = async (
       }
       const batch = payload;
       pushToDeltaBuffer(batch);
-      for (const event of batch.events) {
+      const entityDelta = batch.events.find(
+        (e): e is EntityDelta =>
+          (e as { type?: string })?.type === 'entityDelta'
+      );
+      const serverTimeMsFromBatch =
+        entityDelta && typeof entityDelta.serverTimeMs === 'number'
+          ? entityDelta.serverTimeMs
+          : undefined;
+      const batchContext: DeltaBatchContext = {
+        batchTickSeq: batch.tickSeq,
+        serverTimeMs: serverTimeMsFromBatch,
+      };
+      const processEvent = (event: unknown) => {
+        if (!event || typeof event !== 'object') return;
         if (
-          event &&
-          typeof event === 'object' &&
           (event as { type?: string }).type === 'structureDelta' &&
           batch.tickSeq <= snapshotTickSeq
         ) {
-          continue;
+          return;
         }
         try {
-          applyDelta(event, callbacks, { batchTickSeq: batch.tickSeq }, joinResponse.playerId);
+          applyDelta(event as GameDelta, callbacks, batchContext, joinResponse.playerId);
         } catch (err) {
           console.error('[MobDelta] Error applying delta', {
             deltaType:
-              event && typeof event === 'object'
-                ? (event as { type?: string }).type
-                : 'unknown',
+              (event as { type?: string }).type ?? 'unknown',
             error: err instanceof Error ? err.message : String(err),
             stack: err instanceof Error ? err.stack : undefined,
           });
+        }
+      };
+      for (const event of batch.events) {
+        if ((event as { type?: string; reason?: string })?.type === 'resyncRequired') {
+          processEvent(event);
+        }
+      }
+      for (const event of batch.events) {
+        if ((event as { type?: string })?.type !== 'resyncRequired') {
+          processEvent(event);
         }
       }
     },

@@ -2,11 +2,7 @@ import type { GameWorld, MobState, WorldMeta } from '../../shared/game-state';
 import { MOB_DEFS, DEFAULT_MOB_TYPE } from '../../shared/content/mobs';
 import { getWaveMobCount, getWaveSpawnRate } from '../../shared/content/waves';
 import { weightedSplit } from '../../shared/utils';
-import {
-  MAX_MOBS,
-  AUTO_WAVE_INITIAL_DELAY_MS,
-  AUTO_WAVE_INTERMISSION_MS,
-} from '../config';
+import { MAX_MOBS, WAVE_PREPARE_MS } from '../config';
 import {
   toSideDef,
   getSpawnerSpawnPoint,
@@ -87,7 +83,7 @@ export const ensureInitialWaveSchedule = (world: GameWorld): boolean => {
   if (world.wave.spawners.length === 0) {
     prepareUpcomingWave(world);
   }
-  world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INITIAL_DELAY_MS;
+  world.wave.nextWaveAtMs = world.meta.lastTickMs + WAVE_PREPARE_MS;
   return true;
 };
 
@@ -143,7 +139,7 @@ export const updateWave = (
   if (allSpawned && aliveMobs === 0) {
     world.wave.active = false;
     prepareUpcomingWave(world);
-    world.wave.nextWaveAtMs = world.meta.lastTickMs + AUTO_WAVE_INTERMISSION_MS;
+    world.wave.nextWaveAtMs = world.meta.lastTickMs + WAVE_PREPARE_MS;
     changed = true;
   }
   return { changed, spawned };
