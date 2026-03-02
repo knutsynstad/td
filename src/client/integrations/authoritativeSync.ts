@@ -934,8 +934,17 @@ export const createAuthoritativeSync = (
       typeof serverTimeMs === 'number' &&
       delta.wave.nextWaveAtMs > 0
     ) {
-      countdownServerTimeMs = serverTimeMs;
-      countdownClientDateAtReceive = Date.now();
+      const newRemaining = delta.wave.nextWaveAtMs - serverTimeMs;
+      const shouldUpdate =
+        countdownClientDateAtReceive === 0 ||
+        newRemaining <=
+          delta.wave.nextWaveAtMs -
+            (countdownServerTimeMs +
+              (Date.now() - countdownClientDateAtReceive));
+      if (shouldUpdate) {
+        countdownServerTimeMs = serverTimeMs;
+        countdownClientDateAtReceive = Date.now();
+      }
     }
     syncServerWaveSpawners(delta.wave);
   };
@@ -950,8 +959,17 @@ export const createAuthoritativeSync = (
     ctx.serverWaveActiveRef.current = active;
     ctx.gameState.nextWaveAtMs = nextWaveAtMs > 0 ? nextWaveAtMs : 0;
     if (typeof serverTimeMs === 'number') {
-      countdownServerTimeMs = serverTimeMs;
-      countdownClientDateAtReceive = Date.now();
+      const newRemaining = nextWaveAtMs - serverTimeMs;
+      const shouldUpdate =
+        countdownClientDateAtReceive === 0 ||
+        newRemaining <=
+          nextWaveAtMs -
+            (countdownServerTimeMs +
+              (Date.now() - countdownClientDateAtReceive));
+      if (shouldUpdate) {
+        countdownServerTimeMs = serverTimeMs;
+        countdownClientDateAtReceive = Date.now();
+      }
     }
   };
 

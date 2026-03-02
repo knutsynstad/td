@@ -54,7 +54,7 @@ export const updateHud = (
     showNextWave && state.nextWaveAtMs > 0
       ? state.getCountdownMsRemaining(state.nextWaveAtMs) / 1000
       : 0;
-  const nextWaveIn = Math.min(60, Math.ceil(rawSeconds));
+  const nextWaveIn = Math.min(60, Math.floor(rawSeconds));
   elements.waveEl.textContent = String(
     showNextWave ? state.wave + 1 : state.wave
   );
