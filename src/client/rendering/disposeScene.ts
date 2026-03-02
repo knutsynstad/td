@@ -45,7 +45,7 @@ export type DisposeSceneContext = {
   groundMaterial: THREE.Material;
   waterMesh: THREE.Mesh;
   waterMaterial: THREE.Material;
-  waterDistanceField: { texture: THREE.Texture };
+  waterDistanceFieldRef: { current: { texture: THREE.Texture } };
   groundTileLayer: InstancedModelLayer;
   castle: THREE.Object3D;
   coinHudRoot: THREE.Group;
@@ -125,7 +125,7 @@ export const createDisposeScene = (ctx: DisposeSceneContext): (() => void) => {
     ctx.scene.remove(ctx.waterMesh);
     ctx.waterMesh.geometry.dispose();
     ctx.waterMaterial.dispose();
-    ctx.waterDistanceField.texture.dispose();
+    ctx.waterDistanceFieldRef.current.texture.dispose();
     ctx.groundTileLayer.dispose();
     ctx.scene.remove(ctx.castle);
     ctx.castle.traverse((node) => {
