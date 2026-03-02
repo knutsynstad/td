@@ -115,7 +115,6 @@ export type StructureDelta = {
 export type WaveDelta = {
   type: 'waveDelta';
   wave: WaveState;
-  routesIncluded: boolean;
   lives?: number;
 };
 

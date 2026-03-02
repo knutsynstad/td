@@ -10,7 +10,6 @@ import type { LanePathResult } from '../world/pathfinding/laneAStar';
 
 type SyncAuthoritativeWaveSpawnersOptions = {
   wave: WaveState;
-  routesIncluded: boolean;
   worldBounds: number;
   castleRouteHalfWidthCells: number;
   staticColliders: StaticCollider[];
@@ -63,7 +62,6 @@ export const syncAuthoritativeWaveSpawners = (
 ) => {
   const {
     wave,
-    routesIncluded,
     worldBounds,
     castleRouteHalfWidthCells,
     staticColliders,
@@ -133,7 +131,7 @@ export const syncAuthoritativeWaveSpawners = (
     spawner.spawnRatePerSecond = entry.spawnRatePerSecond;
     spawner.spawnAccumulator = entry.spawnAccumulator;
 
-    const hasRouteData = routesIncluded && entry.route.length > 0;
+    const hasRouteData = entry.route.length > 0;
     if (hasRouteData || topologyChanged) {
       const routePoints = entry.route.map(
         (point) => new THREE.Vector3(point.x, 0, point.z)

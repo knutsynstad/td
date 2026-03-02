@@ -145,10 +145,7 @@ export type AuthoritativeSync = {
     position: { x: number; z: number }
   ) => void;
   removeRemoteNpc: (playerId: string) => void;
-  syncServerWaveSpawners: (
-    wave: SharedWaveState,
-    routesIncluded?: boolean
-  ) => void;
+  syncServerWaveSpawners: (wave: SharedWaveState) => void;
   syncServerMeta: (
     wave: SharedWaveState,
     world: SharedWorldState['meta']
@@ -285,14 +282,10 @@ export const createAuthoritativeSync = (
     ctx.remotePlayersById.delete(playerId);
   };
 
-  const syncServerWaveSpawners = (
-    wave: SharedWaveState,
-    routesIncluded = true
-  ) => {
+  const syncServerWaveSpawners = (wave: SharedWaveState) => {
     const { spawnerHelpers } = ctx;
     syncAuthoritativeWaveSpawners({
       wave,
-      routesIncluded,
       worldBounds: ctx.WORLD_BOUNDS,
       castleRouteHalfWidthCells: ctx.CASTLE_ROUTE_HALF_WIDTH_CELLS,
       staticColliders: ctx.staticColliders,
@@ -944,7 +937,7 @@ export const createAuthoritativeSync = (
       countdownServerTimeMs = serverTimeMs;
       countdownClientDateAtReceive = Date.now();
     }
-    syncServerWaveSpawners(delta.wave, delta.routesIncluded ?? true);
+    syncServerWaveSpawners(delta.wave);
   };
 
   const applyServerWaveTiming = (

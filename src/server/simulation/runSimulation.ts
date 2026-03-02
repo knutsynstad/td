@@ -60,7 +60,6 @@ export const runSimulation = (
   };
   const deltas: GameDelta[] = [];
   let waveChanged = ensureInitialWaveSchedule(world);
-  let routesChanged = waveChanged;
   const commandChanges = applyCommands(world, commands, nowMs);
   const structureUpserts = commandChanges.structureUpserts.slice();
   const structureRemoves = commandChanges.structureRemoves.slice();
@@ -68,7 +67,6 @@ export const runSimulation = (
   if (world.wave.spawners.some((spawner) => spawner.route.length === 0)) {
     recomputeSpawnerRoutes(world);
     waveChanged = true;
-    routesChanged = true;
   }
   const autoRemovedStructureIds = autoUnblockFullyBlockedPaths(world);
   if (autoRemovedStructureIds.length > 0) {
@@ -77,7 +75,6 @@ export const runSimulation = (
         structureRemoves.push(removedId);
     }
     waveChanged = true;
-    routesChanged = true;
   }
   if (structureUpserts.length > 0 || structureRemoves.length > 0) {
     world.meta.lastStructureChangeTickSeq = world.meta.tickSeq;
@@ -94,7 +91,6 @@ export const runSimulation = (
   if (structureUpserts.length > 0 || structureRemoves.length > 0) {
     recomputeSpawnerRoutes(world);
     waveChanged = true;
-    routesChanged = true;
     world.meta.worldVersion += 1;
     const structureDelta: StructureDelta = {
       type: 'structureDelta',
@@ -129,7 +125,6 @@ export const runSimulation = (
       latestWaveDelta = {
         type: 'waveDelta',
         wave: world.wave,
-        routesIncluded: routesChanged,
       };
     }
   }
@@ -142,14 +137,12 @@ export const runSimulation = (
     latestWaveDelta = {
       type: 'waveDelta',
       wave: world.wave,
-      routesIncluded: routesChanged,
     };
   }
   if (!latestWaveDelta && !world.wave.active && world.wave.nextWaveAtMs > 0) {
     latestWaveDelta = {
       type: 'waveDelta',
       wave: world.wave,
-      routesIncluded: routesChanged,
     };
   }
 
@@ -204,18 +197,6 @@ export const runSimulation = (
     }
   }
   if (latestWaveDelta) {
-    if (!latestWaveDelta.routesIncluded) {
-      latestWaveDelta = {
-        ...latestWaveDelta,
-        wave: {
-          ...latestWaveDelta.wave,
-          spawners: latestWaveDelta.wave.spawners.map((s) => ({
-            ...s,
-            route: [],
-          })),
-        },
-      };
-    }
     if (totalCastleCaptures > 0) {
       latestWaveDelta = { ...latestWaveDelta, lives: world.meta.lives };
     }

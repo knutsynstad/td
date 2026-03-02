@@ -52,10 +52,9 @@ devvitTest(
     }
 
     const waveDelta = allEvents.find((e) => e.type === 'waveDelta') as
-      | { type: 'waveDelta'; wave: unknown; routesIncluded: boolean }
+      | { type: 'waveDelta'; wave: unknown }
       | undefined;
     expect(waveDelta).toBeDefined();
     expect(waveDelta?.wave).toBeDefined();
-    expect(typeof waveDelta?.routesIncluded).toBe('boolean');
   }
 );

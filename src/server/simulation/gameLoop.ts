@@ -103,7 +103,6 @@ async function onGameTick(
     const waveDelta: GameDelta = {
       type: 'waveDelta',
       wave: world.wave,
-      routesIncluded: true,
     };
     await broadcast(world.meta.worldVersion, world.meta.tickSeq, [waveDelta]);
     return {
