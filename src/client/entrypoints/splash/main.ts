@@ -245,6 +245,10 @@ window.addEventListener('resize', onResize);
 // Animation loop
 const animate = () => {
   requestAnimationFrame(animate);
+  const treeSway = Math.sin(performance.now() * 0.001) * 0.025;
+  treesGroup.children.forEach((tree) => {
+    tree.rotation.z = treeSway;
+  });
   renderer.render(scene, camera);
 };
 animate();

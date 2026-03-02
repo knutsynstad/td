@@ -3963,6 +3963,15 @@ const tick = (now: number, delta: number) => {
   waterMesh.position.y = WATER_LEVEL - 0.01 + bobOffset;
   waterMaterial.uniforms.uTime.value = waterTime;
 
+  const treeSway = Math.sin(waterTime * 1.0) * 0.025;
+  for (const [collider, state] of structureStore.structureStates.entries()) {
+    if (collider.type !== 'tree') continue;
+    const visual = state.mesh.userData.linkedVisual as THREE.Object3D | undefined;
+    if (visual) {
+      visual.rotation.z = treeSway;
+    }
+  }
+
   updateMinimapEmbellishAlpha(delta);
   if (
     Math.abs(minimapEmbellishTargetAlpha - minimapEmbellishAlphaRef.current) >
