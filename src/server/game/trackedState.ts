@@ -128,16 +128,20 @@ export async function flushGameWorld(world: GameWorld): Promise<void> {
     world.structures as TrackedMap<StructureState>
   );
 
-  const playerTtlSeconds = Math.ceil(PLAYER_TIMEOUT_MS / 1000);
   const playersMap = world.players as TrackedMap<PlayerState>;
-  const exp = new Date(Date.now() + playerTtlSeconds * 1000);
+  const now = Date.now();
   for (const [playerId, player] of world.players) {
-    ops.push(
-      redis.set(KEYS.playerPresence(playerId), JSON.stringify(player), {
-        expiration: exp,
-      })
-    );
-    ops.push(redis.hSet(KEYS.PLAYER_IDS, { [playerId]: '1' }));
+    const expireAt = player.lastSeenMs + PLAYER_TIMEOUT_MS;
+    if (expireAt <= now) {
+      ops.push(redis.del(KEYS.playerPresence(playerId)));
+    } else {
+      ops.push(
+        redis.set(KEYS.playerPresence(playerId), JSON.stringify(player), {
+          expiration: new Date(expireAt),
+        })
+      );
+      ops.push(redis.hSet(KEYS.PLAYER_IDS, { [playerId]: '1' }));
+    }
   }
   for (const playerId of playersMap.removed) {
     ops.push(redis.del(KEYS.playerPresence(playerId)));
