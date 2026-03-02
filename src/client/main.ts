@@ -2073,11 +2073,7 @@ const setupAuthoritativeBridge = async () => {
         worldStateSync.applyServerStructureDelta(delta, batchTickSeq);
       },
       onWaveDelta: (delta, { batchTickSeq, serverTimeMs }) => {
-        worldStateSync.applyServerWaveDelta(
-          delta,
-          batchTickSeq,
-          serverTimeMs
-        );
+        worldStateSync.applyServerWaveDelta(delta, batchTickSeq, serverTimeMs);
       },
       onCoinBalance: (coins) => {
         gameState.coins = Math.max(0, Math.min(COINS_CAP, coins));
@@ -2627,9 +2623,7 @@ const {
     pendingDamageHits.push({ mobId, damage, source, playerId });
   },
   getPlayerId: () =>
-    gameSessionRef.current?.playerId ??
-    selfPlayerIdRef.current ??
-    '',
+    gameSessionRef.current?.playerId ?? selfPlayerIdRef.current ?? '',
   towerHeight: TOWER_HEIGHT,
   mobWidth: MOB_WIDTH,
   playerShootRange: PLAYER_SHOOT_RANGE,
@@ -3966,7 +3960,9 @@ const tick = (now: number, delta: number) => {
   const treeSway = Math.sin(waterTime * 1.0) * 0.025;
   for (const [collider, state] of structureStore.structureStates.entries()) {
     if (collider.type !== 'tree') continue;
-    const visual = state.mesh.userData.linkedVisual as THREE.Object3D | undefined;
+    const visual = state.mesh.userData.linkedVisual as
+      | THREE.Object3D
+      | undefined;
     if (visual) {
       visual.rotation.z = treeSway;
     }

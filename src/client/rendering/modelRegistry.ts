@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const enableShadows = (obj: THREE.Object3D) => {
   obj.traverse((child) => {
@@ -55,34 +54,3 @@ export const preparePlayerModel = (source: THREE.Object3D): THREE.Object3D => {
   enableShadows(model);
   return model;
 };
-
-export const disposeMesh = (obj: THREE.Object3D) => {
-  if (obj instanceof THREE.Mesh && obj.geometry && obj.material) {
-    obj.geometry.dispose();
-    const mat = obj.material;
-    if (Array.isArray(mat)) for (const m of mat) m.dispose();
-    else mat.dispose();
-  }
-};
-
-export const loadModel = (
-  loader: GLTFLoader,
-  url: string,
-  preparer: (source: THREE.Object3D) => THREE.Object3D = prepareStaticModel
-): Promise<THREE.Object3D> =>
-  new Promise((resolve, reject) => {
-    loader.load(
-      url,
-      (gltf) => resolve(preparer(gltf.scene)),
-      undefined,
-      reject
-    );
-  });
-
-export const loadModelRaw = (
-  loader: GLTFLoader,
-  url: string
-): Promise<THREE.Object3D> =>
-  new Promise((resolve, reject) => {
-    loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
-  });

@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 import { deltaProfiler } from '../../utils/deltaProfiler';
 import type { EntityDelta } from '../../../shared/game-protocol';
-import type {
-  MobState as SharedMobState,
-} from '../../../shared/game-state';
+import type { MobState as SharedMobState } from '../../../shared/game-state';
 import type { MobEntity } from '../../domains/gameplay/types/entities';
 
 const DQ = 1 / 100;
@@ -51,7 +49,10 @@ type MobSyncContext = {
 
 export const createMobSync = (
   ctx: MobSyncContext,
-  clockSkew: { sync: (serverEpochMs: number) => void; toPerfTime: (serverEpochMs: number) => number }
+  clockSkew: {
+    sync: (serverEpochMs: number) => void;
+    toPerfTime: (serverEpochMs: number) => number;
+  }
 ) => {
   const { toPerfTime } = clockSkew;
   const serverMobSeenIdsScratch = new Set<string>();

@@ -1,8 +1,6 @@
 import * as THREE from 'three';
 import type { StructureDelta } from '../../../shared/game-protocol';
-import type {
-  StructureState as SharedStructureState,
-} from '../../../shared/game-state';
+import type { StructureState as SharedStructureState } from '../../../shared/game-state';
 import type {
   DestructibleCollider,
   StaticCollider,

@@ -7,7 +7,7 @@ import {
   FULL_MOB_SNAPSHOT_CHUNK_SIZE,
   SIM_TICK_MS,
 } from '../config';
-import { runSimulation } from './index';
+import { runSimulation } from './runSimulation';
 
 function world(nowMs: number): GameWorld {
   return {

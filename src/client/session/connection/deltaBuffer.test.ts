@@ -5,7 +5,12 @@ import type { DeltaBatch } from '../../../shared/game-protocol';
 const mkBatch = (tickSeq: number): DeltaBatch => ({
   tickSeq,
   worldVersion: 1,
-  events: [{ type: 'waveDelta', wave: { wave: 1, active: false, nextWaveAtMs: 0, spawners: [] } }],
+  events: [
+    {
+      type: 'waveDelta',
+      wave: { wave: 1, active: false, nextWaveAtMs: 0, spawners: [] },
+    },
+  ],
 });
 
 describe('createDeltaBuffer', () => {

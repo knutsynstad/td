@@ -131,8 +131,7 @@ export const createWaveAndMetaSync = (ctx: WaveAndMetaSyncContext) => {
       countdownClientDateAtReceive === 0 ||
       newRemaining <=
         nextWaveAtMs -
-          (countdownServerTimeMs +
-            (Date.now() - countdownClientDateAtReceive));
+          (countdownServerTimeMs + (Date.now() - countdownClientDateAtReceive));
     if (shouldUpdate) {
       countdownServerTimeMs = serverTimeMs;
       countdownClientDateAtReceive = Date.now();

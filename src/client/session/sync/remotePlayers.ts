@@ -5,17 +5,11 @@ type RemotePlayersContext = {
   scene: THREE.Scene;
   npcs: NpcEntity[];
   remotePlayersById: Map<string, NpcEntity>;
-  makeNpc: (
-    pos: THREE.Vector3,
-    color: number,
-    username: string
-  ) => NpcEntity;
+  makeNpc: (pos: THREE.Vector3, color: number, username: string) => NpcEntity;
   selfPlayerIdRef: { current: string | null };
 };
 
-export const createRemotePlayers = (
-  ctx: RemotePlayersContext
-) => {
+export const createRemotePlayers = (ctx: RemotePlayersContext) => {
   const upsertRemoteNpc = (
     playerId: string,
     username: string,

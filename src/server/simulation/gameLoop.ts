@@ -17,7 +17,8 @@ import {
 import { KEYS } from '../core/keys';
 import { broadcast, CHANNELS } from '../core/broadcast';
 import { runTickLoop, type TickContext } from '../core/tickLoop';
-import { buildPresenceLeaveDelta, runSimulation } from './index';
+import { buildPresenceLeaveDelta } from './deltas';
+import { runSimulation } from './runSimulation';
 import { resetLastBroadcastMobs } from './deltas';
 import { ensureInitialWaveSchedule } from './waves';
 import { ensureStaticMap } from '../game/staticMap';

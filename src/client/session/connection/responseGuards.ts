@@ -72,14 +72,10 @@ export const isStructuresSyncResponse = (
   isRecord(value.structures) &&
   typeof value.structureChangeSeq === 'number';
 
-export const isMetaSyncResponse = (
-  value: unknown
-): value is MetaSyncResponse =>
+export const isMetaSyncResponse = (value: unknown): value is MetaSyncResponse =>
   isRecord(value) && value.type === 'meta' && isRecord(value.meta);
 
-export const isCommandResponse = (
-  value: unknown
-): value is CommandResponse =>
+export const isCommandResponse = (value: unknown): value is CommandResponse =>
   isRecord(value) &&
   value.type === 'commandAck' &&
   typeof value.accepted === 'boolean' &&

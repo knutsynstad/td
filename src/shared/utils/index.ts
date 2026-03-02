@@ -12,6 +12,6 @@ export {
 } from './math';
 export { hashString01 } from './hash';
 export { snapToGrid } from './grid';
-export { percentile, weightedSplit } from './numeric';
+export { weightedSplit } from './numeric';
 export { parsePositiveInt, safeParseJson } from './parse';
 export { isRecord } from './typeGuards';

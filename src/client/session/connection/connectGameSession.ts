@@ -41,14 +41,8 @@ export type PresenceCallbacks = {
   onRemoteLeave: (playerId: string) => void;
   onPlayerMove: (playerId: string, username: string, next: Vec2) => void;
   onSelfPositionFromServer?: (position: Vec2) => void;
-  onMobDelta: (
-    delta: EntityDelta,
-    context: DeltaBatchContext
-  ) => void;
-  onStructureDelta: (
-    delta: StructureDelta,
-    context: DeltaBatchContext
-  ) => void;
+  onMobDelta: (delta: EntityDelta, context: DeltaBatchContext) => void;
+  onStructureDelta: (delta: StructureDelta, context: DeltaBatchContext) => void;
   onWaveDelta: (delta: WaveDelta, context: DeltaBatchContext) => void;
   onCoinBalance: (coins: number) => void;
   onResyncRequired: (reason: string) => void;

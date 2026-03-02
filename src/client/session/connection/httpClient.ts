@@ -1,6 +1,9 @@
 import { isRecord } from '../../../shared/utils';
 
-export const postJson = async (url: string, body: unknown): Promise<unknown> => {
+export const postJson = async (
+  url: string,
+  body: unknown
+): Promise<unknown> => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {

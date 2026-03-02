@@ -43,17 +43,17 @@ describe('responseGuards', () => {
 
   describe('isDeltaBatch', () => {
     it('returns true for valid batch', () => {
-      expect(
-        isDeltaBatch({ tickSeq: 1, worldVersion: 1, events: [] })
-      ).toBe(true);
+      expect(isDeltaBatch({ tickSeq: 1, worldVersion: 1, events: [] })).toBe(
+        true
+      );
     });
     it('returns false for missing events', () => {
       expect(isDeltaBatch({ tickSeq: 1, worldVersion: 1 })).toBe(false);
     });
     it('returns false for non-array events', () => {
-      expect(
-        isDeltaBatch({ tickSeq: 1, worldVersion: 1, events: {} })
-      ).toBe(false);
+      expect(isDeltaBatch({ tickSeq: 1, worldVersion: 1, events: {} })).toBe(
+        false
+      );
     });
   });
 
