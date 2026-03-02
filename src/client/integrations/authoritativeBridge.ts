@@ -2,10 +2,11 @@ import { connectRealtime } from '@devvit/web/client';
 import type {
   CommandRequest,
   CommandResponse,
-  CoinBalanceResponse,
+  DealDamageHit,
   DeltaBatch,
   EntityDelta,
   GameDelta,
+  CoinBalanceResponse,
   HeartbeatResponse,
   JoinResponse,
   MetaSyncResponse,
@@ -66,6 +67,13 @@ type AuthoritativeBridge = {
     }>
   ) => Promise<CommandResponse>;
   sendRemoveStructure: (structureId: string) => Promise<CommandResponse>;
+  sendDealDamage: (
+    mobId: string,
+    damage: number,
+    source: 'player' | 'tower',
+    playerId: string
+  ) => Promise<CommandResponse>;
+  sendDealDamages: (hits: DealDamageHit[]) => Promise<CommandResponse>;
   resync: () => Promise<void>;
   fetchStructures: () => Promise<StructuresSyncResponse>;
   fetchMeta: () => Promise<MetaSyncResponse>;
@@ -496,6 +504,29 @@ export const connectAuthoritativeBridge = async (
         type: 'removeStructure',
         playerId: joinResponse.playerId,
         structureId,
+      });
+    },
+    sendDealDamage: async (mobId, damage, source, playerId) => {
+      return sendCommand({
+        type: 'dealDamage',
+        playerId,
+        mobId,
+        damage,
+        source,
+      });
+    },
+    sendDealDamages: async (hits) => {
+      if (hits.length === 0) {
+        return {
+          type: 'commandAck',
+          accepted: true,
+          tickSeq: 0,
+          worldVersion: 0,
+        };
+      }
+      return sendCommand({
+        type: 'dealDamages',
+        hits,
       });
     },
     resync,

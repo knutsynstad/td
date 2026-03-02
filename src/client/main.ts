@@ -219,6 +219,7 @@ import {
   requestCastleCoinsDeposit,
   requestCastleCoinsWithdraw,
 } from './integrations/castleApi';
+import type { DealDamageHit } from '../shared/game-protocol';
 import { DEFAULT_PLAYER_SPAWN } from '../shared/game-state';
 import {
   assertCoinsInBounds,
@@ -1902,6 +1903,7 @@ const resyncInProgressRef = { current: false };
 let lastResyncAttemptedAt = 0;
 const RESYNC_COOLDOWN_MS = 15_000;
 const isServerAuthoritative = () => authoritativeBridgeRef.current !== null;
+const pendingDamageHits: DealDamageHit[] = [];
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
 const SERVER_MOB_EXTRAPOLATION_GAP_MAX_MS = 8_000;
@@ -2599,6 +2601,13 @@ const {
   spawnFloatingDamageText,
   setMobLastHitDirection: (mob, step, velocity) =>
     setMobLastHitDirection(mob, step, velocity),
+  sendDealDamage: (mobId, damage, source, playerId) => {
+    pendingDamageHits.push({ mobId, damage, source, playerId });
+  },
+  getPlayerId: () =>
+    authoritativeBridgeRef.current?.playerId ??
+    authoritativeSelfPlayerIdRef.current ??
+    '',
   towerHeight: TOWER_HEIGHT,
   mobWidth: MOB_WIDTH,
   playerShootRange: PLAYER_SHOOT_RANGE,
@@ -4169,6 +4178,10 @@ const tick = (now: number, delta: number) => {
   }
   updateTowerArrowProjectiles(delta);
   updatePlayerArrowProjectiles(delta);
+  if (pendingDamageHits.length > 0 && authoritativeBridgeRef.current) {
+    const hits = pendingDamageHits.splice(0, pendingDamageHits.length);
+    void authoritativeBridgeRef.current.sendDealDamages(hits);
+  }
 
   // Only check collisions between entities in nearby cells
   const processed = new Set<Entity>();

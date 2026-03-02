@@ -40,6 +40,13 @@ export type ArrowProjectileSystemContext = {
     step: THREE.Vector3,
     velocity: THREE.Vector3
   ) => void;
+  sendDealDamage?: (
+    mobId: string,
+    damage: number,
+    source: 'player' | 'tower',
+    playerId: string
+  ) => void;
+  getPlayerId?: () => string;
   towerHeight: number;
   mobWidth: number;
   playerShootRange: number;
@@ -332,6 +339,24 @@ export const createArrowProjectileSystem = (
       ctx.setMobLastHitDirection(hitMob, stepScratch, projectile.velocity);
       if (serverAuthoritative) {
         ctx.markMobHitFlash(hitMob);
+        const attack = rollAttackDamage(projectile.damage);
+        hitMob.lastHitBy =
+          'sourceTower' in projectile ? 'tower' : 'player';
+        ctx.spawnFloatingDamageText(
+          hitMob,
+          attack.damage,
+          hitMob.lastHitBy,
+          attack.isCrit
+        );
+        const mobId = hitMob.mobId;
+        if (mobId && ctx.sendDealDamage) {
+          const source = 'sourceTower' in projectile ? 'tower' : 'player';
+          const playerId =
+            source === 'tower' && 'sourceTower' in projectile
+              ? (projectile as ArrowProjectile).sourceTower.builtBy
+              : ctx.getPlayerId?.() ?? '';
+          if (playerId) ctx.sendDealDamage(mobId, attack.damage, source, playerId);
+        }
         ctx.scene.remove(projectile.mesh);
         projectiles.splice(i, 1);
         continue;

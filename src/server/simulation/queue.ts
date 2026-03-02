@@ -68,6 +68,13 @@ export async function popPendingCommands(
       const envelope = parseCommandEnvelope(parsed);
       if (envelope) {
         envelopes.push(envelope);
+      } else {
+        const cmd = (parsed as { command?: { type?: string } })?.command;
+        if (cmd && typeof cmd === 'object') {
+          console.warn(
+            `[Queue] dropped unparseable command type=${cmd.type ?? 'unknown'}`
+          );
+        }
       }
       membersToRemove.push(item.member);
     }

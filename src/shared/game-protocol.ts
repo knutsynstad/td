@@ -52,12 +52,34 @@ export type StartWaveCommand = {
   playerId: string;
 };
 
+export type DealDamageCommand = {
+  type: 'dealDamage';
+  playerId: string;
+  mobId: string;
+  damage: number;
+  source: 'player' | 'tower';
+};
+
+export type DealDamageHit = {
+  mobId: string;
+  damage: number;
+  source: 'player' | 'tower';
+  playerId: string;
+};
+
+export type DealDamagesCommand = {
+  type: 'dealDamages';
+  hits: DealDamageHit[];
+};
+
 export type GameCommand =
   | MoveIntentCommand
   | BuildStructureCommand
   | BuildStructuresCommand
   | RemoveStructureCommand
-  | StartWaveCommand;
+  | StartWaveCommand
+  | DealDamageCommand
+  | DealDamagesCommand;
 
 export type CommandEnvelope = {
   seq: number;

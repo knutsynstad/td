@@ -369,5 +369,37 @@ export function parseCommandEnvelope(
       },
     };
   }
+  if (commandType === 'dealDamage') {
+    return {
+      seq,
+      sentAtMs,
+      command: {
+        type: 'dealDamage',
+        playerId,
+        mobId: String(value.command.mobId ?? ''),
+        damage: Math.max(0, Number(value.command.damage ?? 0)),
+        source: value.command.source === 'tower' ? 'tower' : 'player',
+      },
+    };
+  }
+  if (commandType === 'dealDamages') {
+    const rawHits = Array.isArray(value.command.hits)
+      ? value.command.hits
+      : [];
+    const hits = rawHits
+      .filter(isRecord)
+      .map((hit) => ({
+        mobId: String(hit.mobId ?? ''),
+        damage: Math.max(0, Number(hit.damage ?? 0)),
+        source: hit.source === 'tower' ? ('tower' as const) : ('player' as const),
+        playerId: String(hit.playerId ?? ''),
+      }))
+      .filter((h) => h.mobId.length > 0 && h.damage > 0);
+    return {
+      seq,
+      sentAtMs,
+      command: { type: 'dealDamages', hits },
+    };
+  }
   return undefined;
 }

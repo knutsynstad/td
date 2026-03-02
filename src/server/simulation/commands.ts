@@ -101,6 +101,29 @@ export const applyCommands = (
       waveChanged = activateWave(world) || waveChanged;
       continue;
     }
+    if (command.type === 'dealDamage') {
+      const mob = world.mobs.get(command.mobId);
+      if (mob && command.damage > 0) {
+        mob.hp = Math.max(0, mob.hp - command.damage);
+      }
+      continue;
+    }
+    if (command.type === 'dealDamages') {
+      let applied = 0;
+      for (const hit of command.hits) {
+        const mob = world.mobs.get(hit.mobId);
+        if (mob && hit.damage > 0) {
+          mob.hp = Math.max(0, mob.hp - hit.damage);
+          applied += 1;
+        }
+      }
+      if (command.hits.length > 0) {
+        console.log(
+          `[DealDamage] applied ${applied}/${command.hits.length} hits, mobs=${world.mobs.size}`
+        );
+      }
+      continue;
+    }
   }
 
   return { structureUpserts, structureRemoves, waveChanged, movedPlayers };
