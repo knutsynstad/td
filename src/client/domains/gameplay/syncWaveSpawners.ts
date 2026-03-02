@@ -8,7 +8,7 @@ import type {
 } from './types/entities';
 import type { LanePathResult } from '../world/pathfinding/laneAStar';
 
-type SyncAuthoritativeWaveSpawnersOptions = {
+type SyncWaveSpawnersOptions = {
   wave: WaveState;
   worldBounds: number;
   castleRouteHalfWidthCells: number;
@@ -59,9 +59,7 @@ const getDoorPositionForSpawnerId = (
   return null;
 };
 
-export const syncAuthoritativeWaveSpawners = (
-  options: SyncAuthoritativeWaveSpawnersOptions
-) => {
+export const syncWaveSpawners = (options: SyncWaveSpawnersOptions) => {
   const {
     wave,
     worldBounds,

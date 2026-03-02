@@ -417,7 +417,7 @@ export const createEntityMotionSystem = (context: MotionContext) => {
   };
 
   /**
-   * No-op: all npcs are remote players (authoritative sync). Their targets come
+   * No-op: all npcs are remote players (WorldStateSync). Their targets come
    * from the server; we must not overwrite with random targets.
    */
   const updateNpcTargets = () => {};

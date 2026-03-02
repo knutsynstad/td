@@ -207,19 +207,19 @@ import {
   type BallistaVisualRig,
 } from './rendering/presenters/ballistaRig';
 import { createArrowProjectileSystem } from './rendering/presenters/arrowProjectileSystem';
-import { connectAuthoritativeBridge } from './integrations/authoritativeBridge';
+import { connectGameSession } from './session/connection/connectGameSession';
 import { deltaProfiler } from './utils/deltaProfiler';
 import {
-  createAuthoritativeSync,
-  type AuthoritativeSync,
-} from './integrations/authoritativeSync';
+  createWorldStateSync,
+  type WorldStateSync,
+} from './session/sync/createWorldStateSync';
 import { createHudUpdaters, type CoinTrail } from './ui/hudUpdaters';
 import { createDisposeScene } from './rendering/disposeScene';
 import {
   fetchCastleCoinsBalance,
   requestCastleCoinsDeposit,
   requestCastleCoinsWithdraw,
-} from './integrations/castleApi';
+} from './api/castleCoins';
 import type { DealDamageHit } from '../shared/game-protocol';
 import { DEFAULT_PLAYER_SPAWN } from '../shared/game-state';
 import {
@@ -1885,11 +1885,11 @@ const makeNpc = (pos: THREE.Vector3, _color: number, username: string) => {
   return npc;
 };
 
-const authoritativeBridgeRef: {
-  current: Awaited<ReturnType<typeof connectAuthoritativeBridge>> | null;
+const gameSessionRef: {
+  current: Awaited<ReturnType<typeof connectGameSession>> | null;
 } = { current: null };
-let authoritativeInitialDataReady = false;
-const authoritativeSelfPlayerIdRef = { current: '' as string | null };
+let sessionDataReady = false;
+const selfPlayerIdRef = { current: '' as string | null };
 let lastNetworkHeartbeatAt = 0;
 let lastMoveIntentSentAt = 0;
 const MOVE_INTENT_MIN_INTERVAL_MS = 100;
@@ -1924,7 +1924,7 @@ const serverMetaSyncInFlightRef = { current: false };
 const resyncInProgressRef = { current: false };
 let lastResyncAttemptedAt = 0;
 const RESYNC_COOLDOWN_MS = 15_000;
-const isServerAuthoritative = () => authoritativeBridgeRef.current !== null;
+const isServerAuthoritative = () => gameSessionRef.current !== null;
 const pendingDamageHits: DealDamageHit[] = [];
 const SERVER_MOB_INTERPOLATION_BACKTIME_MS = 150;
 const SERVER_MOB_EXTRAPOLATION_MAX_MS = 900;
@@ -1947,15 +1947,15 @@ let clientCoinAccrualRemainderSec = 0;
 let lastKnownWorldVersion = 0;
 let lastAppliedStructureChangeSeq = 0;
 let lastSnapshotReceivedAtMs = 0;
-let authoritativeSync: AuthoritativeSync;
+let worldStateSync: WorldStateSync;
 
 const setupAuthoritativeBridge = async () => {
-  if (authoritativeBridgeRef.current) {
+  if (gameSessionRef.current) {
     return;
   }
   try {
-    if (!authoritativeSync) {
-      authoritativeSync = createAuthoritativeSync({
+    if (!worldStateSync) {
+      worldStateSync = createWorldStateSync({
         mobs,
         npcs,
         selectedStructures,
@@ -1972,7 +1972,7 @@ const setupAuthoritativeBridge = async () => {
         structureStore,
         scene,
         staticColliders,
-        authoritativeSelfPlayerIdRef,
+        selfPlayerIdRef,
         mobLogicGeometry,
         mobLogicMaterial,
         MOB_HEIGHT,
@@ -2015,21 +2015,21 @@ const setupAuthoritativeBridge = async () => {
         SERVER_MOB_HARD_STALE_REMOVE_MS,
       });
     }
-    authoritativeBridgeRef.current = await connectAuthoritativeBridge({
+    gameSessionRef.current = await connectGameSession({
       onSnapshot: (snapshot, options) => {
         lastSnapshotReceivedAtMs = performance.now();
         nextServerStructureSyncAtMs =
           lastSnapshotReceivedAtMs + SNAPSHOT_STRUCTURE_GRACE_MS;
-        authoritativeSync.syncServerClockSkew(snapshot.meta.lastTickMs);
-        authoritativeSync.applyServerSnapshot(snapshot, options);
+        worldStateSync.syncServerClockSkew(snapshot.meta.lastTickMs);
+        worldStateSync.applyServerSnapshot(snapshot, options);
         lastKnownWorldVersion = snapshot.meta.worldVersion;
         lastAppliedStructureChangeSeq =
           snapshot.meta.lastStructureChangeTickSeq ?? 0;
-        authoritativeInitialDataReady = true;
+        sessionDataReady = true;
         startGameWhenReady?.();
       },
       onSelfReady: (playerId, username, position) => {
-        authoritativeSelfPlayerIdRef.current = playerId;
+        selfPlayerIdRef.current = playerId;
         player.username = username;
         player.mesh.position.set(position.x, player.baseY, position.z);
         player.target.set(position.x, 0, position.z);
@@ -2037,13 +2037,13 @@ const setupAuthoritativeBridge = async () => {
         lastMoveIntentTarget.z = position.z;
       },
       onRemoteJoin: (playerId, username, position) => {
-        authoritativeSync.upsertRemoteNpc(playerId, username, position);
+        worldStateSync.upsertRemoteNpc(playerId, username, position);
       },
       onRemoteLeave: (playerId) => {
-        authoritativeSync.removeRemoteNpc(playerId);
+        worldStateSync.removeRemoteNpc(playerId);
       },
       onPlayerMove: (playerId, username, next) => {
-        authoritativeSync.upsertRemoteNpc(playerId, username, next);
+        worldStateSync.upsertRemoteNpc(playerId, username, next);
       },
       onSelfPositionFromServer: (position) => {
         const dx = position.x - player.mesh.position.x;
@@ -2053,7 +2053,7 @@ const setupAuthoritativeBridge = async () => {
         const nowMs = performance.now();
         if (
           distSq > EMIT_THRESHOLD_SQ &&
-          authoritativeBridgeRef.current &&
+          gameSessionRef.current &&
           nowMs - lastMoveIntentSentAt >= MOVE_INTENT_MIN_INTERVAL_MS
         ) {
           lastMoveIntentSentAt = nowMs;
@@ -2063,17 +2063,17 @@ const setupAuthoritativeBridge = async () => {
           };
           lastMoveIntentTarget.x = pos.x;
           lastMoveIntentTarget.z = pos.z;
-          void authoritativeBridgeRef.current.sendMoveIntent(pos, pos);
+          void gameSessionRef.current.sendMoveIntent(pos, pos);
         }
       },
       onMobDelta: (delta, { batchTickSeq }) => {
-        authoritativeSync.applyServerMobDelta(delta, batchTickSeq);
+        worldStateSync.applyServerMobDelta(delta, batchTickSeq);
       },
       onStructureDelta: (delta, { batchTickSeq }) => {
-        authoritativeSync.applyServerStructureDelta(delta, batchTickSeq);
+        worldStateSync.applyServerStructureDelta(delta, batchTickSeq);
       },
       onWaveDelta: (delta, { batchTickSeq, serverTimeMs }) => {
-        authoritativeSync.applyServerWaveDelta(
+        worldStateSync.applyServerWaveDelta(
           delta,
           batchTickSeq,
           serverTimeMs
@@ -2086,7 +2086,7 @@ const setupAuthoritativeBridge = async () => {
         if (reason === 'castle death' && hudUpdaters.triggerEventBanner) {
           hudUpdaters.triggerEventBanner('Castle fell - Game over!', 4);
         }
-        if (!authoritativeBridgeRef.current) return;
+        if (!gameSessionRef.current) return;
         const now = performance.now();
         const skipCooldown =
           reason === 'castle death' || reason === 'game reset';
@@ -2100,7 +2100,7 @@ const setupAuthoritativeBridge = async () => {
         }
         resyncInProgressRef.current = true;
         lastResyncAttemptedAt = now;
-        const bridge = authoritativeBridgeRef.current;
+        const bridge = gameSessionRef.current;
         const RESYNC_ATTEMPTS = 3;
         const RESYNC_INITIAL_DELAY_MS = skipCooldown ? 0 : 300;
         const attemptResync = (attempt: number) => {
@@ -2109,14 +2109,14 @@ const setupAuthoritativeBridge = async () => {
               ? RESYNC_INITIAL_DELAY_MS
               : RESYNC_INITIAL_DELAY_MS * Math.pow(2, attempt);
           setTimeout(() => {
-            if (!authoritativeBridgeRef.current) {
+            if (!gameSessionRef.current) {
               resyncInProgressRef.current = false;
               return;
             }
             void bridge
               .resync()
               .catch((error) => {
-                console.error('Failed to resync authoritative snapshot', error);
+                console.error('Failed to resync session snapshot', error);
                 if (attempt < RESYNC_ATTEMPTS - 1) {
                   attemptResync(attempt + 1);
                 } else {
@@ -2137,7 +2137,7 @@ const setupAuthoritativeBridge = async () => {
         hudUpdaters.triggerEventBanner(bannerText, 4);
       },
       onHeartbeatWaveState: (wave, active, nextWaveAtMs, serverTimeMs) => {
-        authoritativeSync.applyServerWaveTiming(
+        worldStateSync.applyServerWaveTiming(
           wave,
           active,
           nextWaveAtMs,
@@ -2152,8 +2152,8 @@ const setupAuthoritativeBridge = async () => {
     serverMetaSyncInFlightRef.current = false;
     void syncCastleCoinsFromServer();
   } catch (error) {
-    console.error('Failed to connect authoritative bridge', error);
-    authoritativeInitialDataReady = false;
+    console.error('Failed to connect game session', error);
+    sessionDataReady = false;
   } finally {
     startGameWhenReady?.();
   }
@@ -2438,15 +2438,15 @@ const syncCastleCoinsFromServer = async () => {
 };
 
 const depositToCastle = async (requestedAmount: number) => {
-  const authoritative = isServerAuthoritative();
-  const transfer = authoritative
+  const serverAuthoritative = isServerAuthoritative();
+  const transfer = serverAuthoritative
     ? Math.max(0, Math.floor(requestedAmount))
     : Math.min(
         Math.max(0, Math.floor(requestedAmount)),
         Math.max(0, Math.floor(gameState.coins))
       );
   if (transfer <= 0) return false;
-  if (!authoritative) {
+  if (!serverAuthoritative) {
     const previousBank = gameState.castleCoins;
     const previousEnergy = gameState.coins;
     gameState.castleCoins += transfer;
@@ -2482,7 +2482,7 @@ const depositToCastle = async (requestedAmount: number) => {
   hudUpdaters.updateCastleCoinPilesVisual();
   gameState.coinsPopTimer = 0.2;
   hudUpdaters.spawnCastleCoinTrails(Math.floor(response.deposited), 'toCastle');
-  void authoritativeBridgeRef.current?.heartbeat({
+  void gameSessionRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
@@ -2490,15 +2490,15 @@ const depositToCastle = async (requestedAmount: number) => {
 };
 
 const withdrawFromCastle = async (requestedAmount: number) => {
-  const authoritative = isServerAuthoritative();
+  const serverAuthoritative = isServerAuthoritative();
   const missing = Math.max(0, COINS_CAP - gameState.coins);
   const transfer = Math.min(
     Math.max(0, Math.floor(requestedAmount)),
     Math.max(0, Math.floor(gameState.castleCoins)),
-    authoritative ? Number.POSITIVE_INFINITY : missing
+    serverAuthoritative ? Number.POSITIVE_INFINITY : missing
   );
   if (transfer <= 0) return false;
-  if (!authoritative) {
+  if (!serverAuthoritative) {
     const previousBank = gameState.castleCoins;
     const previousEnergy = gameState.coins;
     gameState.castleCoins = Math.max(0, gameState.castleCoins - transfer);
@@ -2532,7 +2532,7 @@ const withdrawFromCastle = async (requestedAmount: number) => {
   }
   hudUpdaters.updateCastleCoinPilesVisual();
   hudUpdaters.spawnCastleCoinTrails(Math.floor(response.withdrawn), 'toHud');
-  void authoritativeBridgeRef.current?.heartbeat({
+  void gameSessionRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
@@ -2627,8 +2627,8 @@ const {
     pendingDamageHits.push({ mobId, damage, source, playerId });
   },
   getPlayerId: () =>
-    authoritativeBridgeRef.current?.playerId ??
-    authoritativeSelfPlayerIdRef.current ??
+    gameSessionRef.current?.playerId ??
+    selfPlayerIdRef.current ??
     '',
   towerHeight: TOWER_HEIGHT,
   mobWidth: MOB_WIDTH,
@@ -2936,10 +2936,10 @@ const selectionDialog = new SelectionDialog(
       if (colliders.length === 0) return;
       if (colliders.some((collider) => collider.type === 'castleCoins')) return;
       for (const collider of colliders) {
-        if (authoritativeBridgeRef.current) {
+        if (gameSessionRef.current) {
           const structureId = getStructureIdFromCollider(collider);
           if (structureId) {
-            void authoritativeBridgeRef.current
+            void gameSessionRef.current
               .sendRemoveStructure(structureId)
               .then((response) => {
                 if (!response.accepted) {
@@ -3462,8 +3462,8 @@ const canPlace = (
 };
 
 const placeBuilding = (center: THREE.Vector3) => {
-  if (authoritativeBridgeRef.current && gameState.buildMode !== 'off') {
-    void authoritativeBridgeRef.current
+  if (gameSessionRef.current && gameState.buildMode !== 'off') {
+    void gameSessionRef.current
       .sendBuildStructure({
         structureId: `${gameState.buildMode}-${Date.now()}-${Math.round(center.x)}-${Math.round(center.z)}`,
         type: gameState.buildMode === 'tower' ? 'tower' : 'wall',
@@ -3508,7 +3508,7 @@ const getWallLinePlacement = (
 };
 
 const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
-  if (authoritativeBridgeRef.current) {
+  if (gameSessionRef.current) {
     const { validPositions } = getWallLinePlacement(
       start,
       end,
@@ -3516,7 +3516,7 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
     );
     if (validPositions.length === 0) return false;
     const now = Date.now();
-    void authoritativeBridgeRef.current
+    void gameSessionRef.current
       .sendBuildStructures(
         validPositions.map((center, i) => ({
           structureId: `wall-line-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
@@ -3550,9 +3550,9 @@ const placeWallLine = (start: THREE.Vector3, end: THREE.Vector3) => {
 };
 
 const placeWallSegments = (positions: THREE.Vector3[]) => {
-  if (authoritativeBridgeRef.current && positions.length > 0) {
+  if (gameSessionRef.current && positions.length > 0) {
     const now = Date.now();
-    void authoritativeBridgeRef.current
+    void gameSessionRef.current
       .sendBuildStructures(
         positions.map((center, i) => ({
           structureId: `wall-segments-${now}-${i}-${Math.round(center.x)}-${Math.round(center.z)}`,
@@ -3639,7 +3639,7 @@ const setMoveTarget = (pos: THREE.Vector3) => {
     clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS)
   );
   player.target.copy(clamped);
-  if (authoritativeBridgeRef.current) {
+  if (gameSessionRef.current) {
     const nowMs = performance.now();
     const dx = clamped.x - lastMoveIntentTarget.x;
     const dz = clamped.z - lastMoveIntentTarget.z;
@@ -3651,7 +3651,7 @@ const setMoveTarget = (pos: THREE.Vector3) => {
       lastMoveIntentSentAt = nowMs;
       lastMoveIntentTarget.x = clamped.x;
       lastMoveIntentTarget.z = clamped.z;
-      void authoritativeBridgeRef.current.sendMoveIntent(
+      void gameSessionRef.current.sendMoveIntent(
         { x: player.mesh.position.x, z: player.mesh.position.z },
         { x: clamped.x, z: clamped.z }
       );
@@ -4015,21 +4015,21 @@ const tick = (now: number, delta: number) => {
   updateNpcTargets();
   updateEntityMotion(player, delta);
   if (
-    authoritativeBridgeRef.current &&
+    gameSessionRef.current &&
     now - lastNetworkHeartbeatAt >= SERVER_HEARTBEAT_INTERVAL_MS
   ) {
     lastNetworkHeartbeatAt = now;
-    void authoritativeBridgeRef.current.heartbeat({
+    void gameSessionRef.current.heartbeat({
       x: player.mesh.position.x,
       z: player.mesh.position.z,
     });
   }
   if (
-    authoritativeBridgeRef.current &&
+    gameSessionRef.current &&
     !serverMetaSyncInFlightRef.current &&
     now >= nextServerMetaSyncAtMs
   ) {
-    const bridge = authoritativeBridgeRef.current;
+    const bridge = gameSessionRef.current;
     serverMetaSyncInFlightRef.current = true;
     nextServerMetaSyncAtMs = now + SERVER_META_SYNC_INTERVAL_MS;
     void bridge
@@ -4053,14 +4053,14 @@ const tick = (now: number, delta: number) => {
       });
   }
   if (
-    authoritativeBridgeRef.current &&
+    gameSessionRef.current &&
     !serverStructureSyncInFlightRef.current &&
     now >= nextServerStructureSyncAtMs &&
     now - lastSnapshotReceivedAtMs >= SNAPSHOT_STRUCTURE_GRACE_MS
   ) {
     serverStructureSyncInFlightRef.current = true;
     nextServerStructureSyncAtMs = now + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
-    void authoritativeBridgeRef.current
+    void gameSessionRef.current
       .fetchStructures()
       .then((payload) => {
         if (payload.structureChangeSeq === lastAppliedStructureChangeSeq) {
@@ -4077,7 +4077,7 @@ const tick = (now: number, delta: number) => {
           msSinceSnapshot: applyAtMs - lastSnapshotReceivedAtMs,
           structureCount: Object.keys(payload.structures).length,
         });
-        authoritativeSync.applyServerStructureSync(payload.structures);
+        worldStateSync.applyServerStructureSync(payload.structures);
         lastAppliedStructureChangeSeq = payload.structureChangeSeq;
       })
       .catch((error) => {
@@ -4094,7 +4094,7 @@ const tick = (now: number, delta: number) => {
   }
 
   if (serverAuthoritative) {
-    authoritativeSync.updateServerMobInterpolation(now);
+    worldStateSync.updateServerMobInterpolation(now);
   }
 
   const dynamicEntities = [player, ...npcs, ...mobs];
@@ -4201,9 +4201,9 @@ const tick = (now: number, delta: number) => {
   }
   updateTowerArrowProjectiles(delta);
   updatePlayerArrowProjectiles(delta);
-  if (pendingDamageHits.length > 0 && authoritativeBridgeRef.current) {
+  if (pendingDamageHits.length > 0 && gameSessionRef.current) {
     const hits = pendingDamageHits.splice(0, pendingDamageHits.length);
-    void authoritativeBridgeRef.current.sendDealDamages(hits);
+    void gameSessionRef.current.sendDealDamages(hits);
   }
 
   // Only check collisions between entities in nearby cells
@@ -4409,7 +4409,7 @@ const tick = (now: number, delta: number) => {
       mobsCount: mobs.length,
       coinsPopTimer: gameState.coinsPopTimer,
       shootCooldown: gameState.shootCooldown,
-      getCountdownMsRemaining: authoritativeSync.getCountdownMsRemaining,
+      getCountdownMsRemaining: worldStateSync.getCountdownMsRemaining,
     },
     {
       coinCostWall: COINS_COST_WALL,
@@ -4456,13 +4456,13 @@ const tick = (now: number, delta: number) => {
 const gameLoop = createGameLoop(tick);
 startGameWhenReady = () => {
   if (hasStartedGameLoop || !hasFinishedLoadingAssets) return;
-  if (!authoritativeInitialDataReady) return;
+  if (!sessionDataReady) return;
   hasStartedGameLoop = true;
   completeLoadingAndRevealScene();
   gameLoop.start();
 };
 const disposeGameScene = createDisposeScene({
-  authoritativeBridgeRef,
+  gameSessionRef,
   serverStructureResyncInFlightRef: serverStructureSyncInFlightRef,
   particleSystem,
   spawnContainerOverlay,

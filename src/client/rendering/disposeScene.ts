@@ -8,7 +8,7 @@ import type { PlayerArrowProjectile } from '../gameContext';
 import type { CoinTrail } from '../ui/hudUpdaters';
 
 export type DisposeSceneContext = {
-  authoritativeBridgeRef: {
+  gameSessionRef: {
     current: { disconnect: () => Promise<void> } | null;
   };
   serverStructureResyncInFlightRef: { current: boolean };
@@ -63,9 +63,9 @@ export const createDisposeScene = (ctx: DisposeSceneContext): (() => void) => {
     if (disposed) return;
     disposed = true;
 
-    if (ctx.authoritativeBridgeRef.current) {
-      void ctx.authoritativeBridgeRef.current.disconnect();
-      ctx.authoritativeBridgeRef.current = null;
+    if (ctx.gameSessionRef.current) {
+      void ctx.gameSessionRef.current.disconnect();
+      ctx.gameSessionRef.current = null;
     }
     ctx.serverStructureResyncInFlightRef.current = false;
 

@@ -1,40 +1,54 @@
 import { connectRealtime } from '@devvit/web/client';
-import { deltaProfiler } from '../utils/deltaProfiler';
+import { deltaProfiler } from '../../utils/deltaProfiler';
 import type {
   CommandRequest,
   CommandResponse,
   DealDamageHit,
-  DeltaBatch,
   EntityDelta,
   GameDelta,
-  CoinBalanceResponse,
-  HeartbeatResponse,
-  JoinResponse,
   MetaSyncResponse,
-  ResyncResponse,
   StructureDelta,
   StructuresSyncResponse,
   WaveDelta,
-} from '../../shared/game-protocol';
-import type { Vec2, WorldState } from '../../shared/game-state';
-import { isRecord } from '../../shared/utils';
+} from '../../../shared/game-protocol';
+import type { Vec2, WorldState } from '../../../shared/game-state';
+import { postJson, getJson } from './httpClient';
+import {
+  isCoinBalanceResponse,
+  isCommandResponse,
+  isDeltaBatch,
+  isHeartbeatResponse,
+  isMetaSyncResponse,
+  isResyncResponse,
+  isStructuresSyncResponse,
+  isVec2,
+  hasHeartbeatWaveState,
+  parseJoinResponse,
+} from './responseGuards';
+import { createDeltaBuffer } from './deltaBuffer';
 
 type SnapshotOptions = { skipMobReplacement?: boolean };
 
-type DeltaBatchContext = {
+export type DeltaBatchContext = {
   batchTickSeq: number;
   serverTimeMs?: number;
 };
 
-type PresenceCallbacks = {
+export type PresenceCallbacks = {
   onSnapshot: (snapshot: WorldState, options?: SnapshotOptions) => void;
   onSelfReady: (playerId: string, username: string, position: Vec2) => void;
   onRemoteJoin: (playerId: string, username: string, position: Vec2) => void;
   onRemoteLeave: (playerId: string) => void;
   onPlayerMove: (playerId: string, username: string, next: Vec2) => void;
   onSelfPositionFromServer?: (position: Vec2) => void;
-  onMobDelta: (delta: EntityDelta, context: DeltaBatchContext) => void;
-  onStructureDelta: (delta: StructureDelta, context: DeltaBatchContext) => void;
+  onMobDelta: (
+    delta: EntityDelta,
+    context: DeltaBatchContext
+  ) => void;
+  onStructureDelta: (
+    delta: StructureDelta,
+    context: DeltaBatchContext
+  ) => void;
   onWaveDelta: (delta: WaveDelta, context: DeltaBatchContext) => void;
   onCoinBalance: (coins: number) => void;
   onResyncRequired: (reason: string) => void;
@@ -47,7 +61,7 @@ type PresenceCallbacks = {
   ) => void;
 };
 
-type AuthoritativeBridge = {
+export type GameSession = {
   playerId: string;
   sendMoveIntent: (
     position: Vec2,
@@ -82,116 +96,6 @@ type AuthoritativeBridge = {
   refreshCoinBalance: () => Promise<void>;
   disconnect: () => Promise<void>;
 };
-
-const postJson = async (url: string, body: unknown): Promise<unknown> => {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    let detail = '';
-    try {
-      const errBody = await response.json();
-      if (isRecord(errBody) && typeof errBody.reason === 'string') {
-        detail = `: ${errBody.reason}`;
-      }
-    } catch {
-      /* ignore */
-    }
-    throw new Error(`request failed ${response.status}${detail}`);
-  }
-  return response.json();
-};
-
-const getJson = async (url: string): Promise<unknown> => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`request failed ${response.status}`);
-  }
-  return response.json();
-};
-
-const isCoinBalanceResponse = (value: unknown): value is CoinBalanceResponse =>
-  isRecord(value) &&
-  value.type === 'coinBalance' &&
-  typeof value.coins === 'number';
-
-const isVec2 = (value: unknown): value is Vec2 =>
-  isRecord(value) && typeof value.x === 'number' && typeof value.z === 'number';
-
-const isJoinResponse = (value: unknown): value is JoinResponse => {
-  if (!isRecord(value)) return false;
-  if (value.type !== 'join') return false;
-  if (
-    typeof value.playerId !== 'string' ||
-    typeof value.username !== 'string' ||
-    typeof value.channel !== 'string'
-  ) {
-    return false;
-  }
-  if (!isRecord(value.snapshot) || !isRecord(value.snapshot.players))
-    return false;
-  return true;
-};
-
-const isDeltaBatch = (value: unknown): value is DeltaBatch =>
-  isRecord(value) &&
-  Array.isArray(value.events) &&
-  typeof value.tickSeq === 'number' &&
-  typeof value.worldVersion === 'number';
-
-const isHeartbeatResponse = (value: unknown): value is HeartbeatResponse =>
-  isRecord(value) &&
-  value.type === 'heartbeatAck' &&
-  typeof value.tickSeq === 'number' &&
-  typeof value.worldVersion === 'number';
-
-const hasHeartbeatWaveState = (
-  value: HeartbeatResponse
-): value is HeartbeatResponse & {
-  wave: number;
-  waveActive: boolean;
-  nextWaveAtMs: number;
-} =>
-  typeof value.wave === 'number' &&
-  typeof value.waveActive === 'boolean' &&
-  typeof value.nextWaveAtMs === 'number';
-
-const isResyncResponse = (value: unknown): value is ResyncResponse =>
-  isRecord(value) && value.type === 'snapshot' && isRecord(value.snapshot);
-
-const isStructuresSyncResponse = (
-  value: unknown
-): value is StructuresSyncResponse =>
-  isRecord(value) &&
-  value.type === 'structures' &&
-  isRecord(value.structures) &&
-  typeof value.structureChangeSeq === 'number';
-
-const isMetaSyncResponse = (value: unknown): value is MetaSyncResponse =>
-  isRecord(value) && value.type === 'meta' && isRecord(value.meta);
-
-const isCommandResponse = (value: unknown): value is CommandResponse =>
-  isRecord(value) &&
-  value.type === 'commandAck' &&
-  typeof value.accepted === 'boolean' &&
-  typeof value.tickSeq === 'number' &&
-  typeof value.worldVersion === 'number';
-
-const parseJoinResponse = (value: unknown): JoinResponse => {
-  if (!isJoinResponse(value)) {
-    throw new Error('invalid join response');
-  }
-  return value;
-};
-
-const DELTA_BUFFER_MAX_BATCHES = 50;
-const DELTA_BUFFER_MAX_MS = 10_000;
-
-type BufferedBatch = { batch: DeltaBatch; receivedAtMs: number };
 
 const applyDelta = (
   delta: GameDelta,
@@ -240,9 +144,9 @@ const applyDelta = (
   }
 };
 
-export const connectAuthoritativeBridge = async (
+export const connectGameSession = async (
   callbacks: PresenceCallbacks
-): Promise<AuthoritativeBridge> => {
+): Promise<GameSession> => {
   const joinPayload = await postJson('/api/game/join', {});
   const joinResponse = parseJoinResponse(joinPayload);
   callbacks.onSnapshot(joinResponse.snapshot);
@@ -258,51 +162,44 @@ export const connectAuthoritativeBridge = async (
   }
 
   let seq = 0;
-  const deltaBuffer: BufferedBatch[] = [];
-  const pushToDeltaBuffer = (batch: DeltaBatch) => {
-    const receivedAtMs =
-      typeof performance !== 'undefined' ? performance.now() : 0;
-    deltaBuffer.push({ batch, receivedAtMs });
-    while (deltaBuffer.length > DELTA_BUFFER_MAX_BATCHES) {
-      deltaBuffer.shift();
-    }
-    const cutoffMs = receivedAtMs - DELTA_BUFFER_MAX_MS;
-    while (deltaBuffer.length > 0 && deltaBuffer[0]!.receivedAtMs < cutoffMs) {
-      deltaBuffer.shift();
-    }
-  };
-  const replayBufferedDeltasNewerThan = (tickSeq: number) => {
-    const batchContext = { batchTickSeq: 0 };
-    for (const { batch } of deltaBuffer) {
-      if (batch.tickSeq <= tickSeq) continue;
-      batchContext.batchTickSeq = batch.tickSeq;
-      for (const event of batch.events) {
-        if (!event || typeof event !== 'object') continue;
-        const type = (event as { type?: string }).type;
-        if (type === 'entityDelta' || type === 'waveDelta') {
-          try {
-            applyDelta(event, callbacks, batchContext, joinResponse.playerId);
-          } catch (err) {
-            console.error('[MobDelta] Error replaying buffered delta', {
-              type,
-              tickSeq: batch.tickSeq,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
+  const deltaBuffer = createDeltaBuffer();
+
+  const replayBufferedDeltasNewerThan = (tickSeq: number): void => {
+    const batchContext: DeltaBatchContext = { batchTickSeq: 0 };
+    deltaBuffer.replayNewerThan(tickSeq, (batch, event, batchTickSeq) => {
+      const type = (event as { type?: string }).type;
+      if (type !== 'entityDelta' && type !== 'waveDelta') return;
+      batchContext.batchTickSeq = batchTickSeq;
+      try {
+        applyDelta(
+          event as GameDelta,
+          callbacks,
+          batchContext,
+          joinResponse.playerId
+        );
+      } catch (err) {
+        console.error('[MobDelta] Error replaying buffered delta', {
+          type,
+          tickSeq: batch.tickSeq,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-    }
+    });
   };
-  type PendingBatch = { batch: DeltaBatch; context: DeltaBatchContext };
+
+  type PendingBatch = {
+    batch: { tickSeq: number; worldVersion?: number; events: unknown[] };
+    context: DeltaBatchContext;
+  };
   const pendingBatches: PendingBatch[] = [];
   let rafScheduled = false;
 
-  const flushPendingDeltas = () => {
+  const flushPendingDeltas = (): void => {
     rafScheduled = false;
     deltaProfiler.mark('delta-flush-start');
     while (pendingBatches.length > 0) {
       const { batch, context } = pendingBatches.shift()!;
-      const processEvent = (event: unknown) => {
+      const processEvent = (event: unknown): void => {
         if (!event || typeof event !== 'object') return;
         if (
           (event as { type?: string }).type === 'structureDelta' &&
@@ -347,7 +244,7 @@ export const connectAuthoritativeBridge = async (
     );
   };
 
-  const scheduleFlush = () => {
+  const scheduleFlush = (): void => {
     if (rafScheduled) return;
     rafScheduled = true;
     requestAnimationFrame(flushPendingDeltas);
@@ -365,7 +262,7 @@ export const connectAuthoritativeBridge = async (
         return;
       }
       const batch = payload;
-      pushToDeltaBuffer(batch);
+      deltaBuffer.push(batch);
       const entityDelta = batch.events.find(
         (e): e is EntityDelta =>
           (e as { type?: string })?.type === 'entityDelta'
@@ -467,13 +364,13 @@ export const connectAuthoritativeBridge = async (
       skipMobReplacement: !payload.resetReason,
     });
     if (payload.resetReason) {
-      deltaBuffer.length = 0;
+      deltaBuffer.clear();
     } else {
       replayBufferedDeltasNewerThan(snapshotTickSeq);
     }
   };
 
-  const fetchStructures = async (): Promise<StructuresSyncResponse> => {
+  const fetchStructures = async () => {
     const payload = await getJson('/api/game/structures');
     if (!isStructuresSyncResponse(payload)) {
       throw new Error('invalid structures sync response');
@@ -481,7 +378,7 @@ export const connectAuthoritativeBridge = async (
     return payload;
   };
 
-  const fetchMeta = async (): Promise<MetaSyncResponse> => {
+  const fetchMeta = async () => {
     const payload = await getJson('/api/game/meta');
     if (!isMetaSyncResponse(payload)) {
       throw new Error('invalid meta sync response');
