@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { deltaProfiler } from '../utils/deltaProfiler';
 import type {
   EntityDelta,
   StructureDelta,
@@ -208,6 +209,12 @@ export const createAuthoritativeSync = (
   const CONNECTION_ALIVE_THRESHOLD_MS = 3_000;
 
   const mobPool: MobEntity[] = [];
+  const vector3Pool: THREE.Vector3[] = [];
+  const acquireVector3 = (x: number, y: number, z: number): THREE.Vector3 =>
+    (vector3Pool.pop() ?? new THREE.Vector3()).set(x, y, z);
+  const releaseVector3 = (v: THREE.Vector3): void => {
+    vector3Pool.push(v);
+  };
 
   const acquireMobFromPool = (): MobEntity | null => {
     const pooled = mobPool.pop();
@@ -283,6 +290,7 @@ export const createAuthoritativeSync = (
   };
 
   const syncServerWaveSpawners = (wave: SharedWaveState) => {
+    deltaProfiler.mark('wave-sync-start');
     const { spawnerHelpers } = ctx;
     syncAuthoritativeWaveSpawners({
       wave,
@@ -325,6 +333,8 @@ export const createAuthoritativeSync = (
         );
       },
     });
+    deltaProfiler.mark('wave-sync-end');
+    deltaProfiler.measure('wave-sync', 'wave-sync-start', 'wave-sync-end');
   };
 
   const syncServerMeta = (
@@ -584,6 +594,17 @@ export const createAuthoritativeSync = (
       ctx.mobs.splice(index, 1);
       if (removed) returnMobToPool(removed);
     }
+    const interpolation = ctx.serverMobInterpolationById.get(mobId);
+    if (interpolation) {
+      releaseVector3(interpolation.from);
+      releaseVector3(interpolation.to);
+      releaseVector3(interpolation.velocity);
+    }
+    const sample = ctx.serverMobSampleById.get(mobId);
+    if (sample) {
+      releaseVector3(sample.position);
+      releaseVector3(sample.velocity);
+    }
     ctx.serverMobsById.delete(mobId);
     ctx.serverMobInterpolationById.delete(mobId);
     ctx.serverMobSampleById.delete(mobId);
@@ -680,8 +701,8 @@ export const createAuthoritativeSync = (
       });
       ctx.serverMobSampleById.set(mobId, {
         serverTimeMs: delta.serverTimeMs,
-        position: new THREE.Vector3(posX, ctx.MOB_HEIGHT * 0.5, posZ),
-        velocity: new THREE.Vector3(velX, 0, velZ),
+        position: acquireVector3(posX, ctx.MOB_HEIGHT * 0.5, posZ),
+        velocity: acquireVector3(velX, 0, velZ),
         receivedAtPerfMs: performance.now(),
       });
       return;
@@ -715,15 +736,18 @@ export const createAuthoritativeSync = (
       interpolation.t0 = toPerfTime(fromServerMs);
       interpolation.t1 = toPerfTime(toServerMs);
     } else {
+      const from = acquireVector3(
+        hasPrev && prev ? prev.position.x : 0,
+        hasPrev && prev ? prev.position.y : existing.baseY,
+        hasPrev && prev ? prev.position.z : 0
+      );
+      if (!(hasPrev && prev)) {
+        from.copy(currentPos).addScaledVector(currentVel, -delta.tickMs / 1000);
+      }
       ctx.serverMobInterpolationById.set(mobId, {
-        from:
-          hasPrev && prev
-            ? prev.position.clone()
-            : currentPos
-                .clone()
-                .addScaledVector(currentVel, -delta.tickMs / 1000),
-        to: currentPos.clone(),
-        velocity: currentVel.clone(),
+        from,
+        to: acquireVector3(currentPos.x, currentPos.y, currentPos.z),
+        velocity: acquireVector3(currentVel.x, currentVel.y, currentVel.z),
         t0: toPerfTime(fromServerMs),
         t1: toPerfTime(toServerMs),
       });
@@ -738,8 +762,8 @@ export const createAuthoritativeSync = (
     } else {
       ctx.serverMobSampleById.set(mobId, {
         serverTimeMs: delta.serverTimeMs,
-        position: currentPos.clone(),
-        velocity: currentVel.clone(),
+        position: acquireVector3(currentPos.x, currentPos.y, currentPos.z),
+        velocity: acquireVector3(currentVel.x, currentVel.y, currentVel.z),
         receivedAtPerfMs: performance.now(),
       });
     }
@@ -812,11 +836,13 @@ export const createAuthoritativeSync = (
     delta: EntityDelta,
     batchTickSeq?: number
   ) => {
+    deltaProfiler.mark('mob-delta-start');
     if (
       batchTickSeq !== undefined &&
       lastSnapshotTickSeq > 0 &&
       batchTickSeq <= lastSnapshotTickSeq
     ) {
+      deltaProfiler.measure('mob-delta', 'mob-delta-start', 'mob-delta-start');
       return;
     }
     const pool = delta.mobPool;
@@ -901,7 +927,10 @@ export const createAuthoritativeSync = (
         pendingFullMobSnapshotSeenIds.clear();
         pendingFullMobSnapshotReceivedChunks.clear();
       }
-    } else if (pendingFullMobSnapshotId !== null) {
+    }
+    deltaProfiler.mark('mob-delta-end');
+    deltaProfiler.measure('mob-delta', 'mob-delta-start', 'mob-delta-end');
+    if (pendingFullMobSnapshotId !== null) {
       for (const mobId of serverMobSeenIdsScratch) {
         pendingFullMobSnapshotSeenIds.add(mobId);
       }
@@ -1012,18 +1041,27 @@ export const createAuthoritativeSync = (
       returnMobToPool(mob);
       ctx.serverMobsById.delete(mobId ?? '');
     }
+    for (const interpolation of ctx.serverMobInterpolationById.values()) {
+      releaseVector3(interpolation.from);
+      releaseVector3(interpolation.to);
+      releaseVector3(interpolation.velocity);
+    }
+    for (const sample of ctx.serverMobSampleById.values()) {
+      releaseVector3(sample.position);
+      releaseVector3(sample.velocity);
+    }
     ctx.serverMobInterpolationById.clear();
     ctx.serverMobSampleById.clear();
     for (const mob of Object.values(snapshot.mobs)) {
       upsertServerMobFromSnapshot(mob);
       ctx.serverMobSampleById.set(mob.mobId, {
         serverTimeMs: snapshot.meta.lastTickMs,
-        position: new THREE.Vector3(
+        position: acquireVector3(
           mob.position.x,
           ctx.MOB_HEIGHT * 0.5,
           mob.position.z
         ),
-        velocity: new THREE.Vector3(mob.velocity.x, 0, mob.velocity.z),
+        velocity: acquireVector3(mob.velocity.x, 0, mob.velocity.z),
         receivedAtPerfMs: performance.now(),
       });
     }

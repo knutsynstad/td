@@ -1,4 +1,5 @@
 import { connectRealtime } from '@devvit/web/client';
+import { deltaProfiler } from '../utils/deltaProfiler';
 import type {
   CommandRequest,
   CommandResponse,
@@ -291,6 +292,55 @@ export const connectAuthoritativeBridge = async (
       }
     }
   };
+  type PendingBatch = { batch: DeltaBatch; context: DeltaBatchContext };
+  const pendingBatches: PendingBatch[] = [];
+  let rafScheduled = false;
+
+  const flushPendingDeltas = () => {
+    rafScheduled = false;
+    deltaProfiler.mark('delta-flush-start');
+    while (pendingBatches.length > 0) {
+      const { batch, context } = pendingBatches.shift()!;
+      const processEvent = (event: unknown) => {
+        if (!event || typeof event !== 'object') return;
+        if (
+          (event as { type?: string }).type === 'structureDelta' &&
+          batch.tickSeq <= snapshotTickSeq
+        ) {
+          return;
+        }
+        try {
+          applyDelta(event as GameDelta, callbacks, context, joinResponse.playerId);
+        } catch (err) {
+          console.error('[MobDelta] Error applying delta', {
+            deltaType:
+              (event as { type?: string }).type ?? 'unknown',
+            error: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+        }
+      };
+      for (const event of batch.events) {
+        if ((event as { type?: string; reason?: string })?.type === 'resyncRequired') {
+          processEvent(event);
+        }
+      }
+      for (const event of batch.events) {
+        if ((event as { type?: string })?.type !== 'resyncRequired') {
+          processEvent(event);
+        }
+      }
+    }
+    deltaProfiler.mark('delta-flush-end');
+    deltaProfiler.measure('delta-flush', 'delta-flush-start', 'delta-flush-end');
+  };
+
+  const scheduleFlush = () => {
+    if (rafScheduled) return;
+    rafScheduled = true;
+    requestAnimationFrame(flushPendingDeltas);
+  };
+
   const connection = await connectRealtime({
     channel: joinResponse.channel,
     onMessage: (payload) => {
@@ -316,35 +366,8 @@ export const connectAuthoritativeBridge = async (
         batchTickSeq: batch.tickSeq,
         serverTimeMs: serverTimeMsFromBatch,
       };
-      const processEvent = (event: unknown) => {
-        if (!event || typeof event !== 'object') return;
-        if (
-          (event as { type?: string }).type === 'structureDelta' &&
-          batch.tickSeq <= snapshotTickSeq
-        ) {
-          return;
-        }
-        try {
-          applyDelta(event as GameDelta, callbacks, batchContext, joinResponse.playerId);
-        } catch (err) {
-          console.error('[MobDelta] Error applying delta', {
-            deltaType:
-              (event as { type?: string }).type ?? 'unknown',
-            error: err instanceof Error ? err.message : String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
-        }
-      };
-      for (const event of batch.events) {
-        if ((event as { type?: string; reason?: string })?.type === 'resyncRequired') {
-          processEvent(event);
-        }
-      }
-      for (const event of batch.events) {
-        if ((event as { type?: string })?.type !== 'resyncRequired') {
-          processEvent(event);
-        }
-      }
+      pendingBatches.push({ batch, context: batchContext });
+      scheduleFlush();
     },
   });
 

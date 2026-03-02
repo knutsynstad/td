@@ -208,6 +208,7 @@ import {
 } from './rendering/presenters/ballistaRig';
 import { createArrowProjectileSystem } from './rendering/presenters/arrowProjectileSystem';
 import { connectAuthoritativeBridge } from './integrations/authoritativeBridge';
+import { deltaProfiler } from './utils/deltaProfiler';
 import {
   createAuthoritativeSync,
   type AuthoritativeSync,
@@ -544,6 +545,7 @@ const pathOuterCornerTileLayer = new InstancedModelLayer(scene, 5_000, {
 });
 const pathTilePositions = new Map<string, THREE.Vector3[]>();
 const pathTileKeys = new Set<string>();
+let lastRebuildPathFingerprint: string | null = null;
 const tmpPathCenterTransforms: THREE.Matrix4[] = [];
 const tmpPathEdgeTransforms: THREE.Matrix4[] = [];
 const tmpPathInnerCornerTransforms: THREE.Matrix4[] = [];
@@ -573,6 +575,14 @@ const buildPathTilesFromPoints = (
   };
 };
 const rebuildPathTileLayer = () => {
+  const fingerprint = Array.from(pathTilePositions.entries())
+    .map(([id, pts]) => `${id}:${pts.map((p) => `${p.x},${p.z}`).sort().join('|')}`)
+    .sort()
+    .join(';');
+  if (fingerprint === lastRebuildPathFingerprint) return;
+  lastRebuildPathFingerprint = fingerprint;
+
+  deltaProfiler.mark('path-tile-rebuild-start');
   tmpPathCenterTransforms.length = 0;
   tmpPathEdgeTransforms.length = 0;
   tmpPathInnerCornerTransforms.length = 0;
@@ -674,6 +684,12 @@ const rebuildPathTileLayer = () => {
     lastGroundBounds = null;
     updateGroundFromBounds(bounds);
   }
+  deltaProfiler.mark('path-tile-rebuild-end');
+  deltaProfiler.measure(
+    'path-tile-rebuild',
+    'path-tile-rebuild-start',
+    'path-tile-rebuild-end'
+  );
 };
 let lastGroundBounds: GroundBounds | null = null;
 const updateGroundFromBounds = (bounds: GroundBounds) => {
