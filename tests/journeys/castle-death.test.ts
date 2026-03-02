@@ -106,6 +106,7 @@ devvitTest(
 
     const coinsResponse = await getJson(app, '/api/game/coins');
     const coinsBody = await coinsResponse.json();
-    expect(Number(coinsBody.coins)).toBeLessThan(100);
+    // Players keep their coins on castle death (only castle is taxed).
+    expect(Number(coinsBody.coins)).toBe(100);
   }
 );

@@ -213,6 +213,7 @@ export async function heartbeatGame(
     ]);
   }
 
+  const coins = await getUserCoinBalance(playerId as T2);
   return {
     type: 'heartbeatAck',
     tickSeq: world.meta.tickSeq,
@@ -221,6 +222,7 @@ export async function heartbeatGame(
     waveActive: world.wave.active,
     nextWaveAtMs: world.wave.nextWaveAtMs,
     serverTimeMs: world.meta.lastTickMs,
+    coins,
   };
 }
 
@@ -263,11 +265,18 @@ export async function getStructuresSync(): Promise<StructuresSyncResponse> {
   };
 }
 
-export async function getMetaSync(): Promise<MetaSyncResponse> {
-  const metaRaw = await redis.hGetAll(KEYS.META);
+export async function getMetaSync(
+  playerIdOverride?: string
+): Promise<MetaSyncResponse> {
+  const [metaRaw, playerId] = await Promise.all([
+    redis.hGetAll(KEYS.META),
+    playerIdOverride ?? getPlayerId(),
+  ]);
+  const meta = parseMeta(metaRaw);
+  meta.coins = await getUserCoinBalance(playerId as T2);
   return {
     type: 'meta',
-    meta: parseMeta(metaRaw),
+    meta,
   };
 }
 

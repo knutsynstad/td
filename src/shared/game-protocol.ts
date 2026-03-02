@@ -173,6 +173,7 @@ export type HeartbeatResponse = {
   waveActive?: boolean;
   nextWaveAtMs?: number;
   serverTimeMs?: number;
+  coins?: number;
 };
 
 export type CoinBalanceResponse = {

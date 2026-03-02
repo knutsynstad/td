@@ -365,6 +365,9 @@ export const connectAuthoritativeBridge = async (
     if (!isHeartbeatResponse(payload)) {
       throw new Error('invalid heartbeat response');
     }
+    if (typeof payload.coins === 'number') {
+      callbacks.onCoinBalance(payload.coins);
+    }
     if (hasHeartbeatWaveState(payload) && callbacks.onHeartbeatWaveState) {
       callbacks.onHeartbeatWaveState(
         payload.wave,

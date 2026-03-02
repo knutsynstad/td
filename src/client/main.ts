@@ -133,7 +133,7 @@ import {
   COINS_CAP,
   COINS_COST_TOWER,
   COINS_COST_WALL,
-  USER_COINS_ACCRUED_PER_SECOND,
+  COIN_ACCRUAL_INTERVAL_MS,
   GRID_SIZE,
   MAX_VISIBLE_MOB_INSTANCES,
   MOB_INSTANCE_CAP,
@@ -1914,7 +1914,6 @@ const SERVER_MOB_ACTIVE_WAVE_STALE_REMOVE_MS = 8000;
 const SERVER_MOB_POST_WAVE_STALE_REMOVE_MS = 4000;
 const SERVER_MOB_HARD_STALE_REMOVE_MS = 15000;
 const SERVER_HEARTBEAT_INTERVAL_MS = 500;
-const SERVER_COINS_REFRESH_INTERVAL_MS = 3_000;
 const SERVER_STRUCTURE_SYNC_INTERVAL_MS = 30_000;
 const SERVER_STRUCTURE_SYNC_RETRY_MS = 7_500;
 const SNAPSHOT_STRUCTURE_GRACE_MS = 3_000;
@@ -1923,7 +1922,8 @@ const SERVER_META_SYNC_RETRY_MS = 3_000;
 let nextServerStructureSyncAtMs =
   performance.now() + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
 let nextServerMetaSyncAtMs = performance.now() + SERVER_META_SYNC_INTERVAL_MS;
-let nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
+const COIN_ACCRUAL_INTERVAL_SEC = COIN_ACCRUAL_INTERVAL_MS / 1000;
+let clientCoinAccrualRemainderSec = 0;
 let lastKnownWorldVersion = 0;
 let lastAppliedStructureChangeSeq = 0;
 let lastSnapshotReceivedAtMs = 0;
@@ -2109,7 +2109,6 @@ const setupAuthoritativeBridge = async () => {
     nextServerStructureSyncAtMs =
       performance.now() + SERVER_STRUCTURE_SYNC_INTERVAL_MS;
     nextServerMetaSyncAtMs = performance.now() + SERVER_META_SYNC_INTERVAL_MS;
-    nextCoinsRefreshAtMs = performance.now() + SERVER_COINS_REFRESH_INTERVAL_MS;
     serverStructureSyncInFlightRef.current = false;
     serverMetaSyncInFlightRef.current = false;
     void syncCastleCoinsFromServer();
@@ -3946,10 +3945,10 @@ const tick = (now: number, delta: number) => {
     hudUpdaters.syncMinimapCanvasSize();
   }
   if (!serverAuthoritative) {
-    gameState.coins = Math.min(
-      COINS_CAP,
-      gameState.coins + USER_COINS_ACCRUED_PER_SECOND * delta
-    );
+    clientCoinAccrualRemainderSec += delta;
+    const toAdd = Math.floor(clientCoinAccrualRemainderSec / COIN_ACCRUAL_INTERVAL_SEC);
+    clientCoinAccrualRemainderSec -= toAdd * COIN_ACCRUAL_INTERVAL_SEC;
+    gameState.coins = Math.min(COINS_CAP, gameState.coins + toAdd);
     if (gameState.buildMode === 'wall' && gameState.coins < COINS_COST_WALL) {
       setBuildMode('off');
     }
@@ -3996,10 +3995,6 @@ const tick = (now: number, delta: number) => {
       x: player.mesh.position.x,
       z: player.mesh.position.z,
     });
-  }
-  if (authoritativeBridgeRef.current && now >= nextCoinsRefreshAtMs) {
-    nextCoinsRefreshAtMs = now + SERVER_COINS_REFRESH_INTERVAL_MS;
-    void authoritativeBridgeRef.current.refreshCoinBalance();
   }
   if (
     authoritativeBridgeRef.current &&

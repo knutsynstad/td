@@ -10,11 +10,9 @@ import type {
 import { DEFAULT_PLAYER_SPAWN } from '../../shared/game-state';
 import { PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
-import { CASTLE_DEATH_TAX } from '../../shared/content';
 import {
   applyCastleDeathTax,
   getUserCoinBalance,
-  spendUserCoins,
 } from './economy';
 import {
   defaultMeta,
@@ -150,7 +148,6 @@ export async function resetGameToDefault(
     for (const playerId of connectedPlayerIds) {
       const player = playersResult.players.get(playerId);
       if (!player) continue;
-      await spendUserCoins(playerId as T2, CASTLE_DEATH_TAX);
       const updated: PlayerState = {
         ...player,
         position: { x: DEFAULT_PLAYER_SPAWN.x, z: DEFAULT_PLAYER_SPAWN.z },

@@ -46,10 +46,10 @@ export const MOB_SIEGE_RANGE_BUFFER = 0.35;
 export const MOB_SIEGE_UNREACHABLE_GRACE = 1.2;
 import {
   COINS_CAP,
-  USER_COINS_ACCRUED_PER_SECOND,
+  COIN_ACCRUAL_INTERVAL_MS,
   getStructureCoinCost,
 } from '../../../shared/content';
-export { COINS_CAP, USER_COINS_ACCRUED_PER_SECOND, getStructureCoinCost };
+export { COINS_CAP, COIN_ACCRUAL_INTERVAL_MS, getStructureCoinCost };
 export const COINS_COST_WALL = getStructureCoinCost('wall');
 export const COINS_COST_TOWER = getStructureCoinCost('tower');
 export const COINS_SYMBOL = '🪙';

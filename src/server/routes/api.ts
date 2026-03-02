@@ -148,7 +148,8 @@ api.get('/game/structures', async (c) => {
 });
 
 api.get('/game/meta', async (c) => {
-  const response = await getMetaSync();
+  const playerId = await resolvePlayerId(c);
+  const response = await getMetaSync(playerId);
   return c.json<MetaSyncResponse>(response);
 });
 

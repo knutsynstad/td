@@ -1,7 +1,8 @@
 export const COINS_CAP = 100;
 export const USER_COINS_MIN = 0;
 export const USER_COINS_MAX = COINS_CAP;
-export const USER_COINS_ACCRUED_PER_SECOND = 0.25;
+/** 1 full coin added every this many milliseconds */
+export const COIN_ACCRUAL_INTERVAL_MS = 4000;
 export const COINS_PER_PLAYER_KILL = 6;
 
 export const CASTLE_COINS_MIN = 0;

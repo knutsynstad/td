@@ -4,7 +4,7 @@ import { KEYS, FIELDS } from '../core/keys';
 import {
   CASTLE_COINS_MIN,
   CASTLE_DEATH_TAX_RATIO,
-  USER_COINS_ACCRUED_PER_SECOND,
+  COIN_ACCRUAL_INTERVAL_MS,
   USER_COINS_MIN,
   USER_COINS_MAX,
 } from '../../shared/content';
@@ -33,17 +33,18 @@ export async function getUserCoinBalance(userId: T2): Promise<number> {
   lastAccruedMs = Number(lastAccruedMs);
 
   const elapsedMs = now - lastAccruedMs;
-  const accrued = Math.floor(
-    (elapsedMs / 1000) * USER_COINS_ACCRUED_PER_SECOND
-  );
+  const accrued = Math.floor(elapsedMs / COIN_ACCRUAL_INTERVAL_MS);
 
   balance += accrued;
   balance = Math.floor(balance);
   balance = clamp(balance, USER_COINS_MIN, USER_COINS_MAX);
 
+  const newLastAccruedMs =
+    lastAccruedMs + accrued * COIN_ACCRUAL_INTERVAL_MS;
+
   await redis.hSet(KEYS.PLAYER(userId), {
     [FIELDS.USER_COIN_BALANCE]: String(balance),
-    [FIELDS.USER_COIN_LAST_ACCRUED_MS]: String(now),
+    [FIELDS.USER_COIN_LAST_ACCRUED_MS]: String(newLastAccruedMs),
   });
 
   return balance;
