@@ -18,9 +18,7 @@ export async function enqueueCommand(
     const queueSize = await redis.zCard(KEYS.QUEUE);
     if (queueSize >= MAX_QUEUE_COMMANDS) {
       await tx.unwatch();
-      console.log(
-        `[Queue] enqueue rejected: queue full, size=${queueSize}`
-      );
+      console.log(`[Queue] enqueue rejected: queue full, size=${queueSize}`);
       return { accepted: false, reason: 'command queue is full' };
     }
     await tx.multi();
@@ -52,9 +50,14 @@ export async function popPendingCommands(): Promise<CommandEnvelope[]> {
     const tx = await redis.watch(KEYS.QUEUE);
     // Read with redis (tx.zRange fails in Devvit test mock: requires multi() first).
     // Watch still protects exec: concurrent modification fails the transaction.
-    const items = await redis.zRange(KEYS.QUEUE, 0, MAX_COMMANDS_PER_BATCH - 1, {
-      by: 'rank',
-    });
+    const items = await redis.zRange(
+      KEYS.QUEUE,
+      0,
+      MAX_COMMANDS_PER_BATCH - 1,
+      {
+        by: 'rank',
+      }
+    );
     if (items.length === 0) {
       await tx.unwatch();
       return [];

@@ -340,8 +340,7 @@ export const createArrowProjectileSystem = (
       if (serverAuthoritative) {
         ctx.markMobHitFlash(hitMob);
         const attack = rollAttackDamage(projectile.damage);
-        hitMob.lastHitBy =
-          'sourceTower' in projectile ? 'tower' : 'player';
+        hitMob.lastHitBy = 'sourceTower' in projectile ? 'tower' : 'player';
         ctx.spawnFloatingDamageText(
           hitMob,
           attack.damage,
@@ -354,8 +353,9 @@ export const createArrowProjectileSystem = (
           const playerId =
             source === 'tower' && 'sourceTower' in projectile
               ? (projectile as ArrowProjectile).sourceTower.builtBy
-              : ctx.getPlayerId?.() ?? '';
-          if (playerId) ctx.sendDealDamage(mobId, attack.damage, source, playerId);
+              : (ctx.getPlayerId?.() ?? '');
+          if (playerId)
+            ctx.sendDealDamage(mobId, attack.damage, source, playerId);
         }
         ctx.scene.remove(projectile.mesh);
         projectiles.splice(i, 1);

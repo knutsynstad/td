@@ -260,7 +260,8 @@ export const connectAuthoritativeBridge = async (
   let seq = 0;
   const deltaBuffer: BufferedBatch[] = [];
   const pushToDeltaBuffer = (batch: DeltaBatch) => {
-    const receivedAtMs = typeof performance !== 'undefined' ? performance.now() : 0;
+    const receivedAtMs =
+      typeof performance !== 'undefined' ? performance.now() : 0;
     deltaBuffer.push({ batch, receivedAtMs });
     while (deltaBuffer.length > DELTA_BUFFER_MAX_BATCHES) {
       deltaBuffer.shift();
@@ -310,18 +311,25 @@ export const connectAuthoritativeBridge = async (
           return;
         }
         try {
-          applyDelta(event as GameDelta, callbacks, context, joinResponse.playerId);
+          applyDelta(
+            event as GameDelta,
+            callbacks,
+            context,
+            joinResponse.playerId
+          );
         } catch (err) {
           console.error('[MobDelta] Error applying delta', {
-            deltaType:
-              (event as { type?: string }).type ?? 'unknown',
+            deltaType: (event as { type?: string }).type ?? 'unknown',
             error: err instanceof Error ? err.message : String(err),
             stack: err instanceof Error ? err.stack : undefined,
           });
         }
       };
       for (const event of batch.events) {
-        if ((event as { type?: string; reason?: string })?.type === 'resyncRequired') {
+        if (
+          (event as { type?: string; reason?: string })?.type ===
+          'resyncRequired'
+        ) {
           processEvent(event);
         }
       }
@@ -332,7 +340,11 @@ export const connectAuthoritativeBridge = async (
       }
     }
     deltaProfiler.mark('delta-flush-end');
-    deltaProfiler.measure('delta-flush', 'delta-flush-start', 'delta-flush-end');
+    deltaProfiler.measure(
+      'delta-flush',
+      'delta-flush-start',
+      'delta-flush-end'
+    );
   };
 
   const scheduleFlush = () => {

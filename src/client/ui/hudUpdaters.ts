@@ -411,11 +411,7 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
         rollTotalDeg: 90,
         baseScale,
       };
-      mesh.position.set(
-        startX,
-        window.innerHeight - startY,
-        0
-      );
+      mesh.position.set(startX, window.innerHeight - startY, 0);
       mesh.scale.setScalar(baseScale);
       ctx.coinTrailScene.add(mesh);
       ctx.activeCoinTrails.push(trail);

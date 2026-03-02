@@ -1,10 +1,6 @@
 import { createDevvitTest } from '@devvit/test/server/vitest';
 import { expect } from 'vitest';
-import {
-  enqueueCommand,
-  getQueueSize,
-  popPendingCommands,
-} from './queue';
+import { enqueueCommand, getQueueSize, popPendingCommands } from './queue';
 
 const test = createDevvitTest();
 

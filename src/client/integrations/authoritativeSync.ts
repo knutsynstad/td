@@ -293,9 +293,7 @@ export const createAuthoritativeSync = (
   const syncServerWaveSpawners = (wave: SharedWaveState) => {
     deltaProfiler.mark('wave-sync-start');
     const fingerprint = JSON.stringify(
-      [...wave.spawners].sort((a, b) =>
-        a.spawnerId.localeCompare(b.spawnerId)
-      )
+      [...wave.spawners].sort((a, b) => a.spawnerId.localeCompare(b.spawnerId))
     );
     if (fingerprint === lastWaveSyncFingerprint) {
       deltaProfiler.mark('wave-sync-end');
@@ -850,10 +848,7 @@ export const createAuthoritativeSync = (
     }
   };
 
-  const applyServerMobDelta = (
-    delta: EntityDelta,
-    batchTickSeq?: number
-  ) => {
+  const applyServerMobDelta = (delta: EntityDelta, batchTickSeq?: number) => {
     deltaProfiler.mark('mob-delta-start');
     if (
       batchTickSeq !== undefined &&
@@ -977,10 +972,7 @@ export const createAuthoritativeSync = (
     if (delta.lives !== undefined) {
       ctx.gameState.lives = delta.lives;
     }
-    if (
-      typeof serverTimeMs === 'number' &&
-      delta.wave.nextWaveAtMs > 0
-    ) {
+    if (typeof serverTimeMs === 'number' && delta.wave.nextWaveAtMs > 0) {
       const newRemaining = delta.wave.nextWaveAtMs - serverTimeMs;
       const shouldUpdate =
         countdownClientDateAtReceive === 0 ||

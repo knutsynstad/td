@@ -39,8 +39,7 @@ export async function getUserCoinBalance(userId: T2): Promise<number> {
   balance = Math.floor(balance);
   balance = clamp(balance, USER_COINS_MIN, USER_COINS_MAX);
 
-  const newLastAccruedMs =
-    lastAccruedMs + accrued * COIN_ACCRUAL_INTERVAL_MS;
+  const newLastAccruedMs = lastAccruedMs + accrued * COIN_ACCRUAL_INTERVAL_MS;
 
   await redis.hSet(KEYS.PLAYER(userId), {
     [FIELDS.USER_COIN_BALANCE]: String(balance),

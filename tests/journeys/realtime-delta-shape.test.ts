@@ -24,7 +24,7 @@ devvitTest(
     );
     expect(commandResponse.status).toBe(200);
 
-    await postJson(app, '/internal/scheduler/server-clock?windowMs=500', {});
+    await postJson(app, '/internal/scheduler/server-clock?windowMs=2000', {});
 
     const messages = mocks.realtime.getSentMessagesForChannel(channel);
     expect(messages.length).toBeGreaterThan(0);

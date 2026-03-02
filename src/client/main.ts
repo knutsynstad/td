@@ -576,7 +576,13 @@ const buildPathTilesFromPoints = (
 };
 const rebuildPathTileLayer = () => {
   const fingerprint = Array.from(pathTilePositions.entries())
-    .map(([id, pts]) => `${id}:${pts.map((p) => `${p.x},${p.z}`).sort().join('|')}`)
+    .map(
+      ([id, pts]) =>
+        `${id}:${pts
+          .map((p) => `${p.x},${p.z}`)
+          .sort()
+          .join('|')}`
+    )
     .sort()
     .join(';');
   if (fingerprint === lastRebuildPathFingerprint) return;
@@ -2067,7 +2073,11 @@ const setupAuthoritativeBridge = async () => {
         authoritativeSync.applyServerStructureDelta(delta, batchTickSeq);
       },
       onWaveDelta: (delta, { batchTickSeq, serverTimeMs }) => {
-        authoritativeSync.applyServerWaveDelta(delta, batchTickSeq, serverTimeMs);
+        authoritativeSync.applyServerWaveDelta(
+          delta,
+          batchTickSeq,
+          serverTimeMs
+        );
       },
       onCoinBalance: (coins) => {
         gameState.coins = Math.max(0, Math.min(COINS_CAP, coins));
@@ -2471,10 +2481,7 @@ const depositToCastle = async (requestedAmount: number) => {
   }
   hudUpdaters.updateCastleCoinPilesVisual();
   gameState.coinsPopTimer = 0.2;
-  hudUpdaters.spawnCastleCoinTrails(
-    Math.floor(response.deposited),
-    'toCastle'
-  );
+  hudUpdaters.spawnCastleCoinTrails(Math.floor(response.deposited), 'toCastle');
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
@@ -2509,10 +2516,7 @@ const withdrawFromCastle = async (requestedAmount: number) => {
       ? Math.max(0, Math.floor(response.castleCoins))
       : gameState.castleCoins;
     hudUpdaters.updateCastleCoinPilesVisual();
-    hudUpdaters.spawnCastleCoinTrails(
-      Math.floor(response.withdrawn),
-      'toHud'
-    );
+    hudUpdaters.spawnCastleCoinTrails(Math.floor(response.withdrawn), 'toHud');
     return true;
   }
   const response = await requestCastleCoinsWithdraw(transfer);
@@ -2527,10 +2531,7 @@ const withdrawFromCastle = async (requestedAmount: number) => {
     gameState.coins = Math.max(0, Math.min(COINS_CAP, response.coins));
   }
   hudUpdaters.updateCastleCoinPilesVisual();
-  hudUpdaters.spawnCastleCoinTrails(
-    Math.floor(response.withdrawn),
-    'toHud'
-  );
+  hudUpdaters.spawnCastleCoinTrails(Math.floor(response.withdrawn), 'toHud');
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
@@ -3971,7 +3972,9 @@ const tick = (now: number, delta: number) => {
   }
   if (!serverAuthoritative) {
     clientCoinAccrualRemainderSec += delta;
-    const toAdd = Math.floor(clientCoinAccrualRemainderSec / COIN_ACCRUAL_INTERVAL_SEC);
+    const toAdd = Math.floor(
+      clientCoinAccrualRemainderSec / COIN_ACCRUAL_INTERVAL_SEC
+    );
     clientCoinAccrualRemainderSec -= toAdd * COIN_ACCRUAL_INTERVAL_SEC;
     gameState.coins = Math.min(COINS_CAP, gameState.coins + toAdd);
     if (gameState.buildMode === 'wall' && gameState.coins < COINS_COST_WALL) {
@@ -4063,7 +4066,10 @@ const tick = (now: number, delta: number) => {
         if (payload.structureChangeSeq === lastAppliedStructureChangeSeq) {
           return;
         }
-        if (performance.now() - lastSnapshotReceivedAtMs < SNAPSHOT_STRUCTURE_GRACE_MS) {
+        if (
+          performance.now() - lastSnapshotReceivedAtMs <
+          SNAPSHOT_STRUCTURE_GRACE_MS
+        ) {
           return;
         }
         const applyAtMs = performance.now();

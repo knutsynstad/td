@@ -10,10 +10,7 @@ import type {
 import { DEFAULT_PLAYER_SPAWN } from '../../shared/game-state';
 import { PLAYER_TIMEOUT_MS } from '../config';
 import { KEYS } from '../core/keys';
-import {
-  applyCastleDeathTax,
-  getUserCoinBalance,
-} from './economy';
+import { applyCastleDeathTax, getUserCoinBalance } from './economy';
 import {
   defaultMeta,
   defaultWave,

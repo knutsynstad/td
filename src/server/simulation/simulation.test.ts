@@ -38,9 +38,7 @@ describe('runSimulation', () => {
   it('schedules initial wave when world is fresh', () => {
     const nowMs = Date.now();
     const result = runSimulation(world(nowMs), nowMs, [], 1);
-    expect(result.world.wave.nextWaveAtMs).toBe(
-      nowMs + WAVE_PREPARE_MS
-    );
+    expect(result.world.wave.nextWaveAtMs).toBe(nowMs + WAVE_PREPARE_MS);
     expect(result.deltas.some((delta) => delta.type === 'waveDelta')).toBe(
       true
     );
