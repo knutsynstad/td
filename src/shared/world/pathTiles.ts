@@ -37,18 +37,21 @@ export const buildPathTilesFromPoints = (
   let firstRejectedReason: 'blocked' | 'out_of_bounds' | 'diagonal' | null =
     null;
   const widthHalfCells = Math.max(0, Math.floor(halfWidth));
-  const isBlockedCell = (x: number, z: number) => {
-    for (const collider of colliders) {
-      if (collider.type === 'castle') continue;
-      if (
-        Math.abs(x - collider.center.x) < collider.halfSize.x &&
-        Math.abs(z - collider.center.z) < collider.halfSize.z
-      ) {
-        return true;
+
+  const blockedCells = new Set<string>();
+  for (const collider of colliders) {
+    if (collider.type === 'castle') continue;
+    const minGx = Math.floor(collider.center.x - collider.halfSize.x) + 1;
+    const maxGx = Math.ceil(collider.center.x + collider.halfSize.x) - 1;
+    const minGz = Math.floor(collider.center.z - collider.halfSize.z) + 1;
+    const maxGz = Math.ceil(collider.center.z + collider.halfSize.z) - 1;
+    for (let gx = minGx; gx <= maxGx; gx += 1) {
+      for (let gz = minGz; gz <= maxGz; gz += 1) {
+        blockedCells.add(`${gx},${gz}`);
       }
     }
-    return false;
-  };
+  }
+  const isBlockedCell = (x: number, z: number) => blockedCells.has(`${x},${z}`);
   const pushCell = (x: number, z: number) => {
     const gx = Math.round(x);
     const gz = Math.round(z);

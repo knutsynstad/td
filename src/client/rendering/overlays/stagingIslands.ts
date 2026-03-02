@@ -70,6 +70,17 @@ export class StagingIslandsOverlay {
   private tilesChangedListener: (() => void) | null = null;
   private readonly scene: THREE.Scene;
   private readonly config: StagingIslandsConfig;
+  private readonly lastUpsertStateBySpawner = new Map<string, string>();
+  private batchDepth = 0;
+
+  beginBatch(): void {
+    this.batchDepth += 1;
+  }
+
+  endBatch(): void {
+    this.batchDepth -= 1;
+    if (this.batchDepth === 0) this.rebuildTileLayers();
+  }
 
   constructor(scene: THREE.Scene, config: StagingIslandsConfig) {
     this.scene = scene;
@@ -348,6 +359,9 @@ export class StagingIslandsOverlay {
     gateOpen: boolean,
     showPath = true
   ) {
+    const stateKey = `${center.x},${center.y},${center.z},${normal.x},${normal.y},${normal.z},${gateOpen},${showPath}`;
+    if (this.lastUpsertStateBySpawner.get(spawnerId) === stateKey) return;
+
     this.remove(spawnerId);
     const group = new THREE.Group();
     const towardMap = normal.clone().multiplyScalar(-1);
@@ -401,7 +415,7 @@ export class StagingIslandsOverlay {
       spawnerId,
       bridgePath.outerCornerTransforms
     );
-    this.rebuildTileLayers();
+    if (this.batchDepth === 0) this.rebuildTileLayers();
 
     const gatePos = center
       .clone()
@@ -428,6 +442,7 @@ export class StagingIslandsOverlay {
       gateOpenY,
       gateProgress: gateOpen ? 1 : 0,
     });
+    this.lastUpsertStateBySpawner.set(spawnerId, stateKey);
   }
 
   setGateProgress(spawnerId: string, progress: number) {
@@ -453,13 +468,14 @@ export class StagingIslandsOverlay {
       mesh.geometry?.dispose();
     }
     this.islands.delete(spawnerId);
+    this.lastUpsertStateBySpawner.delete(spawnerId);
     this.islandGroundPositionsBySpawner.delete(spawnerId);
     this.bridgePathKeysBySpawner.delete(spawnerId);
     this.bridgePathCenterPositionsBySpawner.delete(spawnerId);
     this.bridgePathEdgeTransformsBySpawner.delete(spawnerId);
     this.bridgePathInnerCornerTransformsBySpawner.delete(spawnerId);
     this.bridgePathOuterCornerTransformsBySpawner.delete(spawnerId);
-    this.rebuildTileLayers();
+    if (this.batchDepth === 0) this.rebuildTileLayers();
   }
 
   clear() {

@@ -289,8 +289,21 @@ export const createAuthoritativeSync = (
     ctx.remotePlayersById.delete(playerId);
   };
 
+  let lastWaveSyncFingerprint: string | null = null;
   const syncServerWaveSpawners = (wave: SharedWaveState) => {
     deltaProfiler.mark('wave-sync-start');
+    const fingerprint = JSON.stringify(
+      [...wave.spawners].sort((a, b) =>
+        a.spawnerId.localeCompare(b.spawnerId)
+      )
+    );
+    if (fingerprint === lastWaveSyncFingerprint) {
+      deltaProfiler.mark('wave-sync-end');
+      deltaProfiler.measure('wave-sync', 'wave-sync-start', 'wave-sync-end');
+      return;
+    }
+    lastWaveSyncFingerprint = fingerprint;
+
     const { spawnerHelpers } = ctx;
     syncAuthoritativeWaveSpawners({
       wave,
@@ -301,7 +314,10 @@ export const createAuthoritativeSync = (
       spawnerById: ctx.spawnerById,
       spawnerPathlineCache: ctx.spawnerPathlineCache,
       pathTilePositions: ctx.pathTilePositions,
-      clearWaveOverlays: ctx.clearWaveOverlays,
+      clearWaveOverlays: () => {
+        lastWaveSyncFingerprint = null;
+        ctx.clearWaveOverlays();
+      },
       rebuildPathTileLayer: ctx.rebuildPathTileLayer,
       toCastleDisplayPoints: ctx.toCastleDisplayPoints,
       getStagingIslandCenter: spawnerHelpers.getStagingIslandCenter,
@@ -332,6 +348,8 @@ export const createAuthoritativeSync = (
           hasMobs
         );
       },
+      beginStagingBatch: () => ctx.stagingIslandsOverlay.beginBatch(),
+      endStagingBatch: () => ctx.stagingIslandsOverlay.endBatch(),
     });
     deltaProfiler.mark('wave-sync-end');
     deltaProfiler.measure('wave-sync', 'wave-sync-start', 'wave-sync-end');

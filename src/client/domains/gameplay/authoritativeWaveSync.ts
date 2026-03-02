@@ -43,6 +43,8 @@ type SyncAuthoritativeWaveSpawnersOptions = {
     gateOpen: boolean,
     hasMobs: boolean
   ) => void;
+  beginStagingBatch: () => void;
+  endStagingBatch: () => void;
 };
 
 const getDoorPositionForSpawnerId = (
@@ -82,6 +84,8 @@ export const syncAuthoritativeWaveSpawners = (
     upsertSpawnerRouteOverlay,
     upsertSpawnContainerOverlay,
     upsertStagingIslandsOverlay,
+    beginStagingBatch,
+    endStagingBatch,
   } = options;
 
   const nextSpawnerIds = new Set(wave.spawners.map((entry) => entry.spawnerId));
@@ -101,6 +105,7 @@ export const syncAuthoritativeWaveSpawners = (
     spawnerById.clear();
   }
 
+  beginStagingBatch();
   for (const entry of wave.spawners) {
     let spawner = spawnerById.get(entry.spawnerId);
     if (!spawner) {
@@ -199,5 +204,6 @@ export const syncAuthoritativeWaveSpawners = (
       spawner.totalCount > 0
     );
   }
+  endStagingBatch();
   rebuildPathTileLayer();
 };
