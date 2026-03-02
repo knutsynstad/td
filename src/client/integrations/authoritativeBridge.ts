@@ -80,7 +80,16 @@ const postJson = async (url: string, body: unknown): Promise<unknown> => {
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`request failed ${response.status}`);
+    let detail = '';
+    try {
+      const errBody = await response.json();
+      if (isRecord(errBody) && typeof errBody.reason === 'string') {
+        detail = `: ${errBody.reason}`;
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`request failed ${response.status}${detail}`);
   }
   return response.json();
 };
@@ -310,26 +319,44 @@ export const connectAuthoritativeBridge = async (
   });
 
   const sendCommand = async (
-    command: CommandRequest['envelope']['command']
+    command: CommandRequest['envelope']['command'],
+    options?: { ignoreDuplicate?: boolean }
   ): Promise<CommandResponse> => {
     seq += 1;
-    const payload = await postJson('/api/game/command', {
-      envelope: {
-        seq,
-        sentAtMs: Date.now(),
-        command,
-      },
-    } satisfies CommandRequest);
-    if (!isCommandResponse(payload)) {
-      return {
-        type: 'commandAck',
-        accepted: false,
-        tickSeq: 0,
-        worldVersion: 0,
-        reason: 'invalid response',
-      };
+    try {
+      const payload = await postJson('/api/game/command', {
+        envelope: {
+          seq,
+          sentAtMs: Date.now(),
+          command,
+        },
+      } satisfies CommandRequest);
+      if (!isCommandResponse(payload)) {
+        return {
+          type: 'commandAck',
+          accepted: false,
+          tickSeq: 0,
+          worldVersion: 0,
+          reason: 'invalid response',
+        };
+      }
+      return payload;
+    } catch (err) {
+      if (
+        options?.ignoreDuplicate &&
+        err instanceof Error &&
+        err.message.includes('429') &&
+        err.message.includes('duplicate')
+      ) {
+        return {
+          type: 'commandAck',
+          accepted: true,
+          tickSeq: 0,
+          worldVersion: 0,
+        };
+      }
+      throw err;
     }
-    return payload;
   };
 
   const heartbeat = async (position: Vec2): Promise<void> => {
@@ -400,16 +427,19 @@ export const connectAuthoritativeBridge = async (
   return {
     playerId: joinResponse.playerId,
     sendMoveIntent: async (position, target, desiredDir) => {
-      await sendCommand({
-        type: 'moveIntent',
-        playerId: joinResponse.playerId,
-        intent: {
-          updatedAtMs: Date.now(),
-          target,
-          desiredDir,
+      await sendCommand(
+        {
+          type: 'moveIntent',
+          playerId: joinResponse.playerId,
+          intent: {
+            updatedAtMs: Date.now(),
+            target,
+            desiredDir,
+          },
+          clientPosition: position,
         },
-        clientPosition: position,
-      });
+        { ignoreDuplicate: true }
+      );
     },
     sendStartWave: async () => {
       await sendCommand({

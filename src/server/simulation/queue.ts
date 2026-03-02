@@ -18,6 +18,9 @@ export async function enqueueCommand(
     const queueSize = await redis.zCard(KEYS.QUEUE);
     if (queueSize >= MAX_QUEUE_COMMANDS) {
       await tx.unwatch();
+      console.log(
+        `[Queue] enqueue rejected: queue full, size=${queueSize}`
+      );
       return { accepted: false, reason: 'command queue is full' };
     }
     await tx.multi();
@@ -25,11 +28,22 @@ export async function enqueueCommand(
       member: JSON.stringify(envelope),
       score: nowMs,
     });
-    const result = await tx.exec();
-    if (result !== null) {
-      return { accepted: true };
+    try {
+      const result = await tx.exec();
+      if (result !== null) {
+        return { accepted: true };
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('transaction failed') && !msg.includes('EXECABORT')) {
+        throw err;
+      }
+      continue;
     }
   }
+  console.log(
+    `[Queue] enqueue rejected: contention after ${MAX_TX_RETRIES} retries`
+  );
   return { accepted: false, reason: 'queue contention' };
 }
 
@@ -65,11 +79,22 @@ export async function popPendingCommands(
 
     await tx.multi();
     await tx.zRem(KEYS.QUEUE, membersToRemove);
-    const result = await tx.exec();
-    if (result !== null) {
-      return envelopes;
+    try {
+      const result = await tx.exec();
+      if (result !== null) {
+        return envelopes;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('transaction failed') && !msg.includes('EXECABORT')) {
+        throw err;
+      }
+      continue;
     }
   }
+  console.log(
+    `[Queue] pop failed: contention after ${MAX_TX_RETRIES} retries, queue may be growing`
+  );
   return [];
 }
 
@@ -78,4 +103,9 @@ export async function trimCommandQueue(): Promise<void> {
   if (count <= MAX_QUEUE_COMMANDS) return;
   const overflow = count - MAX_QUEUE_COMMANDS;
   await redis.zRemRangeByRank(KEYS.QUEUE, 0, overflow - 1);
+  console.log(`[Queue] trim: removed ${overflow} oldest, was ${count}`);
+}
+
+export async function getQueueSize(): Promise<number> {
+  return redis.zCard(KEYS.QUEUE);
 }

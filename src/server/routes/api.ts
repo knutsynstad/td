@@ -93,6 +93,11 @@ api.post('/game/command', async (c) => {
 
   const playerId = await resolvePlayerId(c);
   const response = await applyCommand(body.envelope, playerId);
+  if (!response.accepted) {
+    console.log(
+      `[Queue] command rejected: ${response.reason ?? 'unknown'}`
+    );
+  }
   return c.json<CommandResponse>(response, response.accepted ? 200 : 429);
 });
 

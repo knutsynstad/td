@@ -21,7 +21,7 @@ import { buildPresenceLeaveDelta, runSimulation } from './index';
 import { resetLastBroadcastMobs } from './deltas';
 import { ensureInitialWaveSchedule } from './waves';
 import { ensureStaticMap } from '../game/staticMap';
-import { popPendingCommands, trimCommandQueue } from './queue';
+import { getQueueSize, popPendingCommands, trimCommandQueue } from './queue';
 import {
   flushGameWorld,
   loadGameWorld,
@@ -47,6 +47,16 @@ async function onGameTick(
   await trimCommandQueue();
 
   const commands = await popPendingCommands(nowMs);
+  const queueSizeAfterPop = await getQueueSize();
+  if (
+    queueSizeAfterPop > 1000 ||
+    (commands.length === 0 && queueSizeAfterPop > 0) ||
+    ticksProcessed % 100 === 0
+  ) {
+    console.log(
+      `[Queue] tick ${ticksProcessed}: popped ${commands.length}, queue size after pop=${queueSizeAfterPop}`
+    );
+  }
   const result = runSimulation(world, nowMs, commands, 1);
 
   for (const [id, mob] of world.mobs) {
