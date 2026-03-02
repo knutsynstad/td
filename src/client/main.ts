@@ -2360,6 +2360,7 @@ const addCoins = (amount: number, withPop = false) => {
 
 const hudUpdaters = createHudUpdaters({
   coinHudCanvasEl,
+  hudCoinsEl,
   coinHudRenderer,
   coinHudCamera,
   coinHudRoot,
@@ -2437,7 +2438,8 @@ const depositToCastle = async (requestedAmount: number) => {
       ? Math.max(0, Math.floor(response.castleCoins))
       : gameState.castleCoins;
     hudUpdaters.updateCastleCoinPilesVisual();
-    hudUpdaters.triggerEventBanner(`Deposited ${Math.floor(transfer)} coins`);
+    gameState.coinsPopTimer = 0.2;
+    hudUpdaters.spawnCastleCoinTrails(Math.floor(transfer), 'toCastle');
     return true;
   }
   const response = await requestCastleCoinsDeposit(transfer);
@@ -2452,13 +2454,15 @@ const depositToCastle = async (requestedAmount: number) => {
     gameState.coins = Math.max(0, Math.min(COINS_CAP, response.coins));
   }
   hudUpdaters.updateCastleCoinPilesVisual();
+  gameState.coinsPopTimer = 0.2;
+  hudUpdaters.spawnCastleCoinTrails(
+    Math.floor(response.deposited),
+    'toCastle'
+  );
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
-  hudUpdaters.triggerEventBanner(
-    `Deposited ${Math.floor(response.deposited)} coins`
-  );
   return true;
 };
 
@@ -2489,8 +2493,9 @@ const withdrawFromCastle = async (requestedAmount: number) => {
       ? Math.max(0, Math.floor(response.castleCoins))
       : gameState.castleCoins;
     hudUpdaters.updateCastleCoinPilesVisual();
-    hudUpdaters.triggerEventBanner(
-      `Withdrew ${Math.floor(response.withdrawn)} coins`
+    hudUpdaters.spawnCastleCoinTrails(
+      Math.floor(response.withdrawn),
+      'toHud'
     );
     return true;
   }
@@ -2506,13 +2511,14 @@ const withdrawFromCastle = async (requestedAmount: number) => {
     gameState.coins = Math.max(0, Math.min(COINS_CAP, response.coins));
   }
   hudUpdaters.updateCastleCoinPilesVisual();
+  hudUpdaters.spawnCastleCoinTrails(
+    Math.floor(response.withdrawn),
+    'toHud'
+  );
   void authoritativeBridgeRef.current?.heartbeat({
     x: player.mesh.position.x,
     z: player.mesh.position.z,
   });
-  hudUpdaters.triggerEventBanner(
-    `Withdrew ${Math.floor(response.withdrawn)} coins`
-  );
   return true;
 };
 

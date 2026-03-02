@@ -28,6 +28,7 @@ export type CoinTrail = {
   elapsed: number;
   duration: number;
   reward: number;
+  visualOnly?: boolean;
   spinStartDeg: number;
   spinTotalDeg: number;
   pitchStartDeg: number;
@@ -39,6 +40,7 @@ export type CoinTrail = {
 
 export type HudUpdatersContext = {
   coinHudCanvasEl: HTMLCanvasElement;
+  hudCoinsEl: HTMLElement;
   coinHudRenderer: THREE.WebGLRenderer;
   coinHudCamera: THREE.PerspectiveCamera;
   coinHudRoot: THREE.Group;
@@ -73,6 +75,10 @@ export type HudUpdaters = {
   syncHudCoinModel: () => void;
   updateCastleCoinPilesVisual: () => void;
   updateCoinTrails: (delta: number) => void;
+  spawnCastleCoinTrails: (
+    amount: number,
+    direction: 'toCastle' | 'toHud'
+  ) => void;
   drawMinimap: () => void;
   syncCoinTrailViewport: () => void;
   syncMinimapCanvasSize: () => void;
@@ -339,6 +345,83 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
     ctx.gameState.eventBannerTimer = 0;
   };
 
+  const worldToScreen = (worldPos: THREE.Vector3) => {
+    const vector = worldPos.clone();
+    vector.project(ctx.camera);
+    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+    return { x, y };
+  };
+
+  const spawnCastleCoinTrails = (
+    amount: number,
+    direction: 'toCastle' | 'toHud'
+  ) => {
+    if (!ctx.coinModelTemplateRef.current || amount <= 0) return;
+    const count = Math.min(8, Math.max(1, Math.floor(amount / 3)));
+    const hudRect = ctx.hudCoinsEl.getBoundingClientRect();
+    const hudX = hudRect.left + hudRect.width * 0.5;
+    const hudY = hudRect.top + hudRect.height * 0.5;
+    const castleScreen = worldToScreen(ctx.castleCollider.center);
+    const startX = direction === 'toCastle' ? hudX : castleScreen.x;
+    const startY = direction === 'toCastle' ? hudY : castleScreen.y;
+    const endX = direction === 'toCastle' ? castleScreen.x : hudX;
+    const endY = direction === 'toCastle' ? castleScreen.y : hudY;
+    const arcOffset = 0.15 * Math.hypot(endX - startX, endY - startY);
+    const midY = Math.min(startY, endY) - arcOffset;
+    const control1X = startX + (endX - startX) * 0.33;
+    const control1Y = midY;
+    const control2X = startX + (endX - startX) * 0.67;
+    const control2Y = midY;
+    const duration = 0.55;
+    const stagger = 0.04;
+
+    for (let i = 0; i < count; i += 1) {
+      const mesh = ctx.coinModelTemplateRef.current.clone(true);
+      const materials: THREE.Material[] = [];
+      mesh.traverse((node) => {
+        if (node instanceof THREE.Mesh && node.material) {
+          const mat = Array.isArray(node.material)
+            ? node.material
+            : [node.material];
+          materials.push(...mat);
+        }
+      });
+      const baseScale = 28;
+      const trail: CoinTrail = {
+        mesh,
+        materials,
+        startX,
+        startY,
+        control1X,
+        control1Y,
+        control2X,
+        control2Y,
+        endX,
+        endY,
+        elapsed: i * stagger,
+        duration,
+        reward: 0,
+        visualOnly: true,
+        spinStartDeg: i * 45,
+        spinTotalDeg: 180 + i * 22,
+        pitchStartDeg: 5,
+        pitchTotalDeg: 12,
+        rollStartDeg: 0,
+        rollTotalDeg: 90,
+        baseScale,
+      };
+      mesh.position.set(
+        startX,
+        window.innerHeight - startY,
+        0
+      );
+      mesh.scale.setScalar(baseScale);
+      ctx.coinTrailScene.add(mesh);
+      ctx.activeCoinTrails.push(trail);
+    }
+  };
+
   const updateCoinTrails = (delta: number) => {
     for (let i = ctx.activeCoinTrails.length - 1; i >= 0; i -= 1) {
       const trail = ctx.activeCoinTrails[i]!;
@@ -378,7 +461,9 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
           material.dispose();
         }
         ctx.activeCoinTrails.splice(i, 1);
-        ctx.addCoins(trail.reward, true);
+        if (!trail.visualOnly) {
+          ctx.addCoins(trail.reward, true);
+        }
       }
     }
   };
@@ -388,6 +473,7 @@ export const createHudUpdaters = (ctx: HudUpdatersContext): HudUpdaters => {
     syncHudCoinModel,
     updateCastleCoinPilesVisual,
     updateCoinTrails,
+    spawnCastleCoinTrails,
     drawMinimap,
     syncCoinTrailViewport,
     syncMinimapCanvasSize,
