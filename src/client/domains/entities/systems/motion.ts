@@ -416,17 +416,11 @@ export const createEntityMotionSystem = (context: MotionContext) => {
     applyMotionTail(entity, dir, delta);
   };
 
-  const updateNpcTargets = () => {
-    for (const npc of context.npcs) {
-      if (npc.mesh.position.distanceTo(npc.target) < 0.5) {
-        npc.target.set(
-          (context.random() - 0.5) * context.constants.worldBounds * 1.2,
-          0,
-          (context.random() - 0.5) * context.constants.worldBounds * 1.2
-        );
-      }
-    }
-  };
+  /**
+   * No-op: all npcs are remote players (authoritative sync). Their targets come
+   * from the server; we must not overwrite with random targets.
+   */
+  const updateNpcTargets = () => {};
 
   return {
     updateEntityMotion,

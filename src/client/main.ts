@@ -1869,7 +1869,6 @@ const authoritativeBridgeRef: {
   current: Awaited<ReturnType<typeof connectAuthoritativeBridge>> | null;
 } = { current: null };
 let authoritativeInitialDataReady = false;
-let authoritativeSelfPlayerId = '';
 const authoritativeSelfPlayerIdRef = { current: '' as string | null };
 let lastNetworkHeartbeatAt = 0;
 let lastMoveIntentSentAt = 0;
@@ -2009,7 +2008,6 @@ const setupAuthoritativeBridge = async () => {
         startGameWhenReady?.();
       },
       onSelfReady: (playerId, username, position) => {
-        authoritativeSelfPlayerId = playerId;
         authoritativeSelfPlayerIdRef.current = playerId;
         player.username = username;
         player.mesh.position.set(position.x, player.baseY, position.z);
@@ -2024,10 +2022,28 @@ const setupAuthoritativeBridge = async () => {
         authoritativeSync.removeRemoteNpc(playerId);
       },
       onPlayerMove: (playerId, username, next) => {
-        if (playerId === authoritativeSelfPlayerId) {
-          return;
-        }
         authoritativeSync.upsertRemoteNpc(playerId, username, next);
+      },
+      onSelfPositionFromServer: (position) => {
+        const dx = position.x - player.mesh.position.x;
+        const dz = position.z - player.mesh.position.z;
+        const distSq = dx * dx + dz * dz;
+        const EMIT_THRESHOLD_SQ = 1;
+        const nowMs = performance.now();
+        if (
+          distSq > EMIT_THRESHOLD_SQ &&
+          authoritativeBridgeRef.current &&
+          nowMs - lastMoveIntentSentAt >= MOVE_INTENT_MIN_INTERVAL_MS
+        ) {
+          lastMoveIntentSentAt = nowMs;
+          const pos = {
+            x: player.mesh.position.x,
+            z: player.mesh.position.z,
+          };
+          lastMoveIntentTarget.x = pos.x;
+          lastMoveIntentTarget.z = pos.z;
+          void authoritativeBridgeRef.current.sendMoveIntent(pos, pos);
+        }
       },
       onMobDelta: (delta, { batchTickSeq }) => {
         authoritativeSync.applyServerMobDelta(delta, batchTickSeq);

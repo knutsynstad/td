@@ -27,6 +27,7 @@ type PresenceCallbacks = {
   onRemoteJoin: (playerId: string, username: string, position: Vec2) => void;
   onRemoteLeave: (playerId: string) => void;
   onPlayerMove: (playerId: string, username: string, next: Vec2) => void;
+  onSelfPositionFromServer?: (position: Vec2) => void;
   onMobDelta: (delta: EntityDelta, context: DeltaBatchContext) => void;
   onStructureDelta: (delta: StructureDelta, context: DeltaBatchContext) => void;
   onWaveDelta: (delta: WaveDelta, context: DeltaBatchContext) => void;
@@ -174,7 +175,8 @@ type BufferedBatch = { batch: DeltaBatch; receivedAtMs: number };
 const applyDelta = (
   delta: GameDelta,
   callbacks: PresenceCallbacks,
-  batchContext: DeltaBatchContext
+  batchContext: DeltaBatchContext,
+  selfPlayerId: string
 ): void => {
   if (delta.type === 'presenceDelta') {
     if (delta.joined) {
@@ -191,6 +193,10 @@ const applyDelta = (
   }
   if (delta.type === 'entityDelta') {
     for (const player of delta.players) {
+      if (player.playerId === selfPlayerId) {
+        callbacks.onSelfPositionFromServer?.(player.interpolation.to);
+        continue;
+      }
       callbacks.onPlayerMove(
         player.playerId,
         player.username,
@@ -255,7 +261,7 @@ export const connectAuthoritativeBridge = async (
         const type = (event as { type?: string }).type;
         if (type === 'entityDelta' || type === 'waveDelta') {
           try {
-            applyDelta(event, callbacks, batchContext);
+            applyDelta(event, callbacks, batchContext, joinResponse.playerId);
           } catch (err) {
             console.error('[MobDelta] Error replaying buffered delta', {
               type,
@@ -317,7 +323,7 @@ export const connectAuthoritativeBridge = async (
           continue;
         }
         try {
-          applyDelta(event, callbacks, { batchTickSeq: batch.tickSeq });
+          applyDelta(event, callbacks, { batchTickSeq: batch.tickSeq }, joinResponse.playerId);
         } catch (err) {
           console.error('[MobDelta] Error applying delta', {
             deltaType:
