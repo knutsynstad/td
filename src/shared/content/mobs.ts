@@ -14,8 +14,8 @@ export type MobDef = {
 export const MOB_DEFS: Record<MobTypeId, MobDef> = {
   basic: {
     id: 'basic',
-    hp: 100,
-    maxHp: 100,
+    hp: 4,
+    maxHp: 4,
     speed: 3.4,
     width: 0.65,
     height: 1.3,

@@ -48,13 +48,9 @@ async function onGameTick(
 
   const commands = await popPendingCommands();
   const queueSizeAfterPop = await getQueueSize();
-  if (
-    queueSizeAfterPop > 1000 ||
-    (commands.length === 0 && queueSizeAfterPop > 0) ||
-    ticksProcessed % 100 === 0
-  ) {
-    console.log(
-      `[Queue] tick ${ticksProcessed}: popped ${commands.length}, queue size after pop=${queueSizeAfterPop}`
+  if (queueSizeAfterPop > 1000) {
+    console.warn(
+      `[Queue] backlog: size=${queueSizeAfterPop} after pop, tick=${ticksProcessed}`
     );
   }
   const result = runSimulation(world, nowMs, commands, 1);
@@ -63,16 +59,11 @@ async function onGameTick(
     world.mobs.set(id, mob);
   }
 
-  if (result.perf.elapsedMs > 0 && ticksProcessed % 10 === 0) {
-    console.log('[SimPerf]', {
+  if (result.perf.elapsedMs > 50 && ticksProcessed % 100 === 0) {
+    console.warn('[SimPerf] slow tick', {
       tickSeq: result.world.meta.tickSeq,
-      commands: commands.length,
-      deltas: result.deltas.length,
-      mobs: result.perf.mobsSimulated,
-      towers: result.perf.towersSimulated,
-      towerMobChecks: result.perf.towerMobChecks,
-      spawned: result.perf.waveSpawnedMobs,
       elapsedMs: result.perf.elapsedMs,
+      mobs: result.perf.mobsSimulated,
     });
   }
 

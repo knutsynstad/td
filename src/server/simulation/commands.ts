@@ -121,11 +121,6 @@ export const applyCommands = (
           );
         }
       }
-      if (command.hits.length > 0) {
-        console.log(
-          `[DealDamage] applied ${applied}/${command.hits.length} hits, mobs=${world.mobs.size}`
-        );
-      }
       continue;
     }
   }
