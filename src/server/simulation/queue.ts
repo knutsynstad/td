@@ -50,6 +50,8 @@ export async function enqueueCommand(
 export async function popPendingCommands(): Promise<CommandEnvelope[]> {
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.QUEUE);
+    // Read with redis (tx.zRange fails in Devvit test mock: requires multi() first).
+    // Watch still protects exec: concurrent modification fails the transaction.
     const items = await redis.zRange(KEYS.QUEUE, 0, MAX_COMMANDS_PER_BATCH - 1, {
       by: 'rank',
     });

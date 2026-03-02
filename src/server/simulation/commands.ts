@@ -115,6 +115,10 @@ export const applyCommands = (
         if (mob && hit.damage > 0) {
           mob.hp = Math.max(0, mob.hp - hit.damage);
           applied += 1;
+        } else if (hit.damage > 0) {
+          console.warn(
+            `[DealDamage] mob not found: mobId=${hit.mobId}, mobs=${world.mobs.size}`
+          );
         }
       }
       if (command.hits.length > 0) {
