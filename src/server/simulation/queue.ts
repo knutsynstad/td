@@ -47,14 +47,11 @@ export async function enqueueCommand(
   return { accepted: false, reason: 'queue contention' };
 }
 
-export async function popPendingCommands(
-  upToMs: number
-): Promise<CommandEnvelope[]> {
+export async function popPendingCommands(): Promise<CommandEnvelope[]> {
   for (let attempt = 0; attempt < MAX_TX_RETRIES; attempt += 1) {
     const tx = await redis.watch(KEYS.QUEUE);
-    const items = await redis.zRange(KEYS.QUEUE, 0, upToMs, {
-      by: 'score',
-      limit: { offset: 0, count: MAX_COMMANDS_PER_BATCH },
+    const items = await redis.zRange(KEYS.QUEUE, 0, MAX_COMMANDS_PER_BATCH - 1, {
+      by: 'rank',
     });
     if (items.length === 0) {
       await tx.unwatch();

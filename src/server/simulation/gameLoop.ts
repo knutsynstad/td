@@ -46,7 +46,7 @@ async function onGameTick(
   }
   await trimCommandQueue();
 
-  const commands = await popPendingCommands(nowMs);
+  const commands = await popPendingCommands();
   const queueSizeAfterPop = await getQueueSize();
   if (
     queueSizeAfterPop > 1000 ||
