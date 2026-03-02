@@ -109,16 +109,11 @@ export const applyCommands = (
       continue;
     }
     if (command.type === 'dealDamages') {
-      let applied = 0;
+      // Mob not found: assume already dead from towers/others under latency; safe to ignore.
       for (const hit of command.hits) {
         const mob = world.mobs.get(hit.mobId);
         if (mob && hit.damage > 0) {
           mob.hp = Math.max(0, mob.hp - hit.damage);
-          applied += 1;
-        } else if (hit.damage > 0) {
-          console.warn(
-            `[DealDamage] mob not found: mobId=${hit.mobId}, mobs=${world.mobs.size}`
-          );
         }
       }
       continue;
