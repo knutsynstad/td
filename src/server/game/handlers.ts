@@ -220,6 +220,7 @@ export async function heartbeatGame(
     wave: world.wave.wave,
     waveActive: world.wave.active,
     nextWaveAtMs: world.wave.nextWaveAtMs,
+    serverTimeMs: world.meta.lastTickMs,
   };
 }
 

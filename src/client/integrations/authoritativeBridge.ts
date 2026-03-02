@@ -36,7 +36,8 @@ type PresenceCallbacks = {
   onHeartbeatWaveState?: (
     wave: number,
     active: boolean,
-    nextWaveAtMs: number
+    nextWaveAtMs: number,
+    serverTimeMs?: number
   ) => void;
 };
 
@@ -368,7 +369,8 @@ export const connectAuthoritativeBridge = async (
       callbacks.onHeartbeatWaveState(
         payload.wave,
         payload.waveActive,
-        payload.nextWaveAtMs
+        payload.nextWaveAtMs,
+        payload.serverTimeMs
       );
     }
   };

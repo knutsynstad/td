@@ -12,7 +12,6 @@ export type GameState = {
   eventBannerTimer: number;
   prevMobsCount: number;
   coinsPopTimer: number;
-  lastCountdownBannerSecond: number;
 };
 
 export const createGameState = (coinsCap: number): GameState => ({
@@ -27,5 +26,4 @@ export const createGameState = (coinsCap: number): GameState => ({
   eventBannerTimer: 0,
   prevMobsCount: 0,
   coinsPopTimer: 0,
-  lastCountdownBannerSecond: -1,
 });

@@ -169,8 +169,10 @@ export type AuthoritativeSync = {
   applyServerWaveTiming: (
     wave: number,
     active: boolean,
-    nextWaveAtMs: number
+    nextWaveAtMs: number,
+    serverTimeMs?: number
   ) => void;
+  getCountdownMsRemaining: (nextWaveAtMs: number) => number;
   applyServerSnapshot: (
     snapshot: SharedWorldState,
     options?: { skipMobReplacement?: boolean }
@@ -188,6 +190,8 @@ export const createAuthoritativeSync = (
 ): AuthoritativeSync => {
   let serverClockSkewMs = 0;
   let serverClockSkewInitialized = false;
+  let countdownServerTimeMs = 0;
+  let countdownClientDateAtReceive = 0;
   const serverMobSeenIdsScratch = new Set<string>();
   const serverMobRemovalScratch: string[] = [];
   const serverMobDeltaPosScratch = new THREE.Vector3();
@@ -340,6 +344,8 @@ export const createAuthoritativeSync = (
     ctx.gameState.coins = Math.max(0, Math.min(ctx.COINS_CAP, world.coins));
     ctx.serverWaveActiveRef.current = wave.active;
     ctx.gameState.nextWaveAtMs = wave.nextWaveAtMs > 0 ? wave.nextWaveAtMs : 0;
+    countdownServerTimeMs = world.lastTickMs;
+    countdownClientDateAtReceive = Date.now();
     syncServerWaveSpawners(wave);
   };
 
@@ -998,11 +1004,27 @@ export const createAuthoritativeSync = (
   const applyServerWaveTiming = (
     wave: number,
     active: boolean,
-    nextWaveAtMs: number
+    nextWaveAtMs: number,
+    serverTimeMs?: number
   ) => {
     ctx.gameState.wave = wave;
     ctx.serverWaveActiveRef.current = active;
     ctx.gameState.nextWaveAtMs = nextWaveAtMs > 0 ? nextWaveAtMs : 0;
+    if (typeof serverTimeMs === 'number') {
+      countdownServerTimeMs = serverTimeMs;
+      countdownClientDateAtReceive = Date.now();
+    }
+  };
+
+  const getCountdownMsRemaining = (nextWaveAtMs: number): number => {
+    if (nextWaveAtMs <= 0) return 0;
+    if (countdownClientDateAtReceive > 0) {
+      const serverNowEstimate =
+        countdownServerTimeMs + (Date.now() - countdownClientDateAtReceive);
+      return Math.max(0, nextWaveAtMs - serverNowEstimate);
+    }
+    const nextWaveAtPerf = toPerfTime(nextWaveAtMs);
+    return Math.max(0, nextWaveAtPerf - performance.now());
   };
 
   const applyServerSnapshot = (
@@ -1159,6 +1181,7 @@ export const createAuthoritativeSync = (
     applyServerMobDelta,
     applyServerWaveDelta,
     applyServerWaveTiming,
+    getCountdownMsRemaining,
     applyServerSnapshot,
     updateServerMobInterpolation,
     serverWaveActiveRef: ctx.serverWaveActiveRef,

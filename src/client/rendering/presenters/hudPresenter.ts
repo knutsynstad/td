@@ -20,11 +20,10 @@ type HudState = {
   wave: number;
   waveComplete: boolean;
   nextWaveAtMs: number;
-  now: number;
   mobsCount: number;
   coinsPopTimer: number;
   shootCooldown: number;
-  toPerfTime: (serverEpochMs: number) => number;
+  getCountdownMsRemaining: (nextWaveAtMs: number) => number;
 };
 
 type HudOptions = {
@@ -51,16 +50,10 @@ export const updateHud = (
   const isPreWaveCountdown = state.wave === 0 && state.nextWaveAtMs !== 0;
   const showNextWave =
     state.nextWaveAtMs !== 0 && (state.waveComplete || isPreWaveCountdown);
-  const nextWaveAtPerf =
+  const rawSeconds =
     showNextWave && state.nextWaveAtMs > 0
-      ? state.toPerfTime(state.nextWaveAtMs)
+      ? state.getCountdownMsRemaining(state.nextWaveAtMs) / 1000
       : 0;
-  // diff is ms until next wave; divide by 1000 for seconds. Clamp to 60s max
-  // (expected: 10s intermission, 30s after castle death) to avoid wild displays
-  // from clock skew or ms/sec unit bugs.
-  const rawSeconds = showNextWave
-    ? Math.max(0, (nextWaveAtPerf - state.now) / 1000)
-    : 0;
   const nextWaveIn = Math.min(60, Math.ceil(rawSeconds));
   elements.waveEl.textContent = String(
     showNextWave ? state.wave + 1 : state.wave
@@ -75,7 +68,7 @@ export const updateHud = (
     elements.mobsSecondaryEl.textContent = `${state.mobsCount} mobs left`;
   }
 
-  if (nextWaveIn > 0 && nextWaveIn <= 5) {
+  if (showNextWave && nextWaveIn > 0 && nextWaveIn <= 5) {
     elements.finalCountdownEl.textContent = String(nextWaveIn);
     elements.finalCountdownEl.classList.add('show');
   } else {

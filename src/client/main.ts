@@ -2097,8 +2097,13 @@ const setupAuthoritativeBridge = async () => {
           reason === 'castle death' ? 'Castle fell - Game over!' : 'Game reset';
         hudUpdaters.triggerEventBanner(bannerText, 4);
       },
-      onHeartbeatWaveState: (wave, active, nextWaveAtMs) => {
-        authoritativeSync.applyServerWaveTiming(wave, active, nextWaveAtMs);
+      onHeartbeatWaveState: (wave, active, nextWaveAtMs, serverTimeMs) => {
+        authoritativeSync.applyServerWaveTiming(
+          wave,
+          active,
+          nextWaveAtMs,
+          serverTimeMs
+        );
       },
     });
     nextServerStructureSyncAtMs =
@@ -4356,6 +4361,7 @@ const tick = (now: number, delta: number) => {
   }
 
   gameState.coinsPopTimer = Math.max(0, gameState.coinsPopTimer - delta);
+
   updateHud(
     {
       wallCountEl,
@@ -4378,11 +4384,10 @@ const tick = (now: number, delta: number) => {
       wave: gameState.wave,
       waveComplete,
       nextWaveAtMs: gameState.nextWaveAtMs,
-      now,
       mobsCount: mobs.length,
       coinsPopTimer: gameState.coinsPopTimer,
       shootCooldown: gameState.shootCooldown,
-      toPerfTime: authoritativeSync.toPerfTime,
+      getCountdownMsRemaining: authoritativeSync.getCountdownMsRemaining,
     },
     {
       coinCostWall: COINS_COST_WALL,
@@ -4393,26 +4398,6 @@ const tick = (now: number, delta: number) => {
 
   if (gameState.prevMobsCount > 0 && waveComplete) {
     hudUpdaters.triggerEventBanner('Wave cleared');
-  }
-
-  const isPreWaveCountdown =
-    gameState.wave === 0 && gameState.nextWaveAtMs !== 0;
-  const showNextWave =
-    gameState.nextWaveAtMs !== 0 && (waveComplete || isPreWaveCountdown);
-  const nextWaveAtPerf =
-    showNextWave && gameState.nextWaveAtMs > 0
-      ? authoritativeSync.toPerfTime(gameState.nextWaveAtMs)
-      : 0;
-  const rawNextWaveSeconds = showNextWave
-    ? Math.max(0, (nextWaveAtPerf - now) / 1000)
-    : 0;
-  const nextWaveIn = Math.min(60, Math.ceil(rawNextWaveSeconds));
-  if (showNextWave && nextWaveIn >= 1 && nextWaveIn <= 5) {
-    if (nextWaveIn !== gameState.lastCountdownBannerSecond) {
-      gameState.lastCountdownBannerSecond = nextWaveIn;
-    }
-  } else if (nextWaveIn === 0) {
-    gameState.lastCountdownBannerSecond = -1;
   }
 
   if (gameState.eventBannerTimer > 0) {
